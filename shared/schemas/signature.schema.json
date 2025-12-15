@@ -1,0 +1,49 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://personal-agent.dev/schemas/signature.schema.json",
+  "title": "Plan Signature",
+  "description": "Cryptographic plan signature (GLOBAL_SPEC v2 §2.4)",
+  "type": "object",
+  "required": ["algo", "signer", "ts", "nonce", "signature", "pubkey_id"],
+  "properties": {
+    "algo": {
+      "type": "string",
+      "enum": ["Ed25519"],
+      "description": "Signature algorithm"
+    },
+    "signer": {
+      "type": "string",
+      "description": "Signer identity",
+      "pattern": "^[a-zA-Z0-9_-]+@[a-zA-Z0-9_-]+$",
+      "examples": ["planner@system", "user@client"]
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of signing"
+    },
+    "nonce": {
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$",
+      "description": "ULID nonce for replay protection"
+    },
+    "signature": {
+      "type": "string",
+      "description": "Base64-encoded signature",
+      "pattern": "^[A-Za-z0-9+/=]+$",
+      "minLength": 64
+    },
+    "pubkey_id": {
+      "type": "string",
+      "description": "Public key identifier",
+      "pattern": "^k[0-9]+$",
+      "examples": ["k1", "k2", "k10"]
+    },
+    "plan_hash": {
+      "type": "string",
+      "description": "SHA-256 hash of canonical plan (optional verification)",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  },
+  "additionalProperties": false
+}

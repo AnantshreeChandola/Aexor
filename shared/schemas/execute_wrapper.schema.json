@@ -1,0 +1,86 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://personal-agent.dev/schemas/execute_wrapper.schema.json",
+  "title": "Execute Wrapper",
+  "description": "Execute response wrapper (GLOBAL_SPEC v2 §2.6)",
+  "type": "object",
+  "required": ["provider", "result", "status"],
+  "properties": {
+    "provider": {
+      "type": "string",
+      "description": "Provider/connector ID that executed the operation",
+      "minLength": 1,
+      "examples": ["google.calendar", "slack", "notion"]
+    },
+    "result": {
+      "type": "object",
+      "description": "Provider-specific result",
+      "required": ["id"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "External resource ID from provider",
+          "minLength": 1,
+          "examples": ["gcal_abc123", "slack_msg_xyz", "notion_page_456"]
+        },
+        "link": {
+          "type": "string",
+          "format": "uri",
+          "description": "Optional direct link to the resource"
+        },
+        "metadata": {
+          "type": "object",
+          "description": "Additional provider metadata",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "status": {
+      "type": "string",
+      "enum": ["created", "updated", "skipped", "error"],
+      "description": "Execution outcome status"
+    },
+    "idempotency_key": {
+      "type": "string",
+      "description": "Idempotency key used for this execution",
+      "pattern": "^[a-zA-Z0-9_:-]+$",
+      "examples": ["plan_01:step_1:hash_abc", "plan_02:step_3:hash_xyz"]
+    },
+    "error": {
+      "type": "object",
+      "description": "Error details if status is 'error'",
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "Error code",
+          "examples": ["RATE_LIMIT", "AUTH_FAILED", "CONFLICT"]
+        },
+        "message": {
+          "type": "string",
+          "description": "Human-readable error message"
+        },
+        "retryable": {
+          "type": "boolean",
+          "description": "Whether this operation can be retried"
+        }
+      }
+    },
+    "compensation": {
+      "type": "object",
+      "description": "Compensation operation details (if supported)",
+      "properties": {
+        "operation": {
+          "type": "string",
+          "description": "Compensation operation name (e.g., 'delete_event')"
+        },
+        "args": {
+          "type": "object",
+          "description": "Arguments for compensation",
+          "additionalProperties": true
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}

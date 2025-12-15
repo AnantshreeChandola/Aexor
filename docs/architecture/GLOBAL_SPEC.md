@@ -175,7 +175,7 @@ Runtime agents are **asynchronous execution instances** that execute plan steps.
 
 ## 4) Schemas & Validation
 - **Component-specific schemas** in `components/<Name>/schemas/`  
-- **Shared contracts** in `plugins/schemas/` (Intent, Evidence, Plan, Signature, Wrappers)  
+- **Shared contracts** in `shared/schemas/` (Intent, Evidence, Plan, Signature, Wrappers)  
 - **Use case plans** in `usecases/<UseCase>/plans/` must validate against the Plan schema in this file  
 - **Tests must validate** against schemas; **no schema drift**  
 

@@ -7,7 +7,7 @@
 - **docs/architecture/adr/** — Architecture Decision Records (tiny, numbered).
 - **docs/planning/** — PRP docs (Plan/PR Proposals) and index.
 - **plans/** — optional: plan drafts/signed/records for provenance.
-- **plugins/** — shared tool registry + JSON Schemas used across components.
+- **shared/** — shared tool registry + JSON Schemas used across components.
 - **tests/** — cross-component/system-level tests.
 - **.github/workflows/** — CI pipelines.
 - **usecases/** — use‑case packets (SPEC.md, LLD.md, plans/, tests/, fixtures/)

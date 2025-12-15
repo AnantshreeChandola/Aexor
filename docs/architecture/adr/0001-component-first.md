@@ -21,7 +21,7 @@ Adopt `/components/<Name>/` packets containing:
 ## Consequences
 - **Pros:** modular reviews, clear contracts, agent/CI friendly, easy navigation.
 - **Cons:** possible duplication vs shared schemas.
-- **Mitigation:** keep truly shared schemas in `/plugins/schemas/`.
+- **Mitigation:** keep truly shared schemas in `/shared/schemas/`.
 
 ## Alternatives considered
 Keep a global `/spec` tree — rejected for discoverability and coupling.

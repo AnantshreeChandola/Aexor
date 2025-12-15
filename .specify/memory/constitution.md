@@ -1,50 +1,179 @@
-# [PROJECT_NAME] Constitution
-<!-- Example: Spec Constitution, TaskFlow Constitution, etc. -->
+# Personal Agent Constitution
 
 ## Core Principles
 
-### [PRINCIPLE_1_NAME]
-<!-- Example: I. Library-First -->
-[PRINCIPLE_1_DESCRIPTION]
-<!-- Example: Every feature starts as a standalone library; Libraries must be self-contained, independently testable, documented; Clear purpose required - no organizational-only libraries -->
+### I. Component-First Architecture
+Every feature is built as a self-contained component under `components/<Name>/` with:
+- **SPEC.md** — Requirements, user stories, acceptance criteria
+- **LLD.md** — Low-level design, interfaces, dependencies
+- **schemas/** — JSON schemas for normalized responses
+- **tests/** — Contract tests, unit tests, integration tests
+- **Code** — api/, service/, domain/, adapters/ subdirectories
 
-### [PRINCIPLE_2_NAME]
-<!-- Example: II. CLI Interface -->
-[PRINCIPLE_2_DESCRIPTION]
-<!-- Example: Every library exposes functionality via CLI; Text in/out protocol: stdin/args → stdout, errors → stderr; Support JSON + human-readable formats -->
+Components must be independently testable and documented. No cross-component file dependencies.
 
-### [PRINCIPLE_3_NAME]
-<!-- Example: III. Test-First (NON-NEGOTIABLE) -->
-[PRINCIPLE_3_DESCRIPTION]
-<!-- Example: TDD mandatory: Tests written → User approved → Tests fail → Then implement; Red-Green-Refactor cycle strictly enforced -->
+### II. Preview-First Safety (NON-NEGOTIABLE)
+All operations MUST preview before execution:
+- **Preview**: Read-only, no external mutations, stubs/mocks only
+- **Execute**: Only after explicit human approval with valid token
+- **Idempotency**: Required via `plan_id:step:arg_hash`
 
-### [PRINCIPLE_4_NAME]
-<!-- Example: IV. Integration Testing -->
-[PRINCIPLE_4_DESCRIPTION]
-<!-- Example: Focus areas requiring integration tests: New library contract tests, Contract changes, Inter-service communication, Shared schemas -->
+Preview paths must never call external APIs in write mode. Use cached/mocked data only.
 
-### [PRINCIPLE_5_NAME]
-<!-- Example: V. Observability, VI. Versioning & Breaking Changes, VII. Simplicity -->
-[PRINCIPLE_5_DESCRIPTION]
-<!-- Example: Text I/O ensures debuggability; Structured logging required; Or: MAJOR.MINOR.BUILD format; Or: Start simple, YAGNI principles -->
+### III. Test-First Development (NON-NEGOTIABLE)
+TDD mandatory for all components:
+1. Write tests FIRST (schema tests, service tests, contract tests)
+2. User approves test plan
+3. Tests FAIL (red)
+4. Implement code
+5. Tests PASS (green)
+6. Refactor (maintain green)
 
-## [SECTION_2_NAME]
-<!-- Example: Additional Constraints, Security Requirements, Performance Standards, etc. -->
+No code commits without corresponding tests. CI enforces this.
 
-[SECTION_2_CONTENT]
-<!-- Example: Technology stack requirements, compliance standards, deployment policies, etc. -->
+### IV. Schema Validation
+All data contracts MUST have JSON schemas:
+- **Shared schemas** in `shared/schemas/` (Intent, Evidence, Plan, Wrappers)
+- **Component schemas** in `components/<Name>/schemas/`
+- **Tests validate** against schemas (no schema drift)
 
-## [SECTION_3_NAME]
-<!-- Example: Development Workflow, Review Process, Quality Gates, etc. -->
+Breaking schema changes require version bump and migration plan.
 
-[SECTION_3_CONTENT]
-<!-- Example: Code review requirements, testing gates, deployment approval process, etc. -->
+### V. Deterministic Planning
+Plans are pure functions of frozen inputs:
+- Intent vN (finalized)
+- Evidence vK (typed, budget-limited)
+- Registry vR (connector catalog snapshot)
+- Policy vC (GLOBAL_SPEC version)
+
+Same inputs → same canonical plan bytes → same hash/signature (Ed25519).
+
+### VI. Observability & Privacy
+- **Structured logging**: Correlated by `plan_id`, `step`, `role`
+- **No secrets/PII in logs**: Derived facts only, explicit consent
+- **Metrics**: p95 latencies (Preview <800ms, Execute <2s)
+- **Audit trail**: All plan executions logged with signatures
+
+### VII. Fault Isolation & Blast Radius
+Components must contain failures:
+- **Circuit breakers** for external provider calls
+- **Fallback behavior** for adapter failures
+- **Resource locks** for write conflicts
+- **Compensation operations** when declared in registry
+
+If a component fails, it must not cascade to others. See [MODULAR_ARCHITECTURE.md](../../docs/architecture/MODULAR_ARCHITECTURE.md).
+
+---
+
+## Development Workflow
+
+### Branch Strategy
+- **main/master**: Protected, no direct pushes
+- **Feature branches**: `feat/<area>-<short-desc>`
+- All work via Pull Requests
+
+### PR Requirements (CI Gates)
+Every PR MUST:
+1. Link to `components/<Name>/SPEC.md` and `LLD.md`
+2. Pass all tests (pytest with coverage)
+3. Pass schema validation (against `shared/schemas/`)
+4. Pass linting (ruff) and type checking (mypy)
+5. Include acceptance criteria verification
+6. Have green CI before merge
+
+### Code Review Checklist
+- [ ] SPEC/LLD linked and conformant
+- [ ] Tests written first and passing
+- [ ] Schemas validated
+- [ ] Preview path has no external mutations
+- [ ] Idempotency implemented
+- [ ] Circuit breakers in place for external calls
+- [ ] Structured logging with `plan_id` correlation
+- [ ] No secrets/PII in logs
+- [ ] Blast radius analyzed
+
+---
+
+## Technology Stack
+
+### Mandatory Stack
+- **Python 3.11+** with type hints (mypy strict mode)
+- **FastAPI** for async HTTP
+- **Pydantic v2** for data validation
+- **SQLAlchemy 2.0** with asyncpg
+- **PostgreSQL 16** with pgvector extension
+- **Redis 7** for caching and coordination
+- **n8n** (self-hosted) for short workflows (<15min)
+- **Temporal** (Python SDK) for long-running workflows
+
+### Forbidden
+- **No LangChain**: Direct API calls for simplicity and control
+- **No global state**: Components must be stateless services
+- **No secrets in code**: Environment variables or secret managers only
+
+---
+
+## Quality Gates
+
+### Pre-Commit (Local)
+- Ruff auto-format
+- Mypy type check
+- Unit tests pass
+
+### CI Pipeline (GitHub Actions)
+- All unit tests pass
+- All contract tests pass
+- Schema validation against `shared/schemas/`
+- Coverage > 80% for new code
+- No mypy errors
+- No ruff violations
+
+### Pre-Merge
+- Green CI
+- At least 1 approval
+- SPEC/LLD linked
+- Acceptance criteria verified
+
+---
+
+## Conformance to GLOBAL_SPEC
+
+All components MUST conform to [GLOBAL_SPEC.md v2](../../docs/architecture/GLOBAL_SPEC.md):
+- Use canonical contracts (Intent, Evidence, Plan, Signature, Preview/Execute wrappers)
+- Respect safety model (Preview vs Execute vs Durable)
+- Meet NFRs (p95 latencies, availability targets)
+- Support runtime agent roles (Fetcher, Analyzer, Watcher, Resolver, Booker, Notifier)
+
+Deviations require explicit declaration in component SPEC.md with rationale.
+
+---
 
 ## Governance
-<!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
 
-[GOVERNANCE_RULES]
-<!-- Example: All PRs/reviews must verify compliance; Complexity must be justified; Use [GUIDANCE_FILE] for runtime development guidance -->
+### Constitution Authority
+This constitution supersedes all other practices. In case of conflict:
+1. Constitution rules apply
+2. GLOBAL_SPEC.md v2 applies
+3. Component SPEC.md applies
+4. Code conventions apply
 
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
-<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
+### Amendments
+Constitution changes require:
+1. ADR (Architecture Decision Record) in `docs/architecture/adr/`
+2. Team approval
+3. Migration plan for existing components
+4. Version bump
+
+### Enforcement
+- All PRs/reviews MUST verify constitution compliance
+- CI enforces automated checks (tests, schemas, linting)
+- Manual review verifies design principles (preview-first, fault isolation)
+
+### Working Guidance
+For runtime development guidance, see:
+- [.claude/CLAUDE.md](.claude/CLAUDE.md) — Agent working instructions
+- [DEVELOPMENT_WORKFLOW.md](DEVELOPMENT_WORKFLOW.md) — Development workflow integration guide
+
+---
+
+**Version**: 1.0.0 | **Ratified**: 2025-12-11 | **Last Amended**: 2025-12-11

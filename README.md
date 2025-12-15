@@ -74,7 +74,7 @@ The system follows a **component-first architecture** with:
 │   └── <Name>/          # SPEC.md, LLD.md, schemas/, tests/, code
 ├── usecases/            # End-to-end use case definitions
 │   └── <UseCase>/       # SPEC.md, LLD.md, plans/, tests/, fixtures/
-├── plugins/             # Cross-component utilities
+├── shared/             # Cross-component utilities
 │   └── schemas/         # Shared schemas (Intent, Evidence, Plan, Signature)
 ├── docs/
 │   ├── architecture/    # GLOBAL_SPEC, HLD, ADRs
