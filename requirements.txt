@@ -1,0 +1,32 @@
+# Personal Agent Dependencies
+# Python 3.11+
+
+# Web Framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+
+# Database
+sqlalchemy[asyncio]>=2.0.0
+asyncpg>=0.29.0
+alembic>=1.12.0
+
+# Validation & Serialization
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# Security & Encryption
+cryptography>=41.0.0
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+
+# Environment & Configuration
+python-dotenv>=1.0.0
+
+# Testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+httpx>=0.25.0
+
+# Utilities
+python-dateutil>=2.8.2
