@@ -90,13 +90,6 @@ class ConsentDeniedError(Exception):
         )
 
 
-class UserNotFoundError(Exception):
-    """Raised when user_id does not exist."""
-    def __init__(self, user_id: UUID4):
-        self.user_id = user_id
-        super().__init__(f"User {user_id} not found")
-
-
 class UnknownPreferenceError(Exception):
     """Raised when preference key is not in schema registry."""
     def __init__(self, preference_key: str):

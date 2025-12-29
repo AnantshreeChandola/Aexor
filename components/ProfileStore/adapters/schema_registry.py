@@ -1,19 +1,16 @@
 """
 Schema Registry Adapter for ProfileStore
 
-File-based preference schema registry with validation.
-Loads schemas from schemas/ directory and provides validation.
+Adapter for the universal preference registry.
+Provides backward-compatible interface for preference validation.
 
 Reference: LLD.md §6.3
 """
 
-import json
 import logging
-from pathlib import Path
-from typing import Any, Dict
-from jsonschema import validate, ValidationError as JSONSchemaValidationError
-import os
+from typing import Any, Dict, List
 
+from shared.schemas.preference_registry import get_preference_registry
 from ..domain.models import UnknownPreferenceError, ValidationError
 
 logger = logging.getLogger(__name__)
@@ -21,56 +18,15 @@ logger = logging.getLogger(__name__)
 
 class SchemaRegistryAdapter:
     """
-    File-based schema registry for preference validation.
+    Adapter for universal preference registry.
     
-    Loads JSON schemas from schemas/ directory and provides validation services.
-    Caches schemas in memory for performance.
+    Provides backward-compatible interface while using the centralized registry.
     """
     
-    def __init__(self, schemas_directory: str | Path = None):
-        """
-        Initialize schema registry.
-        
-        Args:
-            schemas_directory: Path to directory containing JSON schema files
-                              If None, uses components/ProfileStore/schemas/
-        """
-        if schemas_directory is None:
-            # Default to schemas/ directory relative to this file
-            current_dir = Path(__file__).parent.parent
-            schemas_directory = current_dir / "schemas"
-        
-        self.schemas_directory = Path(schemas_directory)
-        self._schema_cache: Dict[str, dict] = {}
-        self._load_schemas()
-        
-        logger.info(f"Schema registry initialized with {len(self._schema_cache)} schemas")
-
-    def _load_schemas(self):
-        """Load all JSON schema files from schemas directory."""
-        if not self.schemas_directory.exists():
-            logger.warning(f"Schemas directory does not exist: {self.schemas_directory}")
-            return
-        
-        for schema_file in self.schemas_directory.glob("*.json"):
-            try:
-                with open(schema_file, "r") as f:
-                    schema = json.load(f)
-                
-                # Extract preference key from filename (remove .json extension)
-                preference_key = schema_file.stem
-                
-                # Validate the schema itself has required fields
-                if "type" not in schema:
-                    logger.warning(f"Schema {preference_key} missing 'type' field")
-                    continue
-                
-                self._schema_cache[preference_key] = schema
-                logger.debug(f"Loaded schema for preference: {preference_key}")
-                
-            except (json.JSONDecodeError, IOError) as e:
-                logger.error(f"Failed to load schema {schema_file}: {e}")
-                continue
+    def __init__(self):
+        """Initialize schema registry adapter."""
+        self.registry = get_preference_registry()
+        logger.info(f"Schema registry adapter initialized with {len(self.registry.list_preference_keys())} preferences")
 
     def get_schema(self, preference_key: str) -> dict:
         """
@@ -85,12 +41,12 @@ class SchemaRegistryAdapter:
         Raises:
             UnknownPreferenceError: If preference key not found in registry
         """
-        schema = self._schema_cache.get(preference_key)
-        if schema is None:
+        try:
+            definition = self.registry.get_preference_definition(preference_key)
+            return definition.get_json_schema()
+        except KeyError:
             logger.warning(f"Unknown preference key: {preference_key}")
             raise UnknownPreferenceError(preference_key)
-        
-        return schema
 
     def validate_value(self, preference_key: str, value: Any) -> bool:
         """
@@ -107,41 +63,42 @@ class SchemaRegistryAdapter:
             UnknownPreferenceError: If preference key not found
             ValidationError: If value fails schema validation
         """
-        schema = self.get_schema(preference_key)
-        
         try:
-            validate(instance=value, schema=schema)
+            self.registry.validate_value(preference_key, value)
             return True
-            
-        except JSONSchemaValidationError as e:
-            logger.warning(
-                f"Validation failed for {preference_key}: {e.message}"
-            )
+        except KeyError:
+            logger.warning(f"Unknown preference key: {preference_key}")
+            raise UnknownPreferenceError(preference_key)
+        except ValueError as e:
+            logger.warning(f"Validation failed for {preference_key}: {str(e)}")
             raise ValidationError(
                 preference_key=preference_key,
                 value=value,
-                reason=e.message
+                reason=str(e)
             )
 
     def get_default_value(self, preference_key: str) -> Any:
         """
-        Get default value for a preference from schema.
+        Get default value for a preference.
         
         Args:
             preference_key: Preference key
             
         Returns:
-            Default value from schema, or None if no default specified
+            Default value from registry
             
         Raises:
             UnknownPreferenceError: If preference key not found
         """
-        schema = self.get_schema(preference_key)
-        return schema.get("default")
+        try:
+            return self.registry.get_default_value(preference_key)
+        except KeyError:
+            logger.warning(f"Unknown preference key: {preference_key}")
+            raise UnknownPreferenceError(preference_key)
 
     def is_sensitive(self, preference_key: str) -> bool:
         """
-        Check if a preference is marked as sensitive in schema.
+        Check if a preference is marked as sensitive.
         
         Args:
             preference_key: Preference key
@@ -152,68 +109,49 @@ class SchemaRegistryAdapter:
         Raises:
             UnknownPreferenceError: If preference key not found
         """
-        schema = self.get_schema(preference_key)
-        return schema.get("sensitive", False)
+        try:
+            return self.registry.is_sensitive(preference_key)
+        except KeyError:
+            logger.warning(f"Unknown preference key: {preference_key}")
+            raise UnknownPreferenceError(preference_key)
 
-    def list_preference_keys(self) -> list[str]:
+    def list_preference_keys(self) -> List[str]:
         """
         Get list of all available preference keys.
         
         Returns:
             List of preference keys in registry
         """
-        return list(self._schema_cache.keys())
+        return self.registry.list_preference_keys()
 
     def get_preference_info(self, preference_key: str) -> dict:
         """
-        Get complete preference information from schema.
+        Get complete preference information.
         
         Args:
             preference_key: Preference key
             
         Returns:
-            Dictionary with schema info (type, default, sensitive, description, etc.)
+            Dictionary with preference info
             
         Raises:
             UnknownPreferenceError: If preference key not found
         """
-        schema = self.get_schema(preference_key)
-        
-        return {
-            "key": preference_key,
-            "type": schema.get("type"),
-            "default": schema.get("default"),
-            "sensitive": schema.get("sensitive", False),
-            "description": schema.get("description"),
-            "title": schema.get("title"),
-            "examples": schema.get("examples", []),
-            "required": True,  # All preferences are required to have a value
-        }
-
-    def reload_schemas(self):
-        """
-        Reload schemas from filesystem.
-        
-        Useful for development when schema files change.
-        """
-        self._schema_cache.clear()
-        self._load_schemas()
-        logger.info(f"Reloaded {len(self._schema_cache)} schemas")
-
-    def add_schema(self, preference_key: str, schema: dict):
-        """
-        Add a schema programmatically (for testing).
-        
-        Args:
-            preference_key: Preference key
-            schema: JSON schema dictionary
-        """
-        # Validate the schema has required fields
-        if "type" not in schema:
-            raise ValueError("Schema must have 'type' field")
-        
-        self._schema_cache[preference_key] = schema
-        logger.debug(f"Added schema for preference: {preference_key}")
+        try:
+            definition = self.registry.get_preference_definition(preference_key)
+            return {
+                "key": preference_key,
+                "type": definition.value_type,
+                "default": definition.default,
+                "sensitive": definition.sensitive,
+                "description": definition.description,
+                "examples": definition.examples,
+                "category": definition.category,
+                "validation": definition.validation
+            }
+        except KeyError:
+            logger.warning(f"Unknown preference key: {preference_key}")
+            raise UnknownPreferenceError(preference_key)
 
 
 # Singleton instance

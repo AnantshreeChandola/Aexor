@@ -32,51 +32,308 @@ Avoid building functionality on speculation. Implement features only when they a
 
 ### Project Architecture
 
-Follow strict vertical slice architecture with tests living next to the code they test:
+Follow modular architecture with shared utilities and component-based design:
 
 ```
-src/project/
-    __init__.py
-    main.py
+project/
+    # SHARED INFRASTRUCTURE (write once, use everywhere)
+    shared/
+        __init__.py
+        database/
+            __init__.py
+            adapter.py           # Shared database connections
+            models.py            # Core shared tables (users, etc.)
+            error_handler.py     # Database error decorators
+            tests/
+                test_adapter.py
+                test_models.py
+        
+        api/
+            __init__.py
+            error_handlers.py    # API error response handlers
+            middleware/
+                auth.py          # Authentication middleware
+            tests/
+                test_error_handlers.py
+        
+        security/
+            __init__.py
+            encryption.py        # Shared encryption utilities
+            tests/
+                test_encryption.py
+        
+        schemas/
+            __init__.py
+            evidence.py          # Evidence Item format
+            preference_schema.json    # Universal schema
+            preference_registry.py    # Programmatic definitions
+            tests/
+                test_schemas.py
+
+    # COMPONENT ARCHITECTURE (use shared utilities)
+    components/
+        ProfileStore/
+            __init__.py
+            api/
+                routes.py        # Uses shared error handlers
+            service/
+                preference_service.py
+            domain/
+                models.py        # Pydantic models only
+            adapters/
+                db.py           # Uses shared database adapter
+                schema_registry.py
+                encryption.py   # Uses shared encryption
+            tests/
+                test_api.py
+                test_service.py
+        
+        History/
+            # Same structure, uses shared utilities
+        
+        PlanLibrary/
+            # Same structure, uses shared utilities
+
+    # ROOT LEVEL
     tests/
-        test_main.py
-    conftest.py
-
-    # Core modules
-    database/
         __init__.py
-        connection.py
-        models.py
-        tests/
-            test_connection.py
-            test_models.py
-
-    auth/
-        __init__.py
-        authentication.py
-        authorization.py
-        tests/
-            test_authentication.py
-            test_authorization.py
-
-    # Feature slices
-    features/
-        user_management/
-            __init__.py
-            handlers.py
-            validators.py
-            tests/
-                test_handlers.py
-                test_validators.py
-
-        payment_processing/
-            __init__.py
-            processor.py
-            gateway.py
-            tests/
-                test_processor.py
-                test_gateway.py
+        conftest.py
+    main.py
+    __init__.py
 ```
+
+**Key Principles**:
+- **Shared utilities** in `shared/` - write once, import everywhere
+- **Components** use shared infrastructure, no duplication
+- **Tests** live next to the code they test
+- **Database models** shared in `shared/database/models.py`
+- **Error handling** centralized with decorators and mixins
+
+## 🔄 Shared Infrastructure & DRY Architecture
+
+### CRITICAL: Always Use Shared Utilities
+
+**DRY Principle**: Write shared utilities ONCE, use everywhere. Never duplicate database initialization, error handling, encryption, or validation logic across components.
+
+### Shared Database Layer
+
+**❌ ANTI-PATTERN: Duplicate database setup in every component**
+```python
+# DON'T DO THIS - Repeated in every adapter
+class ComponentAdapter:
+    def __init__(self, database_url: str = None):
+        if database_url is None:
+            database_url = os.getenv("DATABASE_URL")
+        
+        self.engine = create_async_engine(database_url, pool_size=5, max_overflow=10)
+        self.async_session = async_sessionmaker(self.engine, class_=AsyncSession)
+        # 20+ lines of duplicate setup code...
+```
+
+**✅ BEST PRACTICE: Shared database utilities**
+```python
+# shared/database/adapter.py - Write ONCE
+class SharedDatabaseAdapter:
+    def __init__(self, database_url: str = None):
+        self.database_url = DatabaseConfig.get_database_url(database_url)
+        self.engine = create_async_engine(
+            self.database_url, pool_size=5, max_overflow=10, pool_pre_ping=True
+        )
+        # All setup logic in ONE place
+    
+    async def get_session(self) -> AsyncContextManager[AsyncSession]:
+        """Get database session with automatic transaction management."""
+        # Implementation here
+    
+    async def health_check(self) -> bool:
+        """Check database connectivity."""
+        # Implementation here
+
+# components/*/adapters/db.py - Use everywhere
+class ComponentAdapter:
+    def __init__(self):
+        self.shared_db = get_database_adapter()  # 1 line!
+        
+    async def operation(self):
+        async with self.shared_db.get_session() as session:
+            # Your component logic here
+```
+
+### Shared Error Handling with Decorators
+
+**❌ ANTI-PATTERN: Duplicate error handling in every method**
+```python
+# DON'T DO THIS - Copy-paste in every method
+async def get_user(self, user_id: UUID):
+    try:
+        # Check if user exists
+        user_check = await session.execute(
+            text("SELECT 1 FROM users WHERE user_id = :user_id"),
+            {"user_id": user_id}
+        )
+        if not user_check.fetchone():
+            raise UserNotFoundError(user_id)
+        
+        # Actual operation
+        result = await session.execute(stmt)
+        return process_result(result)
+        
+    except DatabaseError as e:
+        logger.error(f"Database error in get_user: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in get_user: {e}")
+        raise
+```
+
+**✅ BEST PRACTICE: Error handling decorators**
+```python
+# shared/database/error_handler.py - Write ONCE
+def with_db_error_handling(func):
+    """Decorator for consistent database error handling."""
+    @wraps(func)
+    async def wrapper(*args, **kwargs):
+        try:
+            return await func(*args, **kwargs)
+        except DatabaseError as e:
+            logger.error(f"Database error in {func.__name__}: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error in {func.__name__}: {e}")
+            raise
+    return wrapper
+
+def with_user_existence_check(table_name: str = "users"):
+    """Decorator to check if user exists before operation."""
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            # Extract user_id from function args/kwargs
+            user_id = extract_user_id(args, kwargs, func)
+            await check_user_exists(user_id, table_name)
+            return await func(*args, **kwargs)
+        return wrapper
+    return decorator
+
+# Usage in components - Apply decorators
+class ComponentAdapter:
+    @with_user_existence_check()
+    @with_db_error_handling
+    async def get_user(self, user_id: UUID):
+        # Clean business logic only - no error handling boilerplate!
+        async with self.shared_db.get_session() as session:
+            result = await session.execute(stmt)
+            return process_result(result)
+```
+
+### Shared Models Architecture
+
+**❌ ANTI-PATTERN: Duplicate models in every component**
+```python
+# DON'T DO THIS - Each component recreates same tables
+# components/ProfileStore/models.py
+class UserTable(Base):
+    __tablename__ = "users"
+    user_id = Column(UUID, primary_key=True)
+    # ... duplicate definition
+
+# components/History/models.py  
+class UserTable(Base):  # DUPLICATE!
+    __tablename__ = "users"
+    user_id = Column(UUID, primary_key=True)
+    # ... same definition again
+```
+
+**✅ BEST PRACTICE: Shared database models**
+```python
+# shared/database/models.py - Define ONCE
+class UserTable(Base):
+    """Core user table - shared across all components."""
+    __tablename__ = "users"
+    
+    user_id = Column(UUID(as_uuid=True), primary_key=True)
+    email = Column(String(255), unique=True, nullable=False)
+    context_tier = Column(Integer, nullable=False, default=1)
+    # ... complete definition in ONE place
+
+class PreferenceTable(Base):
+    """Preference storage - owned by ProfileStore."""
+    __tablename__ = "preferences"
+    
+    preference_id = Column(UUID(as_uuid=True), primary_key=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.user_id"))
+    # ... specialized table definition
+
+# All components import from shared models
+from shared.database.models import UserTable, PreferenceTable
+```
+
+### Universal Schema Architecture
+
+**❌ ANTI-PATTERN: Individual schema files for each preference type**
+```
+schemas/
+  ├── meeting_duration.json      # Duplicate validation logic
+  ├── work_hours.json           # Duplicate validation logic  
+  ├── timezone.json             # Duplicate validation logic
+  ├── passport_number.json      # Duplicate validation logic
+  └── notification_settings.json # 100+ lines of duplicate structure
+```
+
+**✅ BEST PRACTICE: Universal schema with metadata-driven validation**
+```python
+# shared/schemas/preference_schema.json - ONE schema for ALL types
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Universal Preference Schema",
+  "description": "Flexible schema for all preference types with metadata-driven validation",
+  "properties": {
+    "key": {"type": "string", "pattern": "^[a-zA-Z0-9_]+$"},
+    "value": {"oneOf": [{"type": "string"}, {"type": "number"}, {"type": "object"}]},
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "type": {"enum": ["string", "integer", "object"]},
+        "sensitive": {"type": "boolean"},
+        "validation": {"type": "object"}  // Type-specific rules
+      }
+    }
+  }
+}
+
+# shared/schemas/preference_registry.py - Programmatic definitions
+class PreferenceRegistry:
+    def __init__(self):
+        self.preferences = {}
+        self._register_core_preferences()
+    
+    def _register_core_preferences(self):
+        self.register(PreferenceDefinition(
+            key="meeting_duration_min",
+            value_type="integer", 
+            default=30,
+            validation={"minimum": 15, "maximum": 240}
+        ))
+        # Define all preferences programmatically
+```
+
+### Shared Infrastructure Rules
+
+1. **Database Layer**: Use `shared/database/adapter.py` for ALL database connections
+2. **Error Handling**: Use decorators from `shared/database/error_handler.py` 
+3. **API Errors**: Use `shared/api/error_handlers.py` for consistent responses
+4. **Models**: Define shared tables in `shared/database/models.py`
+5. **Schemas**: Use universal schemas with metadata-driven validation
+6. **Encryption**: Use shared utilities in `shared/security/`
+
+### Benefits of Shared Architecture
+
+- ✅ **~70% reduction** in duplicate code
+- ✅ **Single source of truth** for database connections, error handling, models
+- ✅ **Consistent behavior** across all components  
+- ✅ **Easier maintenance** - fix once, applies everywhere
+- ✅ **Better testing** - test shared utilities thoroughly once
+- ✅ **Faster development** - no need to rewrite common functionality
 
 ## 🛠️ Development Environment
 
@@ -245,6 +502,71 @@ def test_user_update_email_fails_with_invalid_format(sample_user):
 - Aim for 80%+ code coverage, but focus on critical paths
 
 ## 🚨 Error Handling
+
+### DRY Principle: Never Repeat Exception Handling Code
+
+**❌ ANTI-PATTERN: Duplicate exception handling in every route/function**
+```python
+# DON'T DO THIS - Repeated in every route
+try:
+    result = service.operation()
+    return success_response(result)
+except UserNotFoundError as e:
+    logger.warning(f"User not found: {e}")
+    return JSONResponse(
+        status_code=status.HTTP_404_NOT_FOUND,
+        content=ErrorResponse(
+            error_code="USER_NOT_FOUND",
+            message=str(e),
+            details={"user_id": str(e.user_id)}
+        ).model_dump()
+    )
+except ConsentDeniedError as e:
+    logger.warning(f"Consent denied: {e}")
+    return JSONResponse(
+        status_code=status.HTTP_403_FORBIDDEN,
+        content=ErrorResponse(
+            error_code="CONSENT_DENIED",
+            message=str(e),
+            details={
+                "user_id": str(e.user_id),
+                "required_tier": e.required_tier,
+                "current_tier": e.current_tier
+            }
+        ).model_dump()
+    )
+    # ... 50+ more lines of duplicate code
+```
+
+**✅ BEST PRACTICE: Centralized error handling**
+```python
+# shared/api/error_handlers.py
+class ErrorHandlerMixin:
+    """Centralized error handling for API routes."""
+    
+    def handle_service_errors(self, error) -> JSONResponse:
+        """Handle all common service exceptions in one place."""
+        error_type = type(error).__name__
+        
+        if error_type == 'UserNotFoundError':
+            return APIErrorHandler.handle_user_not_found(error)
+        elif error_type == 'ConsentDeniedError':
+            return APIErrorHandler.handle_consent_denied(error)
+        elif error_type == 'ValidationError':
+            return APIErrorHandler.handle_validation_error(error)
+        # ... handle all error types once
+        
+# routes.py - Clean and DRY
+error_handler = ErrorHandlerMixin()
+
+@router.post("/endpoint")
+async def clean_endpoint():
+    try:
+        result = service.operation()
+        return success_response(result)
+    except (UserNotFoundError, ConsentDeniedError, ValidationError) as e:
+        return error_handler.handle_service_errors(e)  # Just 1 line!
+```
 
 ### Exception Best Practices
 

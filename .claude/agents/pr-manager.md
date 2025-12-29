@@ -26,7 +26,7 @@ Behavior:
 - Never auto-merge; wait for green CI and required human approvals.
 
 PR body MUST include (populate from .github/pull_request_template.md):
-- Links: usecases/<UseCase>/{SPEC.md,LLD.md} (if applicable); components/<Name>/{SPEC.md,LLD.md} for any touched components
+- Links: usecases/<UseCase>/{SPEC.md,LLD.md} (if applicable); specs/<spec-id>/SPEC.md + components/<Name>/LLD.md for any touched components
 - Conformance: "Conforms to docs/architecture/GLOBAL_SPEC.md v2 (list deltas)"
 - Verifier artifacts:
   - Test summary (use‑case + touched components)

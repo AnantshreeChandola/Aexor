@@ -14,10 +14,11 @@ from fastapi import APIRouter, Request, HTTPException, status, Depends
 from fastapi.responses import JSONResponse
 
 from shared.schemas.evidence import EvidenceItem
+from shared.api.error_handlers import ErrorHandlerMixin
+from shared.database.error_handler import UserNotFoundError
 from ..domain.models import (
-    PreferenceRequest, PreferenceResponse, DeleteResponse,
-    SuccessResponse, ErrorResponse,
-    ConsentDeniedError, UserNotFoundError, UnknownPreferenceError, ValidationError
+    PreferenceRequest, SuccessResponse,
+    ConsentDeniedError, UnknownPreferenceError, ValidationError
 )
 from ..service.preference_service import PreferenceService
 from ..adapters.db import DatabaseAdapter
@@ -28,6 +29,9 @@ logger = logging.getLogger(__name__)
 
 # Create router
 router = APIRouter(prefix="/preferences", tags=["preferences"])
+
+# Error handler instance for centralized error handling
+error_handler = ErrorHandlerMixin()
 
 
 # Dependency to get preference service
@@ -115,42 +119,8 @@ async def get_preference(
             sensitive=False  # Evidence Item doesn't expose sensitivity
         )
         
-    except ConsentDeniedError as e:
-        logger.warning(f"Consent denied: {e}")
-        return JSONResponse(
-            status_code=status.HTTP_403_FORBIDDEN,
-            content=ErrorResponse(
-                error_code="CONSENT_DENIED",
-                message=str(e),
-                details={
-                    "user_id": str(e.user_id),
-                    "required_tier": e.required_tier,
-                    "current_tier": e.current_tier
-                }
-            ).model_dump()
-        )
-        
-    except UserNotFoundError as e:
-        logger.warning(f"User not found: {e}")
-        return JSONResponse(
-            status_code=status.HTTP_404_NOT_FOUND,
-            content=ErrorResponse(
-                error_code="USER_NOT_FOUND",
-                message=str(e),
-                details={"user_id": str(e.user_id)}
-            ).model_dump()
-        )
-        
-    except UnknownPreferenceError as e:
-        logger.warning(f"Unknown preference: {e}")
-        return JSONResponse(
-            status_code=status.HTTP_404_NOT_FOUND,
-            content=ErrorResponse(
-                error_code="UNKNOWN_PREFERENCE",
-                message=str(e),
-                details={"preference_key": e.preference_key}
-            ).model_dump()
-        )
+    except (ConsentDeniedError, UserNotFoundError, UnknownPreferenceError) as e:
+        return error_handler.handle_service_errors(e)
 
 
 @router.post("/{user_id}")
@@ -202,42 +172,8 @@ async def set_preference(
             sensitive=response.sensitive
         )
         
-    except UserNotFoundError as e:
-        logger.warning(f"User not found: {e}")
-        return JSONResponse(
-            status_code=status.HTTP_404_NOT_FOUND,
-            content=ErrorResponse(
-                error_code="USER_NOT_FOUND",
-                message=str(e),
-                details={"user_id": str(e.user_id)}
-            ).model_dump()
-        )
-        
-    except UnknownPreferenceError as e:
-        logger.warning(f"Unknown preference: {e}")
-        return JSONResponse(
-            status_code=status.HTTP_404_NOT_FOUND,
-            content=ErrorResponse(
-                error_code="UNKNOWN_PREFERENCE",
-                message=str(e),
-                details={"preference_key": e.preference_key}
-            ).model_dump()
-        )
-        
-    except ValidationError as e:
-        logger.warning(f"Validation error: {e}")
-        return JSONResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            content=ErrorResponse(
-                error_code="VALIDATION_ERROR",
-                message=str(e),
-                details={
-                    "preference_key": e.preference_key,
-                    "value": e.value,
-                    "reason": e.reason
-                }
-            ).model_dump()
-        )
+    except (UserNotFoundError, UnknownPreferenceError, ValidationError) as e:
+        return error_handler.handle_service_errors(e)
 
 
 @router.delete("/{user_id}/{preference_key}")
@@ -287,27 +223,8 @@ async def delete_preference(
             sensitive=False
         )
         
-    except UserNotFoundError as e:
-        logger.warning(f"User not found: {e}")
-        return JSONResponse(
-            status_code=status.HTTP_404_NOT_FOUND,
-            content=ErrorResponse(
-                error_code="USER_NOT_FOUND",
-                message=str(e),
-                details={"user_id": str(e.user_id)}
-            ).model_dump()
-        )
-        
-    except UnknownPreferenceError as e:
-        logger.warning(f"Unknown preference: {e}")
-        return JSONResponse(
-            status_code=status.HTTP_404_NOT_FOUND,
-            content=ErrorResponse(
-                error_code="UNKNOWN_PREFERENCE",
-                message=str(e),
-                details={"preference_key": e.preference_key}
-            ).model_dump()
-        )
+    except (UserNotFoundError, UnknownPreferenceError) as e:
+        return error_handler.handle_service_errors(e)
 
 
 @router.get("/{user_id}")
@@ -356,31 +273,8 @@ async def get_all_preferences(
             sensitive=False
         )
         
-    except ConsentDeniedError as e:
-        logger.warning(f"Consent denied: {e}")
-        return JSONResponse(
-            status_code=status.HTTP_403_FORBIDDEN,
-            content=ErrorResponse(
-                error_code="CONSENT_DENIED",
-                message=str(e),
-                details={
-                    "user_id": str(e.user_id),
-                    "required_tier": e.required_tier,
-                    "current_tier": e.current_tier
-                }
-            ).model_dump()
-        )
-        
-    except UserNotFoundError as e:
-        logger.warning(f"User not found: {e}")
-        return JSONResponse(
-            status_code=status.HTTP_404_NOT_FOUND,
-            content=ErrorResponse(
-                error_code="USER_NOT_FOUND",
-                message=str(e),
-                details={"user_id": str(e.user_id)}
-            ).model_dump()
-        )
+    except (ConsentDeniedError, UserNotFoundError) as e:
+        return error_handler.handle_service_errors(e)
 
 
 @router.get("/health")

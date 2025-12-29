@@ -1,0 +1,1 @@
+"""Shared API utilities and error handlers."""
