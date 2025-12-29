@@ -10,11 +10,12 @@ Reference: LLD.md §3.1
 import logging
 from typing import Any
 from uuid import UUID
-from fastapi import APIRouter, Request, HTTPException, status, Depends
+from fastapi import APIRouter, Request, Depends
 from fastapi.responses import JSONResponse
 
 from shared.schemas.evidence import EvidenceItem
 from shared.api.error_handlers import ErrorHandlerMixin
+from shared.api.auth import get_auth_context, verify_user_access, RequireTier2
 from shared.database.error_handler import UserNotFoundError
 from ..domain.models import (
     PreferenceRequest, SuccessResponse,
@@ -48,27 +49,7 @@ def get_preference_service() -> PreferenceService:
     )
 
 
-# Dependency to extract auth context
-def get_auth_context(request: Request) -> dict:
-    """
-    Extract authentication context from request.
-    
-    Expects auth middleware to populate request.state with:
-    - user_id: UUID
-    - context_tier: int
-    - email: str
-    """
-    if not hasattr(request.state, 'user_id'):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required"
-        )
-    
-    return {
-        "user_id": request.state.user_id,
-        "context_tier": request.state.context_tier,
-        "email": request.state.email
-    }
+# Authentication context now provided by shared/api/auth.py
 
 
 @router.get("/{user_id}/{preference_key}")
@@ -87,15 +68,7 @@ async def get_preference(
     """
     try:
         # Verify user can only access their own preferences
-        if auth_context["user_id"] != user_id:
-            logger.warning(
-                f"User {auth_context['user_id']} attempted to access "
-                f"preferences for user {user_id}"
-            )
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Cannot access other users' preferences"
-            )
+        verify_user_access(user_id, auth_context)
         
         # Get plan_id for correlation logging
         plan_id = request.headers.get("X-Plan-ID")
@@ -139,15 +112,7 @@ async def set_preference(
     """
     try:
         # Verify user can only modify their own preferences
-        if auth_context["user_id"] != user_id:
-            logger.warning(
-                f"User {auth_context['user_id']} attempted to modify "
-                f"preferences for user {user_id}"
-            )
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Cannot modify other users' preferences"
-            )
+        verify_user_access(user_id, auth_context)
         
         # Get plan_id for correlation logging
         plan_id = request.headers.get("X-Plan-ID")
@@ -192,15 +157,7 @@ async def delete_preference(
     """
     try:
         # Verify user can only delete their own preferences
-        if auth_context["user_id"] != user_id:
-            logger.warning(
-                f"User {auth_context['user_id']} attempted to delete "
-                f"preference for user {user_id}"
-            )
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Cannot delete other users' preferences"
-            )
+        verify_user_access(user_id, auth_context)
         
         # Get plan_id for correlation logging
         plan_id = request.headers.get("X-Plan-ID")
@@ -242,15 +199,7 @@ async def get_all_preferences(
     """
     try:
         # Verify user can only access their own preferences
-        if auth_context["user_id"] != user_id:
-            logger.warning(
-                f"User {auth_context['user_id']} attempted to access "
-                f"all preferences for user {user_id}"
-            )
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Cannot access other users' preferences"
-            )
+        verify_user_access(user_id, auth_context)
         
         # Get plan_id for correlation logging
         plan_id = request.headers.get("X-Plan-ID")

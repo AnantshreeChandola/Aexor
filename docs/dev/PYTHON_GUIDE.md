@@ -322,9 +322,54 @@ class PreferenceRegistry:
 1. **Database Layer**: Use `shared/database/adapter.py` for ALL database connections
 2. **Error Handling**: Use decorators from `shared/database/error_handler.py` 
 3. **API Errors**: Use `shared/api/error_handlers.py` for consistent responses
-4. **Models**: Define shared tables in `shared/database/models.py`
-5. **Schemas**: Use universal schemas with metadata-driven validation
-6. **Encryption**: Use shared utilities in `shared/security/`
+4. **Authentication**: Use `shared/api/auth.py` for auth context and user verification
+5. **Models**: Define shared tables in `shared/database/models.py`
+6. **Schemas**: Use universal schemas with metadata-driven validation
+7. **Encryption**: Use shared utilities in `shared/security/`
+
+### Shared Authentication Utilities
+
+**❌ ANTI-PATTERN: Duplicate auth logic in every component**
+```python
+# DON'T DO THIS - Repeated in every API route file
+def get_auth_context(request: Request) -> dict:
+    if not hasattr(request.state, 'user_id'):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return {"user_id": request.state.user_id, "context_tier": request.state.context_tier}
+
+def verify_user_access(target_user_id: UUID, auth_context: dict):
+    if auth_context["user_id"] != target_user_id:
+        raise HTTPException(status_code=403, detail="Cannot access other users' data")
+    # 15+ lines of duplicate logic in every component
+```
+
+**✅ BEST PRACTICE: Shared authentication utilities**
+```python
+# shared/api/auth.py - Write ONCE
+from shared.api.auth import (
+    get_auth_context, 
+    verify_user_access, 
+    require_context_tier,
+    RequireTier2  # Convenience dependency
+)
+
+# All component routes - Use everywhere
+@router.get("/{user_id}/data")
+async def get_user_data(
+    user_id: UUID,
+    auth_context: dict = Depends(get_auth_context),
+    _: None = Depends(RequireTier2)  # Requires Tier 2+
+):
+    verify_user_access(user_id, auth_context)  # 1 line!
+    # Clean business logic only
+```
+
+**Authentication Utilities Available:**
+- `get_auth_context()` - Extract full auth context from request
+- `get_user_id()` - Extract just user_id (convenience)
+- `verify_user_access()` - Prevent cross-user access
+- `require_context_tier(n)` - Enforce minimum context tier
+- `RequireTier2/3/4` - Convenience dependencies for common tiers
 
 ### Benefits of Shared Architecture
 
