@@ -10,6 +10,7 @@
 - **shared/** — shared tool registry + JSON Schemas used across components.
 - **tests/** — cross-component/system-level tests.
 - **.github/workflows/** — CI pipelines.
+- **specs/** — component SPEC files (specs/<spec-id>/SPEC.md + diagrams/)
 - **usecases/** — use‑case packets (SPEC.md, LLD.md, plans/, tests/, fixtures/)
 
 ## Component-first layout (no global /spec)

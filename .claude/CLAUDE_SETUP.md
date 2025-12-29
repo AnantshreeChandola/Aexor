@@ -43,6 +43,11 @@
 /primer                      # Understand repo structure
 /specify                     # Create SPEC using Spec Kit
 /design                      # Generate LLD from SPEC
+/flow_orchestrate            # Auto-run: planner → implementer → verifier → pr-manager
+```
+
+**Manual Alternative** (if you want control over each step):
+```bash
 # Use planner agent          # Map SPEC → tasks
 # Use implementer agent      # Write code with preview-first safety
 # Use verifier agent         # Run tests, validate schemas

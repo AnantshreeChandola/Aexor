@@ -29,6 +29,7 @@ Act as a design orchestrator. Use Spec Kit's `/speckit.plan` workflow to generat
 
 2) **Read canonical repo rules and architecture**
    - .specify/memory/constitution.md (PR rules, CI gates, no push to main)
+   - docs/dev/PYTHON_GUIDE.md (DRY principles, shared infrastructure, error handling patterns)
    - docs/architecture/PROJECT_STRUCTURE.md (component-first structure, directory layout)
    - docs/architecture/GLOBAL_SPEC.md (Intent + Preview/Execute envelopes, NFRs)
    - docs/architecture/Project_HLD.md (system context, 4 layers, 16 components, dual runtime)
@@ -56,6 +57,12 @@ Act as a design orchestrator. Use Spec Kit's `/speckit.plan` workflow to generat
      - Required scopes (read-only for preview, write for execute)
      - Idempotency strategy (plan_id:step:arg_hash)
      - Compensation operations (if declared)
+     - **Shared Infrastructure Usage** - From PYTHON_GUIDE.md
+       - Database: Use shared/database/adapter.py (never duplicate connection setup)
+       - Error handling: Use decorators from shared/database/error_handler.py
+       - API errors: Use shared/api/error_handlers.py (ErrorHandlerMixin)
+       - Models: Import shared tables from shared/database/models.py
+       - Schemas: Use universal schema approach where applicable
    - **Sequences** - Flow diagrams
      - Happy path (preview → execute)
      - Error paths

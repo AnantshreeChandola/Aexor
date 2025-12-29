@@ -7,33 +7,41 @@
 ---
 
 ## 0) Purpose
-Define the universal rules every component must follow:
-- The **safety model** (Preview vs Execute vs Durable)  
-- Canonical **I/O contracts** (Intent, Evidence, Plan, Signature, Preview, Execute, Approvals)  
-- Baseline **non-functional requirements**  
-- **Schemas & validation** expectations  
-- **Determinism & auditability** across all planning/execution  
+Define the universal rules that govern this system:
 
-Component `SPEC.md` files **inherit** these rules and may only deviate if explicitly stated (with rationale).
+**For Use Cases** (end-to-end user flows):
+- The **safety model** (Preview vs Execute vs Durable) for user-facing operations
+- Canonical **I/O contracts** (Intent, Evidence, Plan, Signature, Preview, Execute, Approvals)
+- **Determinism & auditability** across all planning/execution
+
+**For Components** (internal building blocks):
+- **Evidence Item format** for data sources (GLOBAL_SPEC §2.2)
+- **Context tier** policy for privacy-aware data fetching (GLOBAL_SPEC §7)
+- Baseline **non-functional requirements** (latency, availability, observability)
+- **Schemas & validation** expectations for typed contracts
+
+Each `SPEC.md` (component or use case) **inherits** these rules and may only deviate if explicitly stated (with rationale).
 
 ---
 
-## 1) Safety Model (applies to all components)
+## 1) Safety Model (applies to user-facing plans)
+
+**Important**: This safety model applies to **user-facing plans** (Intent → Plan → Preview → Execute), NOT to internal component operations. Internal components (ProfileStore, Intake, History) execute operations directly without Preview/Execute wrappers.
 
 ### Preview
-- **Side-effect free**: stubs/mocks only, no writes or external mutations.  
-- Runs **n8n connectors** only in previewable/read-only mode.  
-- Returns a **Preview wrapper** with normalized payload + optional evidence.  
+- **Side-effect free**: stubs/mocks only, no writes or external mutations.
+- Runs **n8n connectors** only in previewable/read-only mode.
+- Returns a **Preview wrapper** with normalized payload + optional evidence.
 
 ### Execute (Short Jobs, via n8n)
-- Allowed **only after explicit human approval** with a valid approval token and verified plan signature.  
-- Calls real providers under **least-privilege** credentials.  
-- Idempotency required (`plan_id:step:arg_hash`).  
-- Returns an **Execute wrapper**.  
+- Allowed **only after explicit human approval** with a valid approval token and verified plan signature.
+- Calls real providers under **least-privilege** credentials.
+- Idempotency required (`plan_id:step:arg_hash`).
+- Returns an **Execute wrapper**.
 
 ### Durable (Long Jobs, via Temporal)
-- Handles long-running/stateful work (poll, retry, signals, compensation).  
-- Deterministic workflow core, Activities for I/O.  
+- Handles long-running/stateful work (poll, retry, signals, compensation).
+- Deterministic workflow core, Activities for I/O.
 - Resilient to restarts; must support **ContinueAsNew** and compensation.  
 
 ---
@@ -195,12 +203,16 @@ Runtime agents are **asynchronous execution instances** that execute plan steps.
 ---
 
 ## 7) Context Policy
-- **Tier 1:** session only  
-- **Tier 2:** stable prefs  
-- **Tier 3:** recent history  
-- **Tier 4:** live signals (cross-app)  
-- **Tier 5:** private content (derived facts only, explicit consent)  
-- ContextRAG enforces tier budgets and produces typed `evidence[]`.  
+- **Tier 1:** session only (current conversation, temporary context extracted from any source)
+- **Tier 2:** stable prefs (user preferences, settings; includes sensitive data with encryption flags)
+- **Tier 3:** recent history (past interactions with 30-day TTL)
+- **Tier 4:** live signals (real-time data fetched on-demand from external APIs; not stored)
+- ContextRAG enforces tier budgets and produces typed `evidence[]`.
+
+**Notes:**
+- Tier 2 sensitive data (passport numbers, health info) stored encrypted at rest with `sensitive: true` flag
+- Tier 4 data is never persisted; fetched fresh during each planning cycle
+- Privacy consent is cumulative (Tier 3 consent includes Tier 1+2)  
 
 ---
 
@@ -214,10 +226,25 @@ Runtime agents are **asynchronous execution instances** that execute plan steps.
 
 ---
 
-## 9) Repository Mapping
-Each `components/<Name>/` includes: SPEC.md, LLD.md, schemas/, tests/, code.
-Each `usecases/<UseCase>/` includes: SPEC.md, LLD.md, plans/, tests/, fixtures/.
-Global contracts live in this file.
+## 9) Repository Structure
+
+### Component-First Architecture
+Each `components/<Name>/` is a self-contained module with:
+- **SPEC.md** — Requirements, user stories, acceptance criteria
+- **LLD.md** — Low-level design, interfaces, dependencies
+- **schemas/** — JSON schemas for component-specific contracts
+- **tests/** — Contract tests, unit tests, integration tests
+- **Code** — api/, service/, domain/, adapters/ subdirectories
+
+### Optional Use-Case Specifications
+Use-case packets in `usecases/<UseCase>/` (when needed):
+- **SPEC.md** — End-to-end scenario requirements
+- **LLD.md** — Flow orchestration across components
+- **plans/** — Workflow definitions
+- **tests/** — End-to-end acceptance tests
+- **fixtures/** — Test data
+
+**Global contracts** (Intent, Evidence, Plan schemas) live in this GLOBAL_SPEC file.
 
 ---
 

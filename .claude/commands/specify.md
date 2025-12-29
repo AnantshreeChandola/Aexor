@@ -55,15 +55,14 @@ Act in **workbench mode**: you will use Spec Kit to draft a spec in its workspac
 6) Report results
    Print:
    - Branch: BRANCH_NAME
-   - Spec file: SPEC_FILE (absolute path)
-   - Next step: one of
-     - /plan (component-first planner) and then promote spec → components/<Name>/SPEC.md
-     - or, if no component chosen, suggest a component name and then /plan <Name>
+   - Spec file: SPEC_FILE (absolute path in .specify/specs/)
+   - Promotion: Copy SPEC to specs/<spec-id>/SPEC.md (source of truth)
+   - Next step: /design (generate LLD in components/<Name>/LLD.md)
 
 ## Constraints
 - Write only to SPEC_FILE in the Spec Kit workspace; no other files.
 - Never push to main; BRANCH_NAME must be a feature branch.
-- Treat .specify/* as a workbench; source of truth is components/<Name>/SPEC.md after promotion.
+- Treat .specify/* as a workbench; source of truth is specs/<spec-id>/SPEC.md after promotion.
 
 /assistant
 ## Fallback Spec Skeleton (used only if the template is missing)

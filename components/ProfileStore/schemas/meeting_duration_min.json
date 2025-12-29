@@ -1,0 +1,9 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Meeting Duration Minimum",
+  "description": "Minimum meeting duration in minutes",
+  "type": "integer",
+  "minimum": 15,
+  "maximum": 240,
+  "default": 30
+}

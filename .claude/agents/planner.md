@@ -13,7 +13,7 @@ Read first (in order):
 3. docs/architecture/GLOBAL_SPEC.md (Intent + Preview/Execute envelopes)
 4. docs/architecture/Project_HLD.md (system context, 4 layers, 16 components)
 5. docs/architecture/MODULAR_ARCHITECTURE.md (blast radius, fault isolation)
-6. components/<Name>/SPEC.md (or usecases/<UseCase>/SPEC.md)
+6. specs/<spec-id>/SPEC.md (or usecases/<UseCase>/SPEC.md for use cases)
 7. components/<Name>/LLD.md (includes dependencies, architectural considerations)
 8. components/<Name>/dependencies.md (library deps, external services, internal deps)
 
@@ -25,7 +25,7 @@ Write `components/<Name>/tasks.md` (or `usecases/<UseCase>/tasks.md`) with the f
 
 **Created**: <date>
 **Branch**: feat/<area>-<short-desc>
-**SPEC**: components/<Name>/SPEC.md
+**SPEC**: specs/<spec-id>/SPEC.md
 **LLD**: components/<Name>/LLD.md
 
 ## Task Organization
