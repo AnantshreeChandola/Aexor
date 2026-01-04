@@ -30,10 +30,11 @@ Act as a design orchestrator. Use Spec Kit's `/speckit.plan` workflow to generat
 2) **Read canonical repo rules and architecture**
    - .specify/memory/constitution.md (PR rules, CI gates, no push to main)
    - docs/dev/PYTHON_GUIDE.md (DRY principles, shared infrastructure, error handling patterns)
-   - docs/architecture/PROJECT_STRUCTURE.md (component-first structure, directory layout)
+   - PROJECT_STRUCTURE.md (component-first structure, directory layout)
    - docs/architecture/GLOBAL_SPEC.md (Intent + Preview/Execute envelopes, NFRs)
    - docs/architecture/Project_HLD.md (system context, 4 layers, 16 components, dual runtime)
    - docs/architecture/MODULAR_ARCHITECTURE.md (modular design principles, blast radius isolation)
+   - docs/architecture/adr/*.md (Architecture Decision Records - decision context and rationale)
 
 3) **Generate LLD.md from plan artifacts and architecture docs**
    Read all generated artifacts from step 1 AND canonical architecture docs from step 2, then create comprehensive LLD.md with:
@@ -67,26 +68,34 @@ Act as a design orchestrator. Use Spec Kit's `/speckit.plan` workflow to generat
      - Happy path (preview → execute)
      - Error paths
      - Retry/backoff strategies
-   - **Library Dependencies** - **NEW SECTION**
-     - Python packages (from plan.md tech stack)
-     - External APIs/services
-     - Version constraints
-     - Justification for each dependency
+   - **Dependencies & External Integrations** - **NEW SECTION**
+     - Python packages (from plan.md tech stack) with version constraints and justifications
+     - External APIs/services with SLA requirements
+     - Internal infrastructure dependencies (shared utilities)
+     - Component dependencies (upstream/downstream relationships)
+     - Development and testing dependencies
    - **Observability & Safety** - From plan.md
      - Structured logging (correlation: plan_id/step/role)
      - No PII in logs
      - Error classes
      - HITL gates (if applicable)
    - **Non-Functional Requirements** - From SPEC.md
-     - Performance (Preview p95 < 800ms, Execute p95 < 2s)
-     - Availability
-     - Resource limits
+     - Performance tables (Local vs Cloud expected latency)
+     - Availability targets (99.9% cloud, best-effort local)
+     - Throughput requirements (single-user vs multi-user scenarios)
+     - Scalability targets (deployment scenarios: local/cloud/enterprise)
+     - Testing strategy (simplified for single-user, contract tests separate)
    - **Architectural Considerations** - **NEW SECTION** from MODULAR_ARCHITECTURE.md
      - Blast radius containment (what fails if this component fails?)
      - Fault isolation strategy (circuit breakers, fallbacks)
      - Cross-component interactions (which components does this depend on?)
      - Determinism guarantees (same inputs → same outputs for preview)
      - State management (stateless vs stateful, persistence needs)
+   - **Architecture Decision Records** - **NEW SECTION** from docs/architecture/adr/*.md
+     - Reference relevant ADRs that impact this component design
+     - Document how component adheres to established architectural decisions
+     - Note any new decisions that may require ADR creation
+     - Cross-reference decision rationale for design choices
    - **Risks & Open Questions** - From research.md and plan.md
 
 4) **Generate Mermaid flowchart**
@@ -96,57 +105,38 @@ Act as a design orchestrator. Use Spec Kit's `/speckit.plan` workflow to generat
    - Error handling
    - HITL gates (if applicable)
 
-   Save as:
-   - `components/<Name>/diagrams/flow.mmd` (for components)
-   - `.specify/specs/###-name/diagrams/flow.mmd` (for use cases, then copy to usecases/<UseCase>/diagrams/)
+   Save as markdown file with mermaid code block:
+   - `components/<Name>/diagrams/flow.md` (for components)
+   - `.specify/specs/###-name/diagrams/flow.md` (for use cases, then copy to usecases/<UseCase>/diagrams/)
 
 5) **Write to target directory**
    - **For components**: Write LLD.md and diagrams to `components/<Name>/`
    - **For use cases**: Write LLD.md and diagrams to `usecases/<UseCase>/`
    - Create `diagrams/` directory if missing
 
-6) **Generate dependency manifest** (NEW)
-   Create `dependencies.md` in the same directory as LLD.md:
-
-   ```markdown
-   # Dependencies: <ComponentName>
-
-   ## Python Packages
-   | Package | Version | Purpose | Justification |
-   |---------|---------|---------|---------------|
-   | pydantic | ^2.0 | Schema validation | Required for normalized response schemas |
-   | httpx | ^0.27 | HTTP client | Async provider API calls |
-   | ... | ... | ... | ... |
-
-   ## External Services
-   | Service | Provider | Scopes Required | Purpose |
-   |---------|----------|-----------------|---------|
-   | Calendar API | Google | calendar.readonly (preview), calendar.events (execute) | Schedule reading/writing |
-   | ... | ... | ... | ... |
-
-   ## Internal Dependencies
-   | Component | Purpose |
-   |-----------|---------|
-   | ProfileStore | User preferences, timezone |
-   | ContextRAG | Fetch relevant history |
-   | ... | ... |
-   ```
-
-7) **Report results**
+6) **Report results**
    Print:
-   - LLD path: `components/<Name>/LLD.md` or `usecases/<UseCase>/LLD.md`
-   - Flowchart path: `components/<Name>/diagrams/flow.mmd`
-   - Dependencies path: `components/<Name>/dependencies.md`
-   - Summary: Key decisions from research.md
+   - LLD path: `components/<Name>/LLD.md` or `usecases/<UseCase>/LLD.md` (includes integrated dependencies section)
+   - Flowchart path: `components/<Name>/diagrams/flow.md`
+   - Summary: Key architectural decisions and design rationale
    - Next step: `/flow_orchestrate` or `/speckit.tasks`
+
+7) **Cleanup temporary artifacts**
+   After successful LLD creation, automatically remove the temporary `.specify/specs/###-name/` directory and all its contents:
+   - Delete plan.md, research.md, data-model.md
+   - Delete contracts/ directory
+   - Delete quickstart.md  
+   - Delete diagrams/ directory (if created by speckit.plan)
+   - Remove the entire spec directory to keep workspace clean
 
 ## Constraints
 - Use `/speckit.plan` for comprehensive research and planning
 - Extract and organize artifacts into clean LLD.md
-- **Must include library dependencies section** with justifications
-- Only write LLD.md, diagrams/flow.mmd, and dependencies.md - no code/schemas/tests
+- **Must integrate dependencies section in LLD.md** with justifications (no separate dependencies.md file)
+- Only write LLD.md and diagrams/flow.md - no code/schemas/tests
 - Use existing directories; create diagrams/ if missing
 - Prefer canonical paths (`components/<Name>/`) over workbench (`.specify/specs/`)
+- **Automatically cleanup temporary artifacts** - remove `.specify/specs/###-name/` directory after successful LLD creation
 
 /assistant
 This command leverages Spec Kit's thorough planning workflow to generate a comprehensive LLD with:
@@ -154,8 +144,8 @@ This command leverages Spec Kit's thorough planning workflow to generate a compr
 2. Complete data modeling
 3. API contract specifications
 4. Detailed flow diagrams
-5. **Library dependency analysis with justifications** (NEW)
-6. **Architectural considerations** (blast radius, fault isolation, determinism) (NEW)
+5. **Integrated dependencies section** with Python packages, external services, and internal component relationships
+6. **Architectural considerations** (blast radius, fault isolation, determinism) 
 7. Layer placement and modular architecture compliance
 
 **Key architectural docs consulted**:

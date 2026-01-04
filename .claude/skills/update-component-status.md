@@ -3,7 +3,7 @@ description: Update the component implementation status tracker with current pro
 ---
 
 Read first:
-- `.claude/COMPONENT_STATUS.md` (the tracker file)
+- `COMPONENT_STATUS.md` (the tracker file)
 - `components/` directory to check what exists
 
 ## Update Process
@@ -14,21 +14,20 @@ Read first:
 find components -maxdepth 1 -type d -not -path components
 
 # For each component, check for required files
-ls components/<Name>/SPEC.md 2>/dev/null
+# SPEC files are in specs/ directory, not components/
 ls components/<Name>/LLD.md 2>/dev/null
 ls components/<Name>/*.py 2>/dev/null
 ```
 
 ### 2. Check File Existence
 For each component, verify:
-- [ ] SPEC.md exists
-- [ ] LLD.md exists
+- [ ] LLD.md exists (SPEC files are stored separately in specs/ directory)
 - [ ] Code files exist (Python/TS)
 - [ ] Tests exist
 - [ ] Schema files exist
 
 ### 3. Update Status File
-Edit `.claude/COMPONENT_STATUS.md`:
+Edit `COMPONENT_STATUS.md`:
 - Mark `✓` for completed items
 - Mark `✗` for missing items
 - Mark `WIP` for work in progress
@@ -45,7 +44,6 @@ Edit `.claude/COMPONENT_STATUS.md`:
 ## [Layer Name]
 
 ### ComponentName
-- SPEC.md: [✓/✗/WIP]
 - LLD.md: [✓/✗/WIP]
 - Code: [✓/✗/WIP]
 - Tests: [✓/✗/WIP]
@@ -60,7 +58,6 @@ Edit `.claude/COMPONENT_STATUS.md`:
 ## Memory Layer
 
 ### ProfileStore
-- SPEC.md: ✗
 - LLD.md: ✗
 - Code: ✗
 - Tests: ✗
@@ -70,8 +67,7 @@ Edit `.claude/COMPONENT_STATUS.md`:
 ```markdown
 ## Memory Layer
 
-### ProfileStore
-- SPEC.md: ✓ (created 2025-01-08)
+### ProfileStore  
 - LLD.md: WIP (in review)
 - Code: ✗
 - Tests: ✗
@@ -87,7 +83,7 @@ Use this command to quickly check all components:
 for component in components/*/; do
   name=$(basename "$component")
   echo "## $name"
-  echo "- SPEC: $([ -f "$component/SPEC.md" ] && echo '✓' || echo '✗')"
+  echo "- SPEC: See specs/ directory for corresponding spec.md file"
   echo "- LLD: $([ -f "$component/LLD.md" ] && echo '✓' || echo '✗')"
   echo "- Code: $(find "$component" -name '*.py' | head -1 >/dev/null && echo '✓' || echo '✗')"
   echo "- Tests: $([ -d "$component/tests" ] && echo '✓' || echo '✗')"

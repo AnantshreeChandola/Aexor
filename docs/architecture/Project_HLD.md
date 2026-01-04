@@ -17,9 +17,8 @@ User Request → Preview → Approval → Execute → Learn
 ### Core Idea
 1. **Never do anything without showing the user first** (Preview-first safety)
 2. **Plans are deterministic and signed** (Same inputs → same plan → same signature)
-3. **Two execution modes** for different job types:
-   - **n8n**: Short jobs (< 15 min) like booking meetings, sending emails
-   - **Temporal**: Long jobs (hours/days) like monitoring visa slots, watching prices
+3. **Single execution runtime** optimized for personal agent scale:
+   - **n8n**: All workflows (short and long-running) with built-in persistence and retry logic
 
 ### Key Innovation
 **Preview State Caching**: User choices made during preview are reused during execution—no need to repeat steps.
@@ -56,8 +55,7 @@ The system has **4 layers** that work together:
 **What it does**: Previews and executes plans safely
 - **PreviewOrchestrator**: Shows you what will happen (no side effects)
 - **ApprovalGate**: Waits for your confirmation
-- **ExecuteOrchestrator**: Does the actual work (n8n workflows)
-- **DurableOrchestrator**: Handles long-running tasks (Temporal workflows)
+- **ExecuteOrchestrator**: Does the actual work (n8n workflows for all task types)
 
 **Example**: Shows you 3 time slots → You pick one → Creates the calendar event
 
@@ -223,6 +221,7 @@ Below are the 16 core components organized by layer. Each will have its own `SPE
 
 **Technology**: PostgreSQL (plans table, indexed by intent type and success)
 
+
 ---
 
 ### Domain Layer (6 components)
@@ -367,6 +366,7 @@ n8n workflow:
 }
 ```
 
+
 #### ExecuteOrchestrator
 **What it does**: Does the actual work (writes to external systems)
 **Process**:
@@ -384,36 +384,49 @@ n8n workflow:
 - Template args resolved from cached state
 - Example: `product_id: "{{preview.cached_state.selected_product}}"`
 
-#### DurableOrchestrator
-**What it does**: Handles long-running tasks (hours/days/weeks)
+#### Long-Running Task Handling
+**What it does**: Handles extended monitoring tasks (hours/days/weeks) using n8n
 **Examples**:
 - Monitor visa appointment slots for 2 weeks
 - Watch flight prices for best deal
 - Poll API every 6 hours for availability
 
-**Technology**: Temporal workflows
-- Deterministic workflow core
-- Activities for I/O operations
-- ContinueAsNew pattern (daily reset)
-- Signals for approval/cancellation
-- Retries with exponential backoff
+**Technology**: n8n workflows with persistence
+- Built-in workflow state management
+- Wait/Schedule nodes for delays
+- HTTP retry logic with exponential backoff
+- Webhook triggers for external signals
+- Visual debugging and monitoring
 
-**Example workflow**:
-```python
-async def visa_watcher_workflow(plan_id, params):
-    while slots_not_found:
-        result = await check_slots_activity()  # I/O
-        if result.has_slots:
-            await send_signal_to_approval_gate(result)
-            approval = await wait_for_signal(timeout=24h)
-            if approval:
-                await book_slot_activity(result.slot_id)
-                break
-        await asyncio.sleep(6 * 3600)  # 6 hours
-
-        # Reset workflow to avoid history bloat
-        if elapsed > 24h:
-            continue_as_new(plan_id, params)
+**Example n8n workflow**:
+```yaml
+workflow: "visa_slot_monitor"
+trigger:
+  type: "manual"
+  
+nodes:
+  - name: "check_visa_slots"
+    type: "http_request"
+    url: "{{embassy_api}}/slots"
+    retry_on_fail: true
+    max_retries: 3
+    
+  - name: "slots_available_check"
+    type: "if"
+    condition: "{{$node.check_visa_slots.json.available_slots.length > 0}}"
+    
+  - name: "notify_user_slots_found"
+    type: "webhook"
+    url: "{{approval_gate_url}}/visa-slots-found"
+    
+  - name: "wait_6_hours"
+    type: "wait"
+    amount: 6
+    unit: "hours"
+    
+  - name: "continue_monitoring"  # Loop back to check
+    type: "set"
+    connects_to: "check_visa_slots"
 ```
 
 ---
@@ -430,7 +443,7 @@ async def visa_watcher_workflow(plan_id, params):
 
 ## 4) Runtime Agent Roles (Responsibility Classification)
 
-Runtime agents are **asynchronous workers** that execute individual plan steps. They're not just labels—they're actual n8n sub-workflows or Temporal activities.
+Runtime agents are **asynchronous workers** that execute individual plan steps. They're not just labels—they're actual n8n sub-workflows and node configurations.
 
 ### The 6 Roles
 
@@ -442,7 +455,7 @@ Runtime agents are **asynchronous workers** that execute individual plan steps. 
 - Look up product details
 - Check flight prices
 
-**Implementation**: n8n HTTP/connector nodes, Temporal activities
+**Implementation**: n8n HTTP/connector nodes
 
 #### 2. Analyzer (Data Processing)
 **What it does**: Compare, rank, research, synthesize
@@ -452,7 +465,7 @@ Runtime agents are **asynchronous workers** that execute individual plan steps. 
 - Compare flight routes
 - Calculate expense totals
 
-**Implementation**: n8n Function nodes, Temporal activities with compute logic
+**Implementation**: n8n Function nodes with compute logic
 
 #### 3. Watcher (Long-Running Monitoring)
 **What it does**: Continuous observation over time
@@ -462,7 +475,7 @@ Runtime agents are **asynchronous workers** that execute individual plan steps. 
 - Watch for email replies
 - Track package delivery
 
-**Implementation**: Temporal workflows with ContinueAsNew pattern
+**Implementation**: n8n workflows with built-in persistence and scheduling
 
 #### 4. Resolver (User Interaction)
 **What it does**: Disambiguation and clarification
@@ -481,7 +494,7 @@ Runtime agents are **asynchronous workers** that execute individual plan steps. 
 - Make purchases
 - Book appointments
 
-**Implementation**: n8n connector nodes, Temporal activities with idempotency keys
+**Implementation**: n8n connector nodes with idempotency keys
 
 **Key requirement**: Must support compensation (undo) if something fails
 
@@ -493,7 +506,7 @@ Runtime agents are **asynchronous workers** that execute individual plan steps. 
 - Progress updates
 - Error notifications
 
-**Implementation**: n8n Slack/email nodes, Temporal notification activities
+**Implementation**: n8n Slack/email nodes
 
 ### How They Execute
 
@@ -727,7 +740,7 @@ See [README.md Tech Stack section](../../README.md#tech-stack) for the complete 
 
 **Summary**:
 - **Backend**: Python 3.11+ (FastAPI, Pydantic, SQLAlchemy async)
-- **Orchestration**: n8n (short jobs) + Temporal (long jobs)
+- **Orchestration**: n8n (all workflows with built-in persistence)
 - **Data**: PostgreSQL 16 + pgvector, Redis 7
 - **AI**: Anthropic Claude (planning), OpenAI (embeddings only)
 - **Testing**: pytest, ruff, mypy
@@ -735,7 +748,7 @@ See [README.md Tech Stack section](../../README.md#tech-stack) for the complete 
 
 **Key architectural decisions**:
 - **No LangChain**: Direct API calls for one-shot planning (not iterative agents)
-- **Dual runtime**: n8n for interactive (< 15min), Temporal for durable (hours/days)
+- **Single runtime**: n8n for all workflows with built-in persistence and scheduling
 - **pgvector**: Single database for relational + vector (upgrade to dedicated vector DB if needed)
 
 ---
@@ -744,11 +757,12 @@ See [README.md Tech Stack section](../../README.md#tech-stack) for the complete 
 
 **Scenario**: "Monitor German visa appointment slots for the next 2 weeks"
 
-### Why Temporal?
-- Runs for days/weeks (not suitable for n8n)
+### Why n8n?
+- Built-in persistence and state management
 - Survives server restarts
-- Needs retries and backoff
-- Requires state management
+- Native scheduling and retry capabilities
+- Visual workflow management and debugging
+- Webhook triggers for user interactions
 
 ### How It Works
 
@@ -768,65 +782,122 @@ See [README.md Tech Stack section](../../README.md#tech-stack) for the complete 
 }
 ```
 
-**Temporal Workflow**:
-```python
-async def visa_watcher_workflow(plan_id: str, params: dict):
-    """Durable workflow for visa slot monitoring"""
-
-    start_time = datetime.now()
-    max_duration = timedelta(days=params["duration_days"])
-
-    while datetime.now() - start_time < max_duration:
-        # Activity: Poll external API
-        result = await check_slots_activity(params["location"])
-
-        if result.has_slots:
-            # Found slots! Send signal to approval gate
-            await send_notification_activity(
-                user_id=params["user_id"],
-                message=f"Visa slot found: {result.slot_date}"
-            )
-
-            # Wait for user approval (with 24h timeout)
-            approval = await workflow.wait_for_signal(
-                signal_name="user_approval",
-                timeout=timedelta(hours=24)
-            )
-
-            if approval:
-                # Book the slot
-                await book_slot_activity(result.slot_id)
-                await send_notification_activity(
-                    user_id=params["user_id"],
-                    message="✓ Visa appointment booked!"
-                )
-                break
-            else:
-                # User didn't approve in time, continue watching
-                continue
-
-        # Sleep for 6 hours before next check
-        await asyncio.sleep(6 * 3600)
-
-        # Prevent workflow history bloat: reset every 24 hours
-        if datetime.now() - start_time > timedelta(hours=24):
-            workflow.continue_as_new(plan_id, params)
-
-    # Duration expired, notify user
-    await send_notification_activity(
-        user_id=params["user_id"],
-        message="Visa slot monitoring ended (14 days elapsed)"
-    )
+**n8n Workflow**:
+```yaml
+workflow: "visa_slot_monitor"
+trigger:
+  type: "manual"
+  
+nodes:
+  - name: "start_monitoring"
+    type: "function"
+    code: |
+      const startTime = new Date();
+      const durationDays = {{$json.duration_days}};
+      const maxDuration = durationDays * 24 * 60 * 60 * 1000;
+      
+      return {
+        startTime,
+        maxDuration,
+        location: {{$json.location}},
+        userId: {{$json.user_id}},
+        planId: {{$json.plan_id}}
+      };
+    
+  - name: "check_visa_slots"
+    type: "http_request"
+    url: "{{embassy_api}}/slots"
+    retry_on_fail: true
+    max_retries: 3
+    backoff_strategy: "exponential"
+    
+  - name: "slots_available_check"
+    type: "if"
+    condition: "{{$node.check_visa_slots.json.available_slots.length > 0}}"
+    
+  - name: "notify_user_slots_found"
+    type: "webhook"
+    url: "{{approval_gate_url}}/visa-slots-found"
+    method: "POST"
+    body: |
+      {
+        "user_id": "{{$node.start_monitoring.json.userId}}",
+        "plan_id": "{{$node.start_monitoring.json.planId}}",
+        "slot_date": "{{$node.check_visa_slots.json.available_slots[0].date}}",
+        "slot_id": "{{$node.check_visa_slots.json.available_slots[0].id}}"
+      }
+    
+  - name: "wait_for_approval"
+    type: "wait_for_webhook"
+    webhook_path: "/visa-approval/{{$node.start_monitoring.json.planId}}"
+    timeout: 86400  # 24 hours
+    
+  - name: "book_approved_slot"
+    type: "http_request"
+    condition: "{{$node.wait_for_approval.json.approved === true}}"
+    url: "{{embassy_api}}/book"
+    method: "POST"
+    body: |
+      {
+        "slot_id": "{{$node.notify_user_slots_found.json.slot_id}}"
+      }
+    
+  - name: "notify_booking_success"
+    type: "webhook"
+    url: "{{notification_service}}/send"
+    method: "POST"
+    body: |
+      {
+        "user_id": "{{$node.start_monitoring.json.userId}}",
+        "message": "✓ Visa appointment booked successfully!"
+      }
+    
+  - name: "check_time_elapsed"
+    type: "function"
+    code: |
+      const startTime = new Date({{$node.start_monitoring.json.startTime}});
+      const now = new Date();
+      const elapsed = now - startTime;
+      const maxDuration = {{$node.start_monitoring.json.maxDuration}};
+      
+      return {
+        shouldContinue: elapsed < maxDuration,
+        elapsed,
+        remaining: maxDuration - elapsed
+      };
+    
+  - name: "wait_6_hours"
+    type: "wait"
+    amount: 6
+    unit: "hours"
+    condition: "{{$node.check_time_elapsed.json.shouldContinue === true}}"
+    
+  - name: "continue_monitoring"
+    type: "set"
+    connects_to: "check_visa_slots"
+    condition: "{{$node.check_time_elapsed.json.shouldContinue === true}}"
+    
+  - name: "notify_monitoring_ended"
+    type: "webhook"
+    url: "{{notification_service}}/send"
+    method: "POST"
+    condition: "{{$node.check_time_elapsed.json.shouldContinue === false}}"
+    body: |
+      {
+        "user_id": "{{$node.start_monitoring.json.userId}}",
+        "message": "Visa slot monitoring ended (14 days elapsed)"
+      }
 ```
 
-**Key Patterns**:
-1. **Deterministic core**: All business logic in workflow
-2. **Activities for I/O**: External API calls, database writes
-3. **Signals**: User approval/cancellation
-4. **ContinueAsNew**: Reset workflow every 24h to prevent history bloat
-5. **Retries**: Automatic retry on transient failures
+**Key Features**:
+1. **Built-in persistence**: n8n automatically manages workflow state
+2. **Visual debugging**: Monitor workflow execution in real-time
+3. **Native scheduling**: Built-in wait nodes and cron triggers
+4. **Webhook integration**: Seamless user approval flows
+5. **Automatic retries**: Configurable retry strategies with backoff
+6. **Loop handling**: Workflow can loop back to previous nodes
 
-**Result**: Monitors visa slots 24/7 for 2 weeks, survives restarts, handles approval flow
+**Result**: Monitors visa slots 24/7 for 2 weeks, survives restarts, handles approval flow with visual monitoring
 
 ---
 
@@ -981,6 +1052,14 @@ After reading this HLD, you should:
 
 ---
 
-**Document Version**: HLD v4.0 (Simplified)
-**Last Updated**: 2025-01-08
-**Changes from v3.4**: Restructured for clarity, added real-world examples, removed redundancy, emphasized preview state caching
+## Related Architecture Documentation
+
+- **[GLOBAL_SPEC.md](GLOBAL_SPEC.md)** - Universal contracts and data envelopes
+- **[MODULAR_ARCHITECTURE.md](MODULAR_ARCHITECTURE.md)** - Component patterns and fault isolation
+- **[Architecture Decision Records (ADRs)](adr/)** - Documented architectural decisions and their rationale
+
+---
+
+**Document Version**: HLD v4.2 (Simplified n8n-only Architecture)
+**Last Updated**: 2025-01-02
+**Changes from v4.1**: Removed Temporal in favor of n8n-only architecture for all workflows, removed ADR-003 architectural improvements as no longer needed

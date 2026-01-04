@@ -315,7 +315,8 @@ async def execute(approved: ApprovedPreview) -> ExecuteWrapper:
 ---
 
 **See Also**:
-- [Project_HLD.md](../docs/architecture/Project_HLD.md) - Complete architecture overview
-- [GLOBAL_SPEC.md](../docs/architecture/GLOBAL_SPEC.md) - Universal contracts
-- [COMPONENT_STATUS.md](.claude/COMPONENT_STATUS.md) - Implementation progress
-- [CLAUDE_SETUP.md](.claude/CLAUDE_SETUP.md) - Full setup guide
+- [Project_HLD.md](Project_HLD.md) - Complete architecture overview
+- [GLOBAL_SPEC.md](GLOBAL_SPEC.md) - Universal contracts
+- [COMPONENT_STATUS.md](../../COMPONENT_STATUS.md) - Implementation progress
+- [DEVELOPMENT_WORKFLOW.md](../../DEVELOPMENT_WORKFLOW.md) - Full workflow guide
+- [PROJECT_STRUCTURE.md](../../PROJECT_STRUCTURE.md) - Complete directory structure

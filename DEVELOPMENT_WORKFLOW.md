@@ -31,7 +31,6 @@ Personal-agent/
 │   │   ├── create-component-spec.md
 │   │   ├── create-component-lld.md
 │   │   └── add-test-cases.md
-│   ├── CLAUDE_SETUP.md        # Claude Code setup guide
 │   ├── CLAUDE.md              # Project rules
 │   └── settings.json          # Permissions/MCP config
 │
@@ -62,7 +61,7 @@ Personal-agent/
             └── tasks.md
 │
 ├── COMPONENT_STATUS.md         # Implementation tracker (16 components)
-├── DIRECTORY_STRUCTURE.md      # Complete file organization
+├── docs/architecture/PROJECT_STRUCTURE.md # Complete file organization
 ├── DEVELOPMENT_WORKFLOW.md     # This file
 ├── QUICK_REFERENCE.md          # Fast lookup (roles, layers, commands)
 └── README.md                   # Project overview
@@ -454,3 +453,42 @@ The planner agent now generates **6-phase structured tasks** instead of basic li
 - Need decision? → Architect agent
 
 **No duplication, clear responsibilities, maximum flexibility.**
+
+---
+
+## Key Files Reference
+
+| Need | File |
+|------|------|
+| Fast lookup (roles, layers, patterns) | `docs/architecture/QUICK_REFERENCE.md` |
+| Component implementation status | `COMPONENT_STATUS.md` |
+| Development workflows | `DEVELOPMENT_WORKFLOW.md` (this file) |
+| Directory structure | `PROJECT_STRUCTURE.md` |
+| System architecture | `docs/architecture/Project_HLD.md` |
+| Universal contracts | `docs/architecture/GLOBAL_SPEC.md` |
+| Project rules | `.claude/CLAUDE.md` |
+
+---
+
+## Next Steps
+
+1. Check **COMPONENT_STATUS.md** to see what to build first
+2. Use **/primer** to understand the repo
+3. Pick a component from the critical path:
+   - PluginRegistry (source of truth for tools)
+   - Signer (plan signing with Ed25519)
+   - ProfileStore (user preferences)
+   - PlanLibrary (store past plans)
+4. Run **/specify** to create its SPEC
+5. Follow the full workflow above
+
+---
+
+## Tips for Efficient Usage
+
+1. **Always start with /primer** before making changes
+2. **Use QUICK_REFERENCE.md** for fast lookups
+3. **Check COMPONENT_STATUS.md** to see progress
+4. **Use architect agent** for decisions, not SPEC/LLD creation
+5. **Use quick-fix skill** only for tiny bugs (< 10 lines, < 3 files)
+6. **Update COMPONENT_STATUS.md** after completing components

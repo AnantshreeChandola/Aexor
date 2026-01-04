@@ -9,13 +9,13 @@ Role: Planner (dev-time, coding plan)
 
 Read first (in order):
 1. .specify/memory/constitution.md (PR rules, CI gates)
-2. docs/architecture/PROJECT_STRUCTURE.md (component-first structure)
+2. PROJECT_STRUCTURE.md (component-first structure)
 3. docs/architecture/GLOBAL_SPEC.md (Intent + Preview/Execute envelopes)
 4. docs/architecture/Project_HLD.md (system context, 4 layers, 16 components)
 5. docs/architecture/MODULAR_ARCHITECTURE.md (blast radius, fault isolation)
-6. specs/<spec-id>/SPEC.md (or usecases/<UseCase>/SPEC.md for use cases)
-7. components/<Name>/LLD.md (includes dependencies, architectural considerations)
-8. components/<Name>/dependencies.md (library deps, external services, internal deps)
+6. docs/architecture/adr/*.md (architectural decisions and context)
+7. specs/<spec-id>/SPEC.md (component and use case specifications)
+8. components/<Name>/LLD.md (includes integrated dependencies section and architectural considerations)
 
 Output Format:
 Write `components/<Name>/tasks.md` (or `usecases/<UseCase>/tasks.md`) with the following structure:
@@ -36,8 +36,8 @@ Tasks are organized by implementation phase, following the LLD architecture.
 
 ## Phase 0: Setup & Dependencies
 
-### Install Dependencies (from dependencies.md)
-- [ ] [T000] Install Python packages: pydantic, httpx, etc.
+### Install Dependencies (from LLD.md Section 7)
+- [ ] [T000] Install Python packages from LLD dependencies section
 - [ ] [T001] Verify external service access (if applicable)
 - [ ] [T002] Set up internal component dependencies
 
@@ -74,7 +74,7 @@ Tasks are organized by implementation phase, following the LLD architecture.
 ### Acceptance Criterion: AC-003 - <description from SPEC>
 
 - [ ] [T300] Create provider adapter (components/<Name>/adapters/<provider>.py)
-  - Implement required scopes (from dependencies.md)
+  - Implement required scopes (from LLD dependencies section)
   - Add circuit breaker (blast radius containment)
   - Add retry/backoff logic
 - [ ] [T301] Write adapter tests with mocks (tests/test_adapters.py)
@@ -131,13 +131,13 @@ Tasks are organized by implementation phase, following the LLD architecture.
 
 ## Dependencies
 
-**External** (from dependencies.md):
-- Python packages: pydantic, httpx
-- External services: Google Calendar API
+**External** (from LLD.md Section 7):
+- Python packages and versions from LLD dependencies section
+- External services and API requirements from LLD
 
-**Internal** (from dependencies.md):
-- ProfileStore (user preferences, timezone)
-- ContextRAG (relevant history)
+**Internal** (from LLD.md Section 7):
+- Component dependencies listed in LLD
+- Shared infrastructure utilities from LLD
 
 ## Architectural Considerations
 
@@ -154,7 +154,7 @@ Rules:
 - Map each SPEC acceptance criterion to a task phase
 - Follow LLD architecture (schemas → domain → service → adapters → api)
 - Include architectural safety tasks (blast radius, fault isolation, determinism)
-- Reference dependencies.md for setup tasks
+- Reference LLD.md Section 7 (Dependencies) for setup tasks
 - Test-first: Schema tests → Service tests → Adapter tests → Contract tests
 - No code changes in this phase; planning only
 - Target branch: feat/<area>-<short-desc> (never main)

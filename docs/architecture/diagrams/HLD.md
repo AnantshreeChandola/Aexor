@@ -11,15 +11,14 @@
   SIG --> PREV[Preview Orchestrator n8n, read-only]
   PREV -->|Preview card + evidence| U
   U -->|Approve Gate A/B/…| GATE[Approval Gates]
-  GATE --> EXE[n8n Execute short jobs via connectors]
-  GATE --> DUR[Temporal Durable Orchestrator long jobs]
+  GATE --> EXE[n8n Execute all workflows via connectors]
   EXE --> BIND[Binding Resolver plan → n8n node params]
   EXE --> CONN[n8n Connector Nodes GCal/Gmail/HTTP/Slack…]
-  DUR --> ACT[Temporal Activities HTTP/SDK calls as needed]
+  EXE --> SCHED[n8n Scheduling & Persistence for long jobs]
   CONN --> AUD[Audit & Metrics]
-  ACT --> AUD
+  SCHED --> AUD
   CONN --> PW[PlanWriter → Plan Library + History]
-  ACT --> PW
+  SCHED --> PW
   AUD --> U
   PW --> RAG
   ```

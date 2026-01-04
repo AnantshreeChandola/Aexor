@@ -5,7 +5,7 @@ description: Write a SPEC.md for a new component following the project's compone
 Read first:
 - `/docs/architecture/GLOBAL_SPEC.md`
 - `/docs/architecture/Project_HLD.md`
-- `/docs/architecture/PROJECT_STRUCTURE.md`
+- `/PROJECT_STRUCTURE.md`
 
 Identify which layer the component belongs to: Intake, Core, Runtime, or Platform.
 

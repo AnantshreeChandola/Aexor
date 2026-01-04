@@ -9,6 +9,6 @@ Architecture & scaffolding. Use existing structure; do not invent new folders.
 - If CI fails, keep iterating on the same branch until it’s green.
 - For Python services, follow `/docs/dev/PYTHON_GUIDE.md`.
 
-- `/docs/architecture/` — Project_HLD, GLOBAL_SPEC, PROJECT_STRUCTURE
+- `/docs/architecture/` — Project_HLD, GLOBAL_SPEC
 - `/tests/` — acceptance/contract tests
 - `/.github/workflows/ci.yml` — CI gates

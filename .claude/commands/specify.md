@@ -3,7 +3,7 @@ description: Create or update a feature specification using Spec Kit, aligned to
 ---
 
 /system
-Act in **workbench mode**: you will use Spec Kit to draft a spec in its workspace, not in components/. Do **not** modify files outside the Spec Kit output path. Do **not** push to main. After drafting, recommend the next step to promote the spec into `components/<Name>/SPEC.md` (the source of truth).
+Act in **workbench mode**: you will use Spec Kit to draft a spec in its workspace, not in components/. Do **not** modify files outside the Spec Kit output path. Do **not** push to main. After drafting, recommend the next step to promote the spec into `specs/<spec-id>/spec.md` (the source of truth).
 
 /user
 ## Inputs (ask if missing)
@@ -20,7 +20,7 @@ Act in **workbench mode**: you will use Spec Kit to draft a spec in its workspac
 
 2) Read canonical repo rules for content
    - .specify/memory/constitution.md (PR rules, no push to main, CI gates)
-   - docs/architecture/PROJECT_STRUCTURE.md (component-first rules)
+   - PROJECT_STRUCTURE.md (component-first rules)
    - docs/architecture/GLOBAL_SPEC.md (Intent + Preview/Execute envelopes, NFRs)
    - docs/architecture/Project_HLD.md (system context)
 
