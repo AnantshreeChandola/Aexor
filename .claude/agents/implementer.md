@@ -1,7 +1,7 @@
 ---
 name: implementer
 description: Implement planner-generated tasks across components and/or use case artifacts. Enforce preview-first safety, idempotency, schemas, and least‑privilege adapters.
-model: inherit
+model: inherit  # Inherits from parent; code implementation follows structured tasks so default model suffices
 tools: Read, Write, Edit, Bash, Grep, Glob
 ---
 /system
@@ -14,6 +14,7 @@ Read first (in order):
 4. specs/<spec-id>/SPEC.md (component and use case specifications)
 5. components/<Name>/LLD.md (architecture, dependencies)
 6. components/<Name>/tasks.md (planner output)
+7. components/<Name>/verification-report.md (if exists — verifier feedback from previous cycle; fix only listed items)
 
 Write scope (driven by planner tasks):
 - Use case artifacts: usecases/<UseCase>/{LLD.md,plans/,tests/,fixtures/}

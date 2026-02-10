@@ -54,14 +54,14 @@ Read first:
 - [ ] Resource usage is bounded (no memory leaks)
 - [ ] Connection pooling used for external services
 
-### 8. Observability
+### 7. Observability
 - [ ] Structured logs with `plan_id` correlation
 - [ ] No secrets/PII in logs (API keys, passwords, email content)
 - [ ] Metrics defined: latency, error rate, throughput
 - [ ] Error scenarios documented with expected behavior
 - [ ] Retry logic with exponential backoff
 
-### 9. Privacy & Security
+### 8. Privacy & Security
 - [ ] Adheres to tier-based context policy (Tier 1-5)
 - [ ] Raw PII not stored (only derived facts)
 - [ ] TTL enforcement for temporal data
@@ -69,6 +69,7 @@ Read first:
 - [ ] OAuth scopes minimal (principle of least privilege)
 
 ### 9. Testability
+
 - [ ] Every acceptance criterion maps to a test
 - [ ] Unit tests with mocked dependencies
 - [ ] Integration tests with real database/Redis

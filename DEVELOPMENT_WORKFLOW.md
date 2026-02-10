@@ -22,15 +22,14 @@ Personal-agent/
 │   │   ├── verifier.md        # Runs tests, validates
 │   │   ├── pr-manager.md      # Creates PR with evidence
 │   │   └── architect.md       # Makes architectural decisions (ADRs, trade-offs)
-│   ├── skills/                 # Quick helper skills (8 files)
+│   ├── skills/                 # Quick helper skills (7 files)
 │   │   ├── explain-component.md
 │   │   ├── review-plan-schema.md
 │   │   ├── review-architecture.md
 │   │   ├── quick-fix.md
 │   │   ├── update-component-status.md
-│   │   ├── create-component-spec.md
-│   │   ├── create-component-lld.md
-│   │   └── add-test-cases.md
+│   │   ├── add-test-cases.md
+│   │   └── async-python-patterns.md
 │   ├── CLAUDE.md              # Project rules
 │   └── settings.json          # Permissions/MCP config
 │
@@ -61,7 +60,7 @@ Personal-agent/
             └── tasks.md
 │
 ├── COMPONENT_STATUS.md         # Implementation tracker (16 components)
-├── docs/architecture/PROJECT_STRUCTURE.md # Complete file organization
+├── PROJECT_STRUCTURE.md                # Complete file organization
 ├── DEVELOPMENT_WORKFLOW.md     # This file
 ├── QUICK_REFERENCE.md          # Fast lookup (roles, layers, commands)
 └── README.md                   # Project overview
@@ -158,9 +157,8 @@ Skills are **fast shortcuts** that bypass workflows entirely.
 | `review-architecture` | Quick architectural review | Before major changes |
 | `review-plan-schema` | Validate plan JSON | Check plan structure |
 | `update-component-status` | Update tracker | After any workflow completes |
-| `create-component-spec` | Quick SPEC template | Bypass `/specify` for speed |
-| `create-component-lld` | Quick LLD template | Bypass `/design` for speed |
 | `add-test-cases` | Generate test templates | Quick test scaffolding |
+| `async-python-patterns` | Asyncio/concurrent patterns | Building async services |
 
 **Characteristics**:
 - ✅ Fastest (no validation, no branching)
@@ -334,8 +332,8 @@ The planner agent now generates **6-phase structured tasks** instead of basic li
 |------|-----------|-----|
 | **New feature (full validation)** | `/specify` → `/speckit.plan` → `/speckit.tasks` → `/speckit.implement` | Need validation gates, team collaboration |
 | **New feature (quick)** | `/specify` → `/design` → `/flow_orchestrate` | Solo dev, fast iteration |
-| **Quick SPEC template** | `create-component-spec` skill | Bypass workflows, no validation needed |
-| **Quick LLD template** | `create-component-lld` skill | Bypass workflows, no validation needed |
+| **Quick SPEC template** | `/specify` command | Fast SPEC creation with component/use case templates |
+| **Quick LLD template** | `/design` command | Fast LLD creation with architectural analysis |
 | **Architectural decision** | `architect` agent (manual) | Need trade-off analysis, ADR |
 | **Bug fix (tiny < 3 files)** | `quick-fix` skill | Typos, small logic errors |
 | **Bug fix (medium)** | `verifier` agent → `implementer` agent | Need test validation |

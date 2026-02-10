@@ -29,7 +29,7 @@ from .dependencies import get_plan_service, get_vector_service, get_analytics_se
 logger = logging.getLogger(__name__)
 
 # Create router for PlanLibrary endpoints
-router = APIRouter(prefix="/api/v1/plans", tags=["plans"])
+router = APIRouter(prefix="/plans", tags=["plans"])
 
 # Error handler for consistent error responses
 error_handler = ErrorHandlerMixin()

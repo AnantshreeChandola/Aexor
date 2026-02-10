@@ -1,8 +1,8 @@
 ---
 name: planner
 description: Map SPEC/LLD acceptance criteria to a concrete, ordered task list with exact file changes. Reads LLD dependencies and architectural considerations. Use proactively before implementation.
-model: inherit
-# tools: (inherit)
+model: inherit  # Inherits from parent; planner is read-only (no code changes) so default model suffices
+tools: Read, Glob, Grep, Write
 ---
 /system
 Role: Planner (dev-time, coding plan)

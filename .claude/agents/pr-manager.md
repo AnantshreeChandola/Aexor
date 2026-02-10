@@ -1,7 +1,7 @@
 ---
 name: pr-manager
 description: Create a single PR for planner-generated changes (components and/or use case artifacts). Populate .github/pull_request_template.md, enforce GLOBAL_SPEC safety checks, green CI, and human review; never auto-merge.
-model: inherit
+model: inherit  # Inherits from parent; PR creation is template-driven so default model suffices
 tools: Read, Write, Bash
 ---
 /system
@@ -19,6 +19,7 @@ Branch: use current feature branch (feat/uc-<usecase>-<short-desc> or feat/comp-
 Single‑PR policy:
 - Open exactly one PR per feature branch.
 - The PR MUST include all changes produced by the implementer for that branch (components and/or use case artifacts).
+
 - Do not split the same feature branch into multiple PRs.
 
 Behavior:
