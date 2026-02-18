@@ -1,6 +1,8 @@
-%% ProfileStore Flow Diagram
-%% Key operations: GET/SET Preference, GET/SET Consent
+# ProfileStore Flow Diagram
 
+Key operations: GET/SET Preference, GET/SET Consent
+
+```mermaid
 graph TD
     %% Entry points
     Start([Component calls ProfileStore])
@@ -106,3 +108,4 @@ graph TD
     class ReturnSuccess1,ReturnSuccess2,ReturnSuccess3,ReturnSuccess4,ReturnCached,ReturnConsent successNode
     class OpType,CheckConsent1,PrefExists1,SchemaValid,SensitiveCheck,DecryptCheck1,CheckCache decisionNode
     class GetPref,SetPref,GetConsent,SetConsent,DelPref,ValidateSchema,QueryDB1,UpsertDB,QueryUsers,UpdateUsers processNode
+```

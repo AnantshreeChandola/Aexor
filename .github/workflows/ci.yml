@@ -164,8 +164,14 @@ jobs:
       - name: Check if critical jobs passed
         run: |
           if [[ "${{ needs.lint.result }}" != "success" ]] || \
+             [[ "${{ needs.type-check.result }}" != "success" ]] || \
+             [[ "${{ needs.test.result }}" != "success" ]] || \
              [[ "${{ needs.schema-validation.result }}" != "success" ]]; then
             echo "✗ Critical checks failed"
+            echo "  lint: ${{ needs.lint.result }}"
+            echo "  type-check: ${{ needs.type-check.result }}"
+            echo "  test: ${{ needs.test.result }}"
+            echo "  schema-validation: ${{ needs.schema-validation.result }}"
             exit 1
           fi
-          echo "✅ All critical checks passed!"
+          echo "✅ All critical checks passed (lint, type-check, test, schema-validation)!"

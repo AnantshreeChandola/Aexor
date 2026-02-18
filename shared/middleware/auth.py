@@ -1,99 +1,155 @@
 """
-Auth Middleware - Header-Based MVP Implementation
+Auth Middleware — JWT Bearer Token Validation
 
-Extracts user identity and context tier from request headers.
-This is a simple MVP implementation for development.
+Validates Authorization: Bearer <jwt> header on every request.
+Extracts claims and populates request.state identically to Phase 1,
+so all downstream components are unchanged.
 
-TODO: Replace with JWT-based authentication in Phase 2 (production).
-
-Reference: SHARED_INFRASTRUCTURE.md §2.1
+Reference: SHARED_INFRASTRUCTURE.md §2.1 Phase 2
 """
+
+import logging
+import os
+from uuid import UUID
 
 from fastapi import Request, status
 from fastapi.responses import JSONResponse
+from jose import JWTError, jwt
 from starlette.middleware.base import BaseHTTPMiddleware
-from uuid import UUID
-import logging
 
 logger = logging.getLogger(__name__)
+
+JWT_ALGORITHM = "HS256"
+
+# Paths that bypass authentication entirely
+_BYPASS_PATHS = frozenset(
+    [
+        "/health",
+        "/docs",
+        "/redoc",
+        "/openapi.json",
+        "/auth/token",
+        "/auth/register",
+    ]
+)
+
+
+def _get_jwt_secret() -> str:
+    """Get JWT secret from environment."""
+    return os.environ.get("JWT_SECRET", "")
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
     """
-    Extract user context from request headers (MVP implementation).
+    Validate JWT Bearer token and populate request.state.
 
-    Reads the following headers:
-    - X-User-ID: UUID of authenticated user (required)
-    - X-Context-Tier: Consent tier (1-4, default: 1)
-    - X-User-Email: User email (optional, for logging)
+    Populates:
+        request.state.user_id     : UUID
+        request.state.context_tier: int
+        request.state.email       : str
 
-    Adds to request.state:
-    - user_id: UUID
-    - context_tier: int
-    - email: str
-
-    Returns 401 if X-User-ID header is missing or invalid.
-
-    Example:
-        >>> # In client request:
-        >>> headers = {
-        >>>     "X-User-ID": "b14025d0-e491-4558-a4d2-ce70609a6a92",
-        >>>     "X-Context-Tier": "3",
-        >>>     "X-User-Email": "test@example.com"
-        >>> }
-
-        >>> # In route handler:
-        >>> user_id = request.state.user_id  # UUID
-        >>> context_tier = request.state.context_tier  # int
+    Returns HTTP 401 for missing/invalid/expired tokens.
+    Bypasses auth for health, docs, and auth endpoints.
     """
 
     async def dispatch(self, request: Request, call_next):
-        # Skip auth for health check and docs
-        if request.url.path in ["/health", "/docs", "/redoc", "/openapi.json"]:
+        # Skip auth for public endpoints
+        if request.url.path in _BYPASS_PATHS:
             return await call_next(request)
 
-        # Extract user ID (required)
-        user_id_str = request.headers.get("X-User-ID")
-        if not user_id_str:
-            logger.warning(f"Missing X-User-ID header for {request.url.path}")
+        # Also bypass component-level health endpoints
+        if request.url.path.endswith("/health"):
+            return await call_next(request)
+
+        # Extract Bearer token
+        auth_header = request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            logger.warning(
+                "Missing or malformed Authorization header",
+                extra={"path": request.url.path},
+            )
             return JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                content={"detail": "Missing X-User-ID header"},
+                content={"detail": "Missing or invalid Authorization header"},
+                headers={"WWW-Authenticate": "Bearer"},
             )
 
-        # Validate and parse user ID
+        token = auth_header.split(" ", 1)[1]
+        if not token:
+            return JSONResponse(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                content={"detail": "Missing or invalid Authorization header"},
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        # Decode and validate JWT
+        secret = _get_jwt_secret()
+        if not secret:
+            logger.error("JWT_SECRET not configured")
+            return JSONResponse(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                content={"detail": "Authentication not configured"},
+            )
+
         try:
-            user_id = UUID(user_id_str)
+            payload = jwt.decode(token, secret, algorithms=[JWT_ALGORITHM])
+        except JWTError as exc:
+            logger.warning(
+                "JWT validation failed",
+                extra={"path": request.url.path, "error": str(exc)},
+            )
+            return JSONResponse(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                content={"detail": "Invalid or expired token"},
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        # Extract required claims
+        sub = payload.get("sub")
+        email = payload.get("email")
+        context_tier = payload.get("context_tier")
+
+        if not sub or not email or context_tier is None:
+            logger.warning(
+                "JWT missing required claims",
+                extra={"path": request.url.path},
+            )
+            return JSONResponse(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                content={"detail": "Token missing required claims"},
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        # Validate sub is a valid UUID
+        try:
+            user_id = UUID(sub)
         except ValueError:
-            logger.warning(f"Invalid X-User-ID format: {user_id_str}")
+            logger.warning(
+                "JWT sub claim is not a valid UUID",
+                extra={"sub": sub},
+            )
             return JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                content={"detail": f"Invalid X-User-ID format"},
+                content={"detail": "Invalid token subject"},
+                headers={"WWW-Authenticate": "Bearer"},
             )
 
-        # Extract context tier (optional, default: 1)
-        context_tier_str = request.headers.get("X-Context-Tier", "1")
-        try:
-            context_tier = int(context_tier_str)
-            if context_tier < 1 or context_tier > 4:
-                raise ValueError("Context tier must be between 1 and 4")
-        except ValueError as e:
-            logger.warning(f"Invalid X-Context-Tier: {context_tier_str}, using default tier 1")
+        # Clamp context_tier to valid range
+        if not isinstance(context_tier, int) or not (1 <= context_tier <= 4):
             context_tier = 1
 
-        # Extract email (optional)
-        email = request.headers.get("X-User-Email", "unknown@example.com")
-
-        # Add to request state
+        # Populate request.state — same interface as Phase 1
         request.state.user_id = user_id
         request.state.context_tier = context_tier
         request.state.email = email
 
         logger.debug(
-            f"Authenticated request: user_id={user_id}, "
-            f"context_tier={context_tier}, path={request.url.path}"
+            "JWT authenticated",
+            extra={
+                "user_id": str(user_id),
+                "context_tier": context_tier,
+                "path": request.url.path,
+            },
         )
 
-        # Continue processing request
-        response = await call_next(request)
-        return response
+        return await call_next(request)

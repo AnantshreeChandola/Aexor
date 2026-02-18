@@ -8,7 +8,7 @@ Act as a **read-only** primer. Do **not** modify files, run package installs, or
 ## What to read (in this order)
 /user
 1) **.specify/memory/constitution.md** — repo laws (no push to main, PR must link SPEC/LLD, CI is the gate)
-2) **docs/architecture/PROJECT_STRUCTURE.md** — component-first layout & rules
+2) **PROJECT_STRUCTURE.md** — component-first layout & rules
 3) **docs/architecture/GLOBAL_SPEC.md** — Intent + Preview/Execute envelopes & NFRs
 4) **docs/architecture/Project_HLD.md** — system diagram, boundaries, flows
 5) **.github/pull_request_template.md** — required links/checklist
@@ -22,7 +22,7 @@ Act as a **read-only** primer. Do **not** modify files, run package installs, or
 
 ## Optional quick scans (read-only helpers)
 - Run: `tree -L 2` to see top-level structure; if unavailable, `ls -la` by dirs
-- Run: `rg -n --hidden --glob '!**/.git/**' '(SPEC\.md|LLD\.md|response\.normalized\.json)' components/` to inventory component packets
+- Run: `rg -n --hidden --glob '!**/.git/**' '(LLD\.md|response\.normalized\.json)' components/` to inventory component implementation files
 - If available, use Serena search to locate key symbols or files. If Serena fails, fall back to `rg`.
 
 ## Output (keep it concise, but precise)
@@ -30,7 +30,7 @@ Act as a **read-only** primer. Do **not** modify files, run package installs, or
 - **Structure (bullets):** How components are organized (`api/`, `service/`, `domain/`, `adapters/`, `schemas/`, `tests/`), plus global docs/ci.
 - **Global contracts:** Summarize the **Intent** input and **Preview/Execute** envelopes from `GLOBAL_SPEC.md`.
 - **Key configs & dependencies:** Call out `pyproject.toml` (or `package.json`), `.claude/settings.json`, CI workflow, and anything notable (e.g., UV usage, Ruff, PyTest).
-- **Component status:** List any components found under `components/` with whether they have `SPEC.md`, `LLD.md`, and `schemas/response.normalized.json`. Note any missing required files.
+- **Component status:** List any components found under `components/` with whether they have `LLD.md` and `schemas/response.normalized.json`. Note corresponding SPEC files should be in `specs/` directory.
 - **Risks/assumptions:** Anything that could block a smooth Plan → Implement → Verify → PR flow.
 - **Next recommended command:** Exactly one of:
   - `/specify` (if no SPEC exists for the target component),

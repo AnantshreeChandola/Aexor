@@ -1,0 +1,117 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Plan Storage Request",
+  "description": "Schema for PlanLibrary plan storage input",
+  "type": "object",
+  "required": ["plan", "signature", "outcome", "metrics"],
+  "properties": {
+    "plan": {
+      "type": "object",
+      "required": ["plan_id", "graph", "meta"],
+      "properties": {
+        "plan_id": {
+          "type": "string",
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$",
+          "description": "ULID format plan identifier"
+        },
+        "graph": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "maxItems": 100,
+          "description": "Plan execution graph (steps)"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "intent_type": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "created_at": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          "required": ["intent_type"]
+        }
+      }
+    },
+    "signature": {
+      "type": "object",
+      "required": ["algorithm", "public_key", "signature_hex"],
+      "properties": {
+        "algorithm": {
+          "type": "string",
+          "enum": ["ed25519"]
+        },
+        "public_key": {
+          "type": "string",
+          "description": "Hex-encoded Ed25519 public key"
+        },
+        "signature_hex": {
+          "type": "string",
+          "description": "Hex-encoded Ed25519 signature"
+        }
+      }
+    },
+    "outcome": {
+      "type": "object",
+      "required": ["success", "execution_start", "execution_end", "total_steps"],
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "error_type": {
+          "type": ["string", "null"],
+          "maxLength": 64
+        },
+        "error_details": {
+          "type": ["object", "null"]
+        },
+        "execution_start": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "execution_end": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "total_steps": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "failed_step": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "context_data": {
+          "type": ["object", "null"]
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "required": ["execute_latency_ms"],
+      "properties": {
+        "preview_latency_ms": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "execute_latency_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "step_timings": {
+          "type": ["object", "null"]
+        },
+        "resource_usage": {
+          "type": ["object", "null"]
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}

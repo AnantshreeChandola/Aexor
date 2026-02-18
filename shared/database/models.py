@@ -28,6 +28,7 @@ class UserTable(Base):
     )
     email = Column(String(255), unique=True, nullable=False)
     full_name = Column(String(255), nullable=True)
+    password_hash = Column(String(255), nullable=True)
     context_tier = Column(Integer, nullable=False, default=1)
     created_at = Column(DateTime, nullable=False, server_default=text("NOW()"))
     updated_at = Column(DateTime, nullable=False, server_default=text("NOW()"))
@@ -80,11 +81,129 @@ class PreferenceTable(Base):
     )
 
 
+# PlanLibrary Tables - Owned by PlanLibrary component
+
+class PlanTable(Base):
+    """
+    Plans table - stores executed plans with signatures.
+    
+    Owned by PlanLibrary component.
+    """
+    __tablename__ = "plans"
+    
+    plan_id = Column(String(26), primary_key=True)  # ULID format
+    canonical_json = Column(JSONB, nullable=False)
+    signature_data = Column(JSONB, nullable=False)
+    intent_type = Column(String(64), nullable=False)
+    step_count = Column(Integer, nullable=False)
+    plan_hash = Column(String(64), nullable=False)  # SHA-256 hex
+    size_bytes = Column(Integer, nullable=False)
+    created_at = Column(DateTime, nullable=False)
+    stored_at = Column(DateTime, nullable=False, server_default=text("NOW()"))
+
+    __table_args__ = (
+        Index("idx_plans_intent_type", intent_type),
+        Index("idx_plans_stored_at", stored_at),
+        Index("idx_plans_hash", plan_hash),
+        Index("idx_plans_step_count", step_count),
+    )
+
+
+class PlanOutcomeTable(Base):
+    """
+    Plan outcomes table - stores execution results.
+    
+    Owned by PlanLibrary component.
+    """
+    __tablename__ = "plan_outcomes"
+    
+    outcome_id = Column(
+        SQLAlchemy_UUID(as_uuid=True), 
+        primary_key=True, 
+        server_default=text("gen_random_uuid()")
+    )
+    plan_id = Column(
+        String(26), 
+        ForeignKey("plans.plan_id", ondelete="CASCADE"),
+        nullable=False
+    )
+    success = Column(Boolean, nullable=False)
+    error_type = Column(String(64), nullable=True)
+    error_details = Column(JSONB, nullable=True)
+    execution_start = Column(DateTime, nullable=False)
+    execution_end = Column(DateTime, nullable=False)
+    total_steps = Column(Integer, nullable=False)
+    failed_step = Column(Integer, nullable=True)
+    context_data = Column(JSONB, nullable=True)
+
+    __table_args__ = (
+        Index("idx_plan_outcomes_plan_id", plan_id),
+        Index("idx_plan_outcomes_success", success),
+        Index("idx_plan_outcomes_execution_start", execution_start),
+    )
+
+
+class PlanEmbeddingTable(Base):
+    """
+    Plan embeddings table - stores vector embeddings for similarity search.
+    
+    Owned by PlanLibrary component. Requires pgvector extension.
+    """
+    __tablename__ = "plan_embeddings"
+    
+    embedding_id = Column(
+        SQLAlchemy_UUID(as_uuid=True), 
+        primary_key=True, 
+        server_default=text("gen_random_uuid()")
+    )
+    plan_id = Column(
+        String(26), 
+        ForeignKey("plans.plan_id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True  # One embedding per plan
+    )
+    # Note: vector column will be added via pgvector extension
+    # vector = Column(Vector(1536), nullable=False) 
+    model_version = Column(String(32), nullable=False, default="text-embedding-ada-002")
+    created_at = Column(DateTime, nullable=False, server_default=text("NOW()"))
+    vector_norm = Column(String, nullable=False)  # Store as JSON for now
+
+    __table_args__ = (
+        Index("idx_plan_embeddings_plan_id", plan_id),
+        Index("idx_plan_embeddings_created_at", created_at),
+    )
+
+
+class PlanMetricsTable(Base):
+    """
+    Plan metrics table - stores performance metrics.
+    
+    Owned by PlanLibrary component.
+    """
+    __tablename__ = "plan_metrics"
+    
+    metrics_id = Column(
+        SQLAlchemy_UUID(as_uuid=True), 
+        primary_key=True, 
+        server_default=text("gen_random_uuid()")
+    )
+    plan_id = Column(
+        String(26), 
+        ForeignKey("plans.plan_id", ondelete="CASCADE"),
+        nullable=False
+    )
+    preview_latency_ms = Column(Integer, nullable=True)
+    execute_latency_ms = Column(Integer, nullable=False)
+    step_timings = Column(JSONB, nullable=True)
+    resource_usage = Column(JSONB, nullable=True)
+
+    __table_args__ = (
+        Index("idx_plan_metrics_plan_id", plan_id),
+        Index("idx_plan_metrics_execute_latency", execute_latency_ms),
+    )
+
+
 # Add more shared models here as needed
 # class HistoryTable(Base):
 #     """History/interaction storage - owned by History component."""
-#     pass
-
-# class PlanTable(Base):
-#     """Plan storage - owned by PlanLibrary component."""
 #     pass

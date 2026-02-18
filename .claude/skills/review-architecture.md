@@ -2,6 +2,9 @@
 description: Review architectural decisions in SPEC/LLD for alignment with GLOBAL_SPEC and HLD principles.
 ---
 
+**Note**: This skill reviews **COMPONENTS** (building blocks like ProfileStore, Signer, ContextRAG). 
+For **USE CASES** (end-to-end workflows with preview/execute patterns), use a different review approach that focuses on the preview/execute model.
+
 Read first:
 - `/docs/architecture/Project_HLD.md`
 - `/docs/architecture/GLOBAL_SPEC.md`
@@ -9,15 +12,20 @@ Read first:
 
 ## Architectural Review Checklist
 
-### 1. Conformance to GLOBAL_SPEC
-- [ ] Uses Preview/Execute wrapper pattern
-- [ ] Preview mode is READ-ONLY (no mutations, no side effects)
-- [ ] Execute mode has idempotency keys (`plan_id:step:arg_hash`)
-- [ ] Intent input matches schema (intent, entities, constraints, tz)
-- [ ] Normalized payload structure documented
-- [ ] Error codes defined and descriptive
+### 1. Component Type Assessment
+**First, determine what type this component is:**
+- [ ] **Data Store Component** (ProfileStore, PlanLibrary) - Storage and retrieval
+- [ ] **Service Component** (Signer, ContextRAG) - Business logic 
+- [ ] **Orchestration Component** (PreviewOrchestrator) - Coordinates other components
+- [ ] **Use Case Implementation** - Implements preview/execute pattern (review separately)
 
-### 2. Layer Assignment
+### 2. Core Component Requirements
+- [ ] Clear, single responsibility (does one thing well)
+- [ ] Well-defined public interface (schemas, methods)
+- [ ] Error handling strategy documented
+- [ ] Logging strategy follows structured format
+
+### 3. Layer Assignment
 - [ ] Component fits into exactly one layer:
   - **Intake**: User request understanding (Intake, ContextRAG)
   - **Core**: Planning and memory (Planner, Signer, PlanLibrary, etc.)
@@ -25,60 +33,48 @@ Read first:
   - **Platform**: Infrastructure (Audit, API Gateway)
 - [ ] No cross-layer violations (e.g., Intake calling ExecuteOrchestrator directly)
 
-### 3. Preview-First Safety Model
-- [ ] Preview operations use mocks/stubs for external calls
-- [ ] Preview returns `can_execute: true/false` based on feasibility
-- [ ] No writes to database/external APIs in preview mode
-- [ ] Preview state caching declared if user makes selections
-- [ ] Execute steps reference cached state with `{{preview.cached_state.field}}`
+### 4. Component Interface Design
+- [ ] Schemas defined for all inputs/outputs (Pydantic models)
+- [ ] Methods are pure functions where possible (deterministic)
+- [ ] Async/await pattern used consistently for I/O operations
+- [ ] Type hints complete and accurate
+- [ ] Error cases explicitly handled and documented
 
-### 4. Idempotency & Compensation
-- [ ] Write operations declare idempotency strategy
-- [ ] Idempotency keys include: `plan_id`, `step`, `hash(args)`
-- [ ] Compensation operation declared in PluginRegistry (if reversible)
-- [ ] Non-reversible operations documented (e.g., "send_email": no compensation)
-- [ ] Saga pattern for multi-step transactions
-
-### 5. Resource Locking
-- [ ] Fine-grained locks declared (e.g., `calendar.alice.write`)
-- [ ] Read operations don't require locks
-- [ ] Coarse locks only for rate-limited resources
-- [ ] Lock scope minimal (avoid blocking unrelated operations)
-
-### 6. Dependencies
+### 5. Dependencies
 - [ ] Dependencies on other components are minimal and documented
 - [ ] No circular dependencies between components
 - [ ] External APIs accessed through adapters (not direct imports)
 - [ ] Shared contracts versioned (avoid breaking changes)
 
-### 7. Scalability & Performance
-- [ ] Can handle 100+ concurrent plans
-- [ ] Preview latency target: p95 < 800ms
-- [ ] Execute latency target: p95 < 2s
-- [ ] Database queries use indexes
+### 6. Scalability & Performance
+- [ ] Can handle concurrent operations efficiently
+- [ ] Database queries optimized with proper indexes
 - [ ] N+1 query problems avoided
 - [ ] Caching strategy defined for expensive operations
+- [ ] Resource usage is bounded (no memory leaks)
+- [ ] Connection pooling used for external services
 
-### 8. Observability
+### 7. Observability
 - [ ] Structured logs with `plan_id` correlation
 - [ ] No secrets/PII in logs (API keys, passwords, email content)
 - [ ] Metrics defined: latency, error rate, throughput
 - [ ] Error scenarios documented with expected behavior
 - [ ] Retry logic with exponential backoff
 
-### 9. Privacy & Security
+### 8. Privacy & Security
 - [ ] Adheres to tier-based context policy (Tier 1-5)
 - [ ] Raw PII not stored (only derived facts)
 - [ ] TTL enforcement for temporal data
 - [ ] Consent checks before accessing user data
 - [ ] OAuth scopes minimal (principle of least privilege)
 
-### 10. Testability
+### 9. Testability
+
 - [ ] Every acceptance criterion maps to a test
 - [ ] Unit tests with mocked dependencies
 - [ ] Integration tests with real database/Redis
 - [ ] Contract tests validate SPEC.md schema
-- [ ] Preview-execute consistency tests
+- [ ] Component interface tests (input/output validation)
 
 ## Review Output Format
 

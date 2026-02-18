@@ -10,17 +10,12 @@ Reference: LLD.md §6.1
 import logging
 from typing import Any
 from uuid import UUID
-from datetime import datetime
-from sqlalchemy import (
-    Column, String, Boolean, DateTime, UUID as SQLAlchemy_UUID, 
-    Index, text, select
-)
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import text, select
 
 from shared.database.adapter import get_database_adapter
-from shared.database.models import PreferenceTable, UserTable
+from shared.database.models import PreferenceTable
 from shared.database.error_handler import (
-    with_db_error_handling, with_user_existence_check, UserNotFoundError
+    with_db_error_handling, with_user_existence_check
 )
 from ..domain.models import PreferenceDB
 
