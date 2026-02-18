@@ -7,7 +7,6 @@ and embedding generation. Returns data in Evidence Item format.
 Reference: LLD.md, tasks.md T200
 """
 
-import asyncio
 import logging
 import time
 from datetime import datetime
@@ -50,7 +49,6 @@ class PlanService:
     def __init__(
         self,
         db_adapter: DatabaseAdapter,
-        vector_service: Any = None,
         signature_verifier: SignatureVerifier | None = None,
     ) -> None:
         """
@@ -58,11 +56,9 @@ class PlanService:
 
         Args:
             db_adapter: Database operations
-            vector_service: Vector/embedding operations (optional)
             signature_verifier: Signature verification (optional)
         """
         self.db = db_adapter
-        self.vector_service = vector_service
         self.signature_verifier = signature_verifier or SignatureVerifier()
         self.evidence_service = EvidenceService()
         logger.info(
@@ -212,28 +208,6 @@ class PlanService:
                 raise DuplicatePlanError(plan_id=plan_id)
             raise
 
-        # Decision Rule 9: Queue async embedding generation
-        embedding_queued = False
-        if self.vector_service is not None:
-            try:
-                plan_text = f"{intent_type}: {canonical[:500]}"
-                asyncio.create_task(
-                    self.vector_service.queue_embedding_generation(
-                        plan_id=plan_id,
-                        plan_text=plan_text,
-                    )
-                )
-                embedding_queued = True
-            except Exception as e:
-                logger.warning(
-                    "Failed to queue embedding generation",
-                    extra={
-                        "plan_id": plan_id,
-                        "error": str(e),
-                        "component": "PlanLibrary",
-                    },
-                )
-
         latency_ms = (time.time() - start_time) * 1000
         logger.info(
             "Plan stored successfully",
@@ -242,7 +216,6 @@ class PlanService:
                 "intent_type": intent_type,
                 "step_count": step_count,
                 "storage_latency_ms": round(latency_ms, 2),
-                "embedding_queued": embedding_queued,
                 "component": "PlanLibrary",
                 "operation": "store_plan",
             },
@@ -251,7 +224,6 @@ class PlanService:
         return StorePlanResponse(
             plan_id=plan_id,
             stored_at=now,
-            embedding_queued=embedding_queued,
         )
 
     async def get_plans_by_intent(

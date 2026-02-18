@@ -2,19 +2,20 @@
 PlanLibrary API Handler Tests
 
 Tests for API routes as thin wrappers around service layer.
-Uses mocked services following ProfileStore test patterns.
+Uses dependency_overrides following FastAPI testing patterns.
 
 Reference: tasks.md T402
 """
 
 import pytest
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from shared.schemas.evidence import EvidenceItem
+from shared.dependencies import get_plan_service, get_analytics_service
 
 from components.PlanLibrary.api.routes import router
 from components.PlanLibrary.domain.models import (
@@ -30,10 +31,18 @@ from components.PlanLibrary.domain.models import (
 VALID_ULID = "01HX1234567890ABCDEFGHJKMN"
 
 
-def _create_test_app():
+def _create_test_app(plan_service=None, analytics_service=None, db=None):
     """Create FastAPI app with PlanLibrary routes for testing."""
     app = FastAPI()
     app.include_router(router)
+
+    if plan_service is not None:
+        app.dependency_overrides[get_plan_service] = lambda: plan_service
+    if analytics_service is not None:
+        app.dependency_overrides[get_analytics_service] = lambda: analytics_service
+    if db is not None:
+        app.state.db = db
+
     return app
 
 
@@ -65,20 +74,17 @@ def _make_store_request():
 class TestStorePlanEndpoint:
     """Tests for POST /plans endpoint."""
 
-    @patch("components.PlanLibrary.api.routes.get_plan_service")
-    def test_store_plan_success(self, mock_get_service):
+    def test_store_plan_success(self):
         """POST /plans with valid data -- 200 success."""
         mock_service = MagicMock()
         mock_service.store_plan = AsyncMock(
             return_value=StorePlanResponse(
                 plan_id=VALID_ULID,
                 stored_at=datetime.utcnow(),
-                embedding_queued=True,
             )
         )
-        mock_get_service.return_value = mock_service
 
-        app = _create_test_app()
+        app = _create_test_app(plan_service=mock_service)
         client = TestClient(app)
 
         response = client.post("/plans", json=_make_store_request())
@@ -88,8 +94,7 @@ class TestStorePlanEndpoint:
         assert data["status"] == "ok"
         assert data["plan_id"] == VALID_ULID
 
-    @patch("components.PlanLibrary.api.routes.get_plan_service")
-    def test_store_plan_invalid_signature(self, mock_get_service):
+    def test_store_plan_invalid_signature(self):
         """POST /plans with invalid signature -- 400."""
         mock_service = MagicMock()
         mock_service.store_plan = AsyncMock(
@@ -97,9 +102,8 @@ class TestStorePlanEndpoint:
                 plan_id=VALID_ULID, reason="bad sig"
             )
         )
-        mock_get_service.return_value = mock_service
 
-        app = _create_test_app()
+        app = _create_test_app(plan_service=mock_service)
         client = TestClient(app)
 
         response = client.post("/plans", json=_make_store_request())
@@ -108,16 +112,14 @@ class TestStorePlanEndpoint:
         data = response.json()
         assert data["error_code"] == "INVALID_SIGNATURE"
 
-    @patch("components.PlanLibrary.api.routes.get_plan_service")
-    def test_store_plan_duplicate(self, mock_get_service):
+    def test_store_plan_duplicate(self):
         """POST /plans with duplicate plan_id -- 409."""
         mock_service = MagicMock()
         mock_service.store_plan = AsyncMock(
             side_effect=DuplicatePlanError(plan_id=VALID_ULID)
         )
-        mock_get_service.return_value = mock_service
 
-        app = _create_test_app()
+        app = _create_test_app(plan_service=mock_service)
         client = TestClient(app)
 
         response = client.post("/plans", json=_make_store_request())
@@ -126,8 +128,7 @@ class TestStorePlanEndpoint:
         data = response.json()
         assert data["error_code"] == "DUPLICATE_PLAN_ID"
 
-    @patch("components.PlanLibrary.api.routes.get_plan_service")
-    def test_store_plan_too_large(self, mock_get_service):
+    def test_store_plan_too_large(self):
         """POST /plans with oversized plan -- 413."""
         mock_service = MagicMock()
         mock_service.store_plan = AsyncMock(
@@ -135,9 +136,8 @@ class TestStorePlanEndpoint:
                 plan_id=VALID_ULID, reason="exceeds 100 steps"
             )
         )
-        mock_get_service.return_value = mock_service
 
-        app = _create_test_app()
+        app = _create_test_app(plan_service=mock_service)
         client = TestClient(app)
 
         response = client.post("/plans", json=_make_store_request())
@@ -150,8 +150,7 @@ class TestStorePlanEndpoint:
 class TestGetPlansByIntentEndpoint:
     """Tests for GET /plans/by-intent/{intent_type} endpoint."""
 
-    @patch("components.PlanLibrary.api.routes.get_plan_service")
-    def test_get_plans_by_intent(self, mock_get_service):
+    def test_get_plans_by_intent(self):
         """GET /plans/by-intent/{intent_type} returns Evidence Items."""
         evidence = EvidenceItem(
             type="plan",
@@ -166,9 +165,8 @@ class TestGetPlansByIntentEndpoint:
         mock_service.get_plans_by_intent = AsyncMock(
             return_value=[evidence]
         )
-        mock_get_service.return_value = mock_service
 
-        app = _create_test_app()
+        app = _create_test_app(plan_service=mock_service)
         client = TestClient(app)
 
         response = client.get("/plans/by-intent/test")
@@ -182,8 +180,7 @@ class TestGetPlansByIntentEndpoint:
 class TestGetPlanEndpoint:
     """Tests for GET /plans/{plan_id} endpoint."""
 
-    @patch("components.PlanLibrary.api.routes.get_plan_service")
-    def test_get_plan_found(self, mock_get_service):
+    def test_get_plan_found(self):
         """GET /plans/{plan_id} returns plan data when found."""
         mock_service = MagicMock()
         mock_service.get_plan_by_id = AsyncMock(
@@ -198,9 +195,8 @@ class TestGetPlanEndpoint:
                 created_at=datetime.utcnow(),
             )
         )
-        mock_get_service.return_value = mock_service
 
-        app = _create_test_app()
+        app = _create_test_app(plan_service=mock_service)
         client = TestClient(app)
 
         response = client.get(f"/plans/{VALID_ULID}")
@@ -209,14 +205,12 @@ class TestGetPlanEndpoint:
         data = response.json()
         assert data["status"] == "ok"
 
-    @patch("components.PlanLibrary.api.routes.get_plan_service")
-    def test_get_plan_not_found(self, mock_get_service):
+    def test_get_plan_not_found(self):
         """GET /plans/{plan_id} returns 404 when not found."""
         mock_service = MagicMock()
         mock_service.get_plan_by_id = AsyncMock(return_value=None)
-        mock_get_service.return_value = mock_service
 
-        app = _create_test_app()
+        app = _create_test_app(plan_service=mock_service)
         client = TestClient(app)
 
         response = client.get(f"/plans/{VALID_ULID}")
@@ -229,14 +223,12 @@ class TestGetPlanEndpoint:
 class TestHealthEndpoint:
     """Tests for GET /plans/health endpoint."""
 
-    @patch("components.PlanLibrary.adapters.db.DatabaseAdapter")
-    def test_health_check_healthy(self, mock_db_class):
+    def test_health_check_healthy(self):
         """GET /plans/health returns healthy status."""
         mock_db = MagicMock()
         mock_db.health_check = AsyncMock(return_value=True)
-        mock_db_class.return_value = mock_db
 
-        app = _create_test_app()
+        app = _create_test_app(db=mock_db)
         client = TestClient(app)
 
         response = client.get("/plans/health")
@@ -249,8 +241,7 @@ class TestHealthEndpoint:
 class TestErrorResponseFormat:
     """Tests for error response format consistency."""
 
-    @patch("components.PlanLibrary.api.routes.get_plan_service")
-    def test_error_response_has_required_fields(self, mock_get_service):
+    def test_error_response_has_required_fields(self):
         """All error responses match ErrorResponse schema."""
         mock_service = MagicMock()
         mock_service.store_plan = AsyncMock(
@@ -258,9 +249,8 @@ class TestErrorResponseFormat:
                 plan_id=VALID_ULID, reason="test"
             )
         )
-        mock_get_service.return_value = mock_service
 
-        app = _create_test_app()
+        app = _create_test_app(plan_service=mock_service)
         client = TestClient(app)
 
         response = client.post("/plans", json=_make_store_request())

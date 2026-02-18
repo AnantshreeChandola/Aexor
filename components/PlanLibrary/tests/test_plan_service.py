@@ -95,20 +95,10 @@ def mock_signature_verifier():
 
 
 @pytest.fixture
-def mock_vector_service():
-    """Create mock vector service."""
-    service = MagicMock()
-    service.queue_embedding_generation = AsyncMock(return_value=True)
-    service.similarity_search = AsyncMock(return_value=[])
-    return service
-
-
-@pytest.fixture
-def plan_service(mock_db_adapter, mock_vector_service, mock_signature_verifier):
+def plan_service(mock_db_adapter, mock_signature_verifier):
     """Create PlanService with mocked dependencies."""
     return PlanService(
         db_adapter=mock_db_adapter,
-        vector_service=mock_vector_service,
         signature_verifier=mock_signature_verifier,
     )
 

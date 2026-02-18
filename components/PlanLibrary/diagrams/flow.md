@@ -53,44 +53,30 @@ graph TD
     I --> J[Apply Result Limit]
     J --> K[Convert to Evidence Items]
     K --> L[Return Similarity Results]
-    
-    %% Cache check branch
-    A --> M{Check Redis Cache}
-    M -->|Hit| N[Return Cached Results]
-    M -->|Miss| B
-    
-    %% Store results in cache
-    L --> O[Cache Results with TTL]
-    
+
     %% Styling
     classDef start fill:#e1f5fe
     classDef decision fill:#fff3e0
     classDef process fill:#f3e5f5
     classDef storage fill:#e8f5e8
-    classDef cache fill:#fce4ec
-    
+
     class A start
-    class C,M decision
+    class C decision
     class B,E,F,G,H,I,J,K,L process
-    class O storage
-    class N,O cache
 ```
 
 ## Intent-Based Query Flow
 
 ```mermaid
 graph TD
-    A[Planner requests plans by intent] --> B{Check Cache}
-    B -->|Hit| C[Return Cached Results]
-    B -->|Miss| D[Query Database by Intent Type]
+    A[Planner requests plans by intent] --> D[Query Database by Intent Type]
     D --> E[JOIN plans with plan_success_rates]
     E --> F[Filter by Success Threshold]
     F --> G[Filter by Min Execution Count]
     G --> H[Order by Success Rate DESC]
     H --> I[Apply Result Limit]
     I --> J[Convert to Plan Patterns]
-    J --> K[Cache Results]
-    K --> L[Return Query Results]
+    J --> L[Return Query Results]
     
     %% Error handling
     D --> M{DB Connection Error?}
@@ -104,13 +90,11 @@ graph TD
     classDef decision fill:#fff3e0
     classDef process fill:#f3e5f5
     classDef error fill:#ffebee
-    classDef cache fill:#fce4ec
-    
+
     class A start
-    class B,M,O decision
+    class M,O decision
     class D,E,F,G,H,I,J,L process
     class P error
-    class C,K cache
 ```
 
 ## Error Handling Flows
@@ -196,13 +180,12 @@ graph TD
     %% Background view refresh
     J[Plan Outcome Stored] --> K[Trigger View Refresh]
     K --> L[Recalculate Success Rates]
-    L --> M[Update Cached Statistics]
+    L --> M[Recalculate Success Rates]
     
     %% Styling
     classDef query fill:#e1f5fe
     classDef calc fill:#f3e5f5
     classDef update fill:#fff3e0
-    
     class A,B,I query
     class C,D,E,F,G,H calc
     class J,K,L,M update
@@ -217,27 +200,19 @@ sequenceDiagram
     participant PL as PlanLibrary
     participant SV as SignatureVerifier
     participant DB as PostgreSQL
-    participant VS as VectorService
-    participant OAI as OpenAI API
-    
+
     Note over PW: Plan execution completed
     PW->>+PL: POST /plans (plan, signature, outcome, metrics)
     PL->>+SV: verify_plan_signature(plan, signature)
     SV-->>-PL: signature_valid: true
-    
+
     PL->>+DB: BEGIN TRANSACTION
     PL->>DB: INSERT INTO plans
-    PL->>DB: INSERT INTO plan_outcomes  
+    PL->>DB: INSERT INTO plan_outcomes
     PL->>DB: INSERT INTO plan_metrics
     DB-->>-PL: COMMIT SUCCESS
-    
-    PL->>VS: queue_embedding_generation(plan_id, plan_text)
-    PL-->>-PW: 200 OK {plan_id, stored_at, embedding_queued: true}
-    
-    Note over VS: Background Process
-    VS->>+OAI: generate_embedding(plan_text)
-    OAI-->>-VS: embedding_vector[1536]
-    VS->>DB: INSERT INTO plan_embeddings
+
+    PL-->>-PW: 200 OK {plan_id, stored_at}
 ```
 
 ### ContextRAG → PlanLibrary Query
@@ -245,26 +220,21 @@ sequenceDiagram
 sequenceDiagram
     participant CR as ContextRAG
     participant PL as PlanLibrary
-    participant Redis as Redis Cache
     participant DB as PostgreSQL
     participant OAI as OpenAI API
-    
+
     Note over CR: Need similar plan patterns
     CR->>+PL: similarity_search("schedule meeting with executive")
-    
-    PL->>+Redis: GET cached_query_hash
-    Redis-->>-PL: CACHE_MISS
-    
+
     PL->>+OAI: generate_embedding(query_text)
     OAI-->>-PL: query_vector[1536]
-    
+
     PL->>+DB: SELECT plans JOIN embeddings WHERE similarity >= threshold
     DB-->>-PL: similarity_results[]
-    
+
     PL->>PL: convert_to_evidence_items(results)
-    PL->>Redis: SET cached_query_hash, TTL=300s
     PL-->>-CR: evidence_items[]
-    
+
     Note over CR: Evidence Items used in planning
 ```
 
@@ -277,7 +247,6 @@ sequenceDiagram
 - **Purple boxes**: Data processing and transformations
 - **Green boxes**: Successful outcomes and storage operations
 - **Red boxes**: Error conditions and failures
-- **Pink boxes**: Caching operations
 
 ## Performance Annotations
 

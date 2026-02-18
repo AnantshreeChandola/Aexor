@@ -81,12 +81,16 @@ class SharedDatabaseAdapter:
         
         logger.info("Shared database adapter initialized")
 
-    async def get_session(self) -> AsyncSession:
+    def get_session(self) -> AsyncSession:
         """
-        Get async database session.
-        
+        Get async database session as context manager.
+
+        Usage:
+            async with adapter.get_session() as session:
+                ...
+
         Returns:
-            AsyncSession: Database session
+            AsyncSession (async context manager)
         """
         return self.async_session()
 

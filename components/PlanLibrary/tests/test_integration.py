@@ -2,7 +2,7 @@
 PlanLibrary Integration Tests
 
 End-to-end flow tests with mocked database.
-Tests service layer integration and graceful degradation.
+Tests service layer integration.
 
 Reference: tasks.md T601
 """
@@ -15,15 +15,12 @@ from uuid import uuid4
 from shared.schemas.evidence import EvidenceItem
 
 from components.PlanLibrary.domain.models import (
-    EmbeddingServiceError,
     PlanDB,
-    SimilarityMatch,
     StorePlanResponse,
 )
 from components.PlanLibrary.service.analytics_service import AnalyticsService
 from components.PlanLibrary.service.evidence_service import EvidenceService
 from components.PlanLibrary.service.plan_service import PlanService
-from components.PlanLibrary.service.vector_service import VectorService
 
 
 VALID_ULID = "01HX1234567890ABCDEFGHJKMN"
@@ -77,23 +74,6 @@ def mock_db():
 
 
 @pytest.fixture
-def mock_vector_adapter():
-    """Create mock vector adapter."""
-    adapter = MagicMock()
-    adapter.similarity_search = AsyncMock(return_value=[])
-    adapter.store_embedding = AsyncMock(return_value=True)
-    return adapter
-
-
-@pytest.fixture
-def mock_embedding_client():
-    """Create mock embedding client."""
-    client = MagicMock()
-    client.generate_embedding = AsyncMock(return_value=[0.1] * 1536)
-    return client
-
-
-@pytest.fixture
 def mock_sig_verifier():
     """Create mock signature verifier."""
     verifier = MagicMock()
@@ -109,14 +89,8 @@ class TestStoreThenQuery:
         self, mock_db, mock_sig_verifier
     ):
         """Store plan then query by intent returns evidence items."""
-        vector_service = MagicMock()
-        vector_service.queue_embedding_generation = AsyncMock(
-            return_value=True
-        )
-
         service = PlanService(
             db_adapter=mock_db,
-            vector_service=vector_service,
             signature_verifier=mock_sig_verifier,
         )
 
@@ -149,58 +123,6 @@ class TestStoreThenQuery:
         assert isinstance(evidence[0], EvidenceItem)
         assert evidence[0].type == "plan"
         assert evidence[0].tier == 3
-
-
-class TestStoreThenSimilaritySearch:
-    """Test store plan -> similarity search flow."""
-
-    @pytest.mark.asyncio
-    async def test_store_and_similarity_search(
-        self,
-        mock_db,
-        mock_vector_adapter,
-        mock_embedding_client,
-        mock_sig_verifier,
-    ):
-        """Store plan then find via similarity search."""
-        vector_svc = VectorService(
-            vector_adapter=mock_vector_adapter,
-            embedding_client=mock_embedding_client,
-        )
-
-        plan_service = PlanService(
-            db_adapter=mock_db,
-            vector_service=vector_svc,
-            signature_verifier=mock_sig_verifier,
-        )
-
-        # Step 1: Store plan
-        result = await plan_service.store_plan(
-            plan=_make_plan_data(),
-            signature=_make_signature(),
-            outcome=_make_outcome(),
-            metrics=_make_metrics(),
-        )
-        assert result.plan_id == VALID_ULID
-
-        # Step 2: Similarity search
-        mock_vector_adapter.similarity_search.return_value = [
-            SimilarityMatch(
-                plan_id=VALID_ULID,
-                similarity_score=0.9,
-                success_rate=0.85,
-                intent_type="schedule_meeting",
-                pattern_summary="Schedule meeting plan with 3 steps",
-            ),
-        ]
-
-        evidence = await vector_svc.similarity_search(
-            query_text="book a meeting",
-            similarity_threshold=0.5,
-        )
-
-        assert len(evidence) == 1
-        assert evidence[0].type == "plan"
 
 
 class TestStoreThenAnalytics:
@@ -264,87 +186,6 @@ class TestStoreFailureOutcome:
             success_threshold=0.7,
         )
         assert len(evidence) == 0
-
-
-class TestGracefulDegradation:
-    """Test graceful degradation when services are unavailable."""
-
-    @pytest.mark.asyncio
-    async def test_plan_stored_without_embedding(
-        self, mock_db, mock_sig_verifier
-    ):
-        """Plan stored even when embedding API is down."""
-        mock_vector_svc = MagicMock()
-        mock_vector_svc.queue_embedding_generation = AsyncMock(
-            side_effect=EmbeddingServiceError("API down")
-        )
-
-        service = PlanService(
-            db_adapter=mock_db,
-            vector_service=mock_vector_svc,
-            signature_verifier=mock_sig_verifier,
-        )
-
-        # Should succeed even with embedding failure
-        result = await service.store_plan(
-            plan=_make_plan_data(),
-            signature=_make_signature(),
-            outcome=_make_outcome(),
-            metrics=_make_metrics(),
-        )
-
-        assert result.plan_id == VALID_ULID
-        mock_db.store_plan_transaction.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_similarity_search_returns_empty_on_embedding_failure(
-        self, mock_vector_adapter, mock_embedding_client
-    ):
-        """Similarity search returns empty when embedding fails."""
-        mock_embedding_client.generate_embedding.side_effect = (
-            EmbeddingServiceError("Circuit breaker open")
-        )
-
-        svc = VectorService(
-            vector_adapter=mock_vector_adapter,
-            embedding_client=mock_embedding_client,
-        )
-
-        result = await svc.similarity_search(query_text="test")
-        assert result == []
-
-
-class TestPlanServiceVectorServiceIntegration:
-    """Test PlanService + VectorService integration."""
-
-    @pytest.mark.asyncio
-    async def test_embedding_queued_after_storage(
-        self,
-        mock_db,
-        mock_vector_adapter,
-        mock_embedding_client,
-        mock_sig_verifier,
-    ):
-        """Embedding is queued after plan is stored."""
-        vector_svc = VectorService(
-            vector_adapter=mock_vector_adapter,
-            embedding_client=mock_embedding_client,
-        )
-
-        service = PlanService(
-            db_adapter=mock_db,
-            vector_service=vector_svc,
-            signature_verifier=mock_sig_verifier,
-        )
-
-        result = await service.store_plan(
-            plan=_make_plan_data(),
-            signature=_make_signature(),
-            outcome=_make_outcome(),
-            metrics=_make_metrics(),
-        )
-
-        assert result.embedding_queued is True
 
 
 class TestEvidenceServiceIntegration:

@@ -15,7 +15,6 @@ from shared.api.error_handlers import ErrorResponse
 
 from ..domain.models import (
     DuplicatePlanError,
-    EmbeddingServiceError,
     InvalidQueryError,
     InvalidSignatureError,
     PlanNotFoundError,
@@ -124,27 +123,6 @@ class PlanLibraryErrorHandler:
             ).model_dump(),
         )
 
-    @staticmethod
-    def handle_embedding_service_error(
-        error: EmbeddingServiceError,
-    ) -> JSONResponse:
-        """Handle EmbeddingServiceError (503)."""
-        logger.error(
-            "Embedding service error",
-            extra={
-                "reason": error.reason,
-                "component": "PlanLibrary",
-            },
-        )
-        return JSONResponse(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            content=ErrorResponse(
-                error_code="EMBEDDING_SERVICE_ERROR",
-                message="Embedding service temporarily unavailable",
-                details={"reason": error.reason},
-            ).model_dump(),
-        )
-
     def handle_service_errors(self, error: Exception) -> JSONResponse:
         """
         Handle all PlanLibrary service errors.
@@ -167,8 +145,6 @@ class PlanLibraryErrorHandler:
             return self.handle_invalid_query(error)
         if isinstance(error, PlanNotFoundError):
             return self.handle_plan_not_found(error)
-        if isinstance(error, EmbeddingServiceError):
-            return self.handle_embedding_service_error(error)
         if isinstance(error, ValueError):
             return JSONResponse(
                 status_code=status.HTTP_400_BAD_REQUEST,

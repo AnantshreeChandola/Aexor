@@ -47,6 +47,12 @@ dependencies = [
     # Cryptography (for plan signing)
     "cryptography>=41.0",
     "pynacl>=1.5.0",
+    # JWT Authentication
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4,<2.0",
+    "bcrypt>=4.0,<5.0",
+    "python-multipart>=0.0.6",
+    "email-validator>=2.0.0",
     # Structured Logging
     "structlog>=24.1.0",
     "python-json-logger>=2.0.7",
@@ -198,5 +204,12 @@ module = [
     "temporalio.*",
     "anthropic.*",
     "openai.*",
+]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = [
+    "jose.*",
+    "passlib.*",
 ]
 ignore_missing_imports = true

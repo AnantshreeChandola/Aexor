@@ -1,8 +1,8 @@
 # Modular Architecture — Layered Component Tree
 
 **Status:** Active
-**Version:** 1.0
-**Conforms to:** GLOBAL_SPEC.md v2, Project_HLD.md v3.4
+**Version:** 1.1
+**Conforms to:** GLOBAL_SPEC.md v2, Project_HLD.md v4.3
 
 ---
 
@@ -68,16 +68,16 @@ Each component's database dependencies, component dependencies, and external ser
                               ▼
     ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
     │ ContextRAG       │  │ Planner          │  │ Signer           │
-    │                  │  │                  │  │                  │
-    │ • DB: None       │  │ • DB: None       │  │ • DB: None       │
-    │   (queries only) │  │ • Deps:          │  │ • Deps: None     │
-    │ • Deps:          │  │   - ContextRAG   │  │ • Ext:           │
-    │   - ProfileStore │  │   - PluginReg    │  │   cryptography   │
-    │   - History      │  │ • Ext:           │  │   (Ed25519)      │
-    │   - PlanLibrary  │  │   Anthropic API  │  └──────────────────┘
-    │   - VectorIndex  │  └──────────────────┘
-    │ • Ext:           │
-    │   OpenAI (embed) │  ┌──────────────────┐  ┌──────────────────┐
+    │ (context         │  │                  │  │                  │
+    │  assembler)      │  │ • DB: None       │  │ • DB: None       │
+    │ • DB: None       │  │ • Deps:          │  │ • Deps: None     │
+    │   (queries only) │  │   - ContextRAG   │  │ • Ext:           │
+    │ • Deps:          │  │   - PluginReg    │  │   cryptography   │
+    │   - ProfileStore │  │ • Ext:           │  │   (Ed25519)      │
+    │   - History      │  │   Anthropic API  │  └──────────────────┘
+    │   - PlanLibrary  │  └──────────────────┘
+    │ • Ext: None      │
+    │                  │  ┌──────────────────┐  ┌──────────────────┐
     └──────────────────┘  │ PluginRegistry   │  │ Audit            │
                           │                  │  │                  │
                           │ • DB: None       │  │ • DB: PostgreSQL │
@@ -125,12 +125,8 @@ Each component's database dependencies, component dependencies, and external ser
     │     plans,       │
     │     signatures,  │
     │     outcomes     │
-    │ • Deps:          │
-    │   - VectorIndex  │
-    │     (for         │
-    │      retrieval)  │
-    │ • Ext:           │
-    │   OpenAI (embed) │
+    │ • Deps: None     │
+    │ • Ext: None      │
     └──────────────────┘
 ```
 
@@ -144,13 +140,13 @@ The **Memory Layer** is a cohesive module containing all database-interaction co
 memory/
 ├── ProfileStore/      # User preferences, consent
 ├── History/           # Normalized outcome facts
-├── VectorIndex/       # Semantic similarity search
+├── VectorIndex/       # Semantic similarity search (deferred — see HLD §12)
 └── PlanLibrary/       # Plan storage + retrieval
 ```
 
 **Shared Characteristics:**
 - All interact directly with PostgreSQL
-- VectorIndex uses pgvector extension
+- VectorIndex uses pgvector extension (when implemented)
 - Provide CRUD operations for upper layers
 - No business logic (thin adapters)
 - Reusable across services
@@ -250,9 +246,9 @@ PlanLibrary
 │   ├── PostgreSQL: plans, plan_signatures, plan_outcomes
 │   └── Redis: plan_cache:{plan_id}
 ├── Component Dependencies
-│   └── → VectorIndex (for semantic plan retrieval)
+│   └── (none - foundation component)
 └── External Dependencies
-    └── OpenAI API (embeddings for plan indexing)
+    └── (none)
 ```
 
 ---
@@ -272,16 +268,15 @@ Intake
 
 #### ContextRAG
 ```
-ContextRAG
+ContextRAG (context assembler — structured queries, not embedding-based RAG)
 ├── Database Dependencies
 │   └── (none - queries via component dependencies)
 ├── Component Dependencies
 │   ├── → ProfileStore (Tier 2: stable prefs)
 │   ├── → History (Tier 3: recent history)
-│   ├── → PlanLibrary (Tier 3: successful plans)
-│   └── → VectorIndex (semantic retrieval)
+│   └── → PlanLibrary (Tier 3: successful plans)
 └── External Dependencies
-    └── OpenAI API (embedding query text)
+    └── (none)
 ```
 
 #### Planner
@@ -326,9 +321,9 @@ PlanWriter
 ├── Component Dependencies
 │   ├── → PlanLibrary (persist outcomes)
 │   ├── → History (persist facts)
-│   └── → VectorIndex (trigger re-indexing)
+│   └── → VectorIndex (trigger re-indexing — deferred, see HLD §12)
 └── External Dependencies
-    └── OpenAI API (embeddings for new facts)
+    └── OpenAI API (embeddings for new facts — deferred with VectorIndex)
 ```
 
 #### Audit
@@ -454,7 +449,6 @@ DurableOrchestrator
 │     │- ProfileStore (prefs)  │                          │      │
 │     │- History (facts)       │                          │      │
 │     │- PlanLibrary (plans)   │                          │      │
-│     │- VectorIndex (search)  │                          │      │
 │     └───────────┬────────────┘                          │      │
 └─────────────────┼───────────────────────────────────────┼──────┘
                   │                                       │
@@ -471,7 +465,6 @@ DurableOrchestrator
 │ DATABASE LAYER                                                  │
 │  ┌────────────┐  ┌────────────┐                                │
 │  │ PostgreSQL │  │   Redis    │                                │
-│  │  + pgvector│  │            │                                │
 │  └────────────┘  └────────────┘                                │
 └─────────────────────────────────────────────────────────────────┘
 
@@ -557,11 +550,11 @@ DurableOrchestrator
 **Can build in parallel:**
 - ProfileStore
 - History
-- VectorIndex
-- PlanLibrary (depends on VectorIndex schemas only)
+- PlanLibrary
+- VectorIndex (deferred — see HLD §12)
 
 **Timeline:** Sprint 1 (2 weeks)
-**Agents:** 4 parallel agents, one per component
+**Agents:** 3 parallel agents (VectorIndex deferred)
 
 ---
 
@@ -996,9 +989,9 @@ CREATE TABLE audit_events (...);
    - Sessions, tokens, idempotency keys, preview state caching
    - Short TTLs prevent state accumulation
 
-4. **PostgreSQL + pgvector for Persistent State**
+4. **PostgreSQL for Persistent State** (pgvector deferred with VectorIndex)
    - Relational data (profiles, plans, history)
-   - Vector search (semantic retrieval)
+   - Vector search deferred until structured queries prove insufficient (see HLD §12)
    - Single database reduces operational complexity
 
 5. **Component Ownership**
@@ -1014,7 +1007,7 @@ CREATE TABLE audit_events (...);
 
 ## Next Steps
 
-1. **Implement Memory Module** (ProfileStore, History, VectorIndex, PlanLibrary)
+1. **Implement Memory Module** (ProfileStore, History, PlanLibrary — VectorIndex deferred)
 2. **Set up database schemas** and migrations
 3. **Build Security & Config** (Signer, PluginRegistry, Audit)
 4. **Implement Planning Layer** (Intake → ContextRAG → Planner)

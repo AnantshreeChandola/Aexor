@@ -59,14 +59,6 @@ class PlanTooLargeError(PlanLibraryError):
         super().__init__(f"Plan {plan_id} too large: {reason}")
 
 
-class EmbeddingServiceError(PlanLibraryError):
-    """Raised when embedding generation fails."""
-
-    def __init__(self, reason: str = "Embedding generation failed"):
-        self.reason = reason
-        super().__init__(reason)
-
-
 class InvalidQueryError(PlanLibraryError):
     """Raised when query parameters are invalid."""
 
@@ -149,21 +141,6 @@ class PlanOutcomeDB(BaseModel):
     context_data: dict[str, Any] | None = None
 
 
-class PlanEmbeddingDB(BaseModel):
-    """
-    Database model for plan embedding records.
-
-    Maps to PlanEmbeddingTable in shared/database/models.py.
-    """
-
-    embedding_id: UUID = Field(default_factory=uuid4)
-    plan_id: str = Field(..., min_length=26, max_length=26)
-    vector: list[float] = Field(..., min_length=1536, max_length=1536)
-    model_version: str = "text-embedding-ada-002"
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    vector_norm: float
-
-
 class PlanMetricsDB(BaseModel):
     """
     Database model for plan metrics records.
@@ -215,9 +192,6 @@ class StorePlanResponse(BaseModel):
     status: Literal["ok"] = "ok"
     plan_id: str
     stored_at: datetime
-    embedding_queued: bool = False
-
-
 class QueryPlansRequest(BaseModel):
     """Request model for querying plans by intent."""
 
@@ -237,15 +211,6 @@ class QueryPlansRequest(BaseModel):
         return v
 
 
-class SimilaritySearchRequest(BaseModel):
-    """Request model for similarity search."""
-
-    query_text: str = Field(..., min_length=1, max_length=2000)
-    similarity_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
-    limit: int = Field(default=10, ge=1, le=100)
-    success_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
-
-
 class PlanPattern(BaseModel):
     """Plan pattern summary for analytics and evidence items."""
 
@@ -254,16 +219,6 @@ class PlanPattern(BaseModel):
     success_rate: float = Field(..., ge=0.0, le=1.0)
     avg_execution_time_ms: float = Field(..., ge=0.0)
     steps_count: int = Field(..., ge=0)
-    pattern_summary: str
-
-
-class SimilarityMatch(BaseModel):
-    """A single similarity search result."""
-
-    plan_id: str
-    similarity_score: float = Field(..., ge=0.0, le=1.0)
-    success_rate: float = Field(..., ge=0.0, le=1.0)
-    intent_type: str
     pattern_summary: str
 
 

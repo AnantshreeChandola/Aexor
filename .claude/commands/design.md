@@ -79,7 +79,11 @@ Act as a design orchestrator. Use Spec Kit's `/speckit.plan` workflow to generat
      - Required scopes (read-only for preview, write for execute)
      - **Idempotency**: Both for provider calls (plan_id:step:arg_hash) AND for the component's own storage APIs (per GLOBAL_SPEC §8 — duplicate writes should return original result, not error)
      - Compensation operations (if declared)
-     - **Shared Infrastructure Usage** - From PYTHON_GUIDE.md
+     - **Shared Infrastructure Usage** - From PYTHON_GUIDE.md and Project_HLD.md §7
+       - **Dependency injection**: Services are wired via lifespan-based DI (see Project_HLD.md §7 "Application Factory & Dependency Injection"). New components must:
+         1. Initialize their service in `shared/app.py` lifespan function
+         2. Add a `Depends()` function in `shared/dependencies.py`
+         3. Use `Depends(get_<service>)` in route handlers — never construct services in routes
        - Database: Use shared/database/adapter.py (never duplicate connection setup)
        - Error handling: Use decorators from shared/database/error_handler.py
        - API errors: Use shared/api/error_handlers.py (ErrorHandlerMixin)

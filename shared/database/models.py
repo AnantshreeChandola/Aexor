@@ -28,6 +28,7 @@ class UserTable(Base):
     )
     email = Column(String(255), unique=True, nullable=False)
     full_name = Column(String(255), nullable=True)
+    password_hash = Column(String(255), nullable=True)
     context_tier = Column(Integer, nullable=False, default=1)
     created_at = Column(DateTime, nullable=False, server_default=text("NOW()"))
     updated_at = Column(DateTime, nullable=False, server_default=text("NOW()"))

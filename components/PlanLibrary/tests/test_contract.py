@@ -18,7 +18,6 @@ from shared.schemas.evidence import EvidenceItem
 
 from components.PlanLibrary.domain.models import (
     DuplicatePlanError,
-    EmbeddingServiceError,
     InvalidQueryError,
     InvalidSignatureError,
     PlanDB,
@@ -186,7 +185,6 @@ class TestErrorCodeContract:
             InvalidSignatureError,
             DuplicatePlanError,
             PlanTooLargeError,
-            EmbeddingServiceError,
             InvalidQueryError,
             PlanNotFoundError,
         ]
@@ -295,18 +293,6 @@ class TestPreviewExecuteModelCompliance:
         assert "get_plans_by_intent" in methods
         assert "get_plan_by_id" in methods
 
-    def test_no_preview_execute_in_vector_service(self):
-        """VectorService does not have preview_/execute_ methods."""
-        from components.PlanLibrary.service.vector_service import VectorService
-
-        methods = dir(VectorService)
-        preview_methods = [m for m in methods if m.startswith("preview_")]
-        execute_methods = [m for m in methods if m.startswith("execute_")]
-
-        assert len(preview_methods) == 0
-        assert len(execute_methods) == 0
-
-
 class TestEvidenceServiceContract:
     """Test EvidenceService compliance with GLOBAL_SPEC."""
 
@@ -344,20 +330,6 @@ class TestEvidenceServiceContract:
         items = service.to_evidence_items(plans)
         assert len(items) == 1
         assert all(isinstance(i, EvidenceItem) for i in items)
-
-    def test_similarity_evidence_item_confidence(self):
-        """Similarity Evidence Item confidence = success_rate * similarity."""
-        service = EvidenceService()
-        evidence = service.similarity_to_evidence_item(
-            plan_id=VALID_ULID,
-            intent_type="test",
-            similarity_score=0.8,
-            success_rate=0.9,
-            pattern_summary="test plan",
-        )
-
-        expected_confidence = 0.8 * 0.9  # 0.72
-        assert evidence.confidence == pytest.approx(expected_confidence, abs=0.01)
 
 
 if __name__ == "__main__":

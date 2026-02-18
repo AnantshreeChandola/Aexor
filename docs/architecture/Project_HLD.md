@@ -37,15 +37,15 @@ The system has **4 layers** that work together:
 **What it does**: Stores everything the system knows
 - **ProfileStore**: Your stable preferences (work hours, meeting duration)
 - **History**: What you've done before ("usually meets Alice on Tuesdays")
-- **VectorIndex**: Finds similar situations by meaning
 - **PlanLibrary**: Reusable successful plans
+- **VectorIndex** _(deferred)_: Semantic similarity search — deferred until exact-match queries prove insufficient (see §11 Architectural Decisions)
 
 **Example**: When you say "book a meeting," the system remembers you prefer 30-minute meetings at 10 AM.
 
 ### Layer 2: Domain Services
 **What it does**: Understands your request and builds a plan
 - **Intake**: Figures out what you want across multiple messages
-- **ContextRAG**: Gathers relevant context (≤2KB, not your entire history)
+- **ContextRAG**: Assembles relevant context from Memory Layer via structured queries (≤2KB budget, consent tier enforcement) — not embedding-based RAG
 - **Planner**: Creates a step-by-step plan (deterministic, signed)
 - **PluginRegistry**: Knows what tools are available (Google Calendar, Slack, etc.)
 
@@ -751,6 +751,45 @@ See [README.md Tech Stack section](../../README.md#tech-stack) for the complete 
 - **Single runtime**: n8n for all workflows with built-in persistence and scheduling
 - **pgvector**: Single database for relational + vector (upgrade to dedicated vector DB if needed)
 
+### Application Factory & Dependency Injection
+
+All services are wired via a **lifespan-based DI** pattern — no global mutable state, no per-request construction:
+
+```
+shared/app.py         → create_app() + lifespan (startup/shutdown)
+shared/dependencies.py → Depends() functions pulling from app.state
+```
+
+**How it works**:
+1. **Startup** (`lifespan` context manager): Constructs all service singletons (adapters, services) and stores them on `app.state`
+2. **Request time** (`Depends()`): Thin functions return the pre-built singleton from `app.state` — zero per-request overhead
+3. **Shutdown** (`lifespan` exit): Closes database connections and cleans up resources
+
+```python
+# shared/app.py — lifespan creates singletons at startup
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    app.state.plan_service = PlanService(db_adapter=..., ...)
+    app.state.preference_service = PreferenceService(db_adapter=..., ...)
+    yield
+    await db.close()
+
+# shared/dependencies.py — thin Depends() wrappers
+def get_plan_service(request: Request) -> Any:
+    return request.app.state.plan_service
+
+# routes — declare dependencies, get injected
+@router.post("")
+async def store_plan(service: PlanService = Depends(get_plan_service)):
+    ...
+```
+
+**Benefits**:
+- Services testable via `app.dependency_overrides[get_plan_service] = lambda: mock_service`
+- No import-time side effects — lazy imports inside lifespan avoid circular dependencies
+- Single source of truth for service wiring
+- Adding a new component requires: (1) init in lifespan, (2) add Depends() function, (3) use in routes
+
 ---
 
 ## 8) Long-Running Tasks (Visa Watcher Example)
@@ -977,30 +1016,37 @@ All components use these schemas. Full definitions in [GLOBAL_SPEC.md](GLOBAL_SP
 Each component follows the same structure for consistency:
 
 ```
+shared/
+├── app.py              # Application factory (create_app + lifespan DI)
+├── dependencies.py     # Depends() functions for all services
+├── database/           # Shared database adapter
+├── middleware/          # Auth middleware
+├── api/                # Auth routes, error handlers
+└── schemas/            # Shared Pydantic schemas
+
 components/<ComponentName>/
-├── SPEC.md           # Declares conformance to GLOBAL_SPEC
-├── LLD.md            # Low-level design details
-├── schemas/          # Pydantic models
-│   ├── input.py
-│   ├── output.py
-│   └── internal.py
-├── tests/            # Unit and integration tests
-│   ├── test_unit.py
-│   └── test_integration.py
-└── <code files>      # Implementation
+├── SPEC.md             # Declares conformance to GLOBAL_SPEC
+├── LLD.md              # Low-level design details
+├── api/                # FastAPI routes (thin wrappers using Depends())
+│   └── routes.py
+├── domain/             # Domain models and business logic
+│   └── models.py
+├── service/            # Service layer
+├── adapters/           # External integrations (DB, APIs)
+└── tests/              # Unit and integration tests
 
 usecases/<UseCase>/
-├── SPEC.md           # Use case specification
-├── LLD.md            # Implementation design
-├── plans/            # Example plans
-│   ├── drafts/       # Work-in-progress plans
-│   └── approved/     # Validated plans
-├── tests/            # End-to-end tests
-└── fixtures/         # Test data
+├── SPEC.md             # Use case specification
+├── LLD.md              # Implementation design
+├── plans/              # Example plans
+│   ├── drafts/         # Work-in-progress plans
+│   └── approved/       # Validated plans
+├── tests/              # End-to-end tests
+└── fixtures/           # Test data
 ```
 
-**16 Core Components**:
-1. ProfileStore, History, VectorIndex, PlanLibrary (Memory Layer)
+**15 Active Components** (VectorIndex deferred):
+1. ProfileStore, History, PlanLibrary (Memory Layer) — VectorIndex deferred (§11)
 2. Intake, ContextRAG, Planner, Signer, PluginRegistry, PlanWriter (Domain Layer)
 3. WorkflowBuilder, PreviewOrchestrator, ApprovalGate, ExecuteOrchestrator, DurableOrchestrator (Orchestration Layer)
 4. Audit (Utilities)
@@ -1014,7 +1060,6 @@ usecases/<UseCase>/
 - **Execute (short)**: < 2s (target: 1.2s)
 - **ContextRAG**: < 150ms (target: 120ms)
 - **Plan Retrieval**: < 200ms
-- **Vector search**: < 100ms
 
 ### Availability
 - **Intake/Preview**: 99.9% (< 43min downtime/month)
@@ -1022,12 +1067,34 @@ usecases/<UseCase>/
 
 ### Scalability
 - **Concurrent plans**: 100+ simultaneous executions
-- **Vector index**: < 1M embeddings (upgrade to dedicated DB if exceeded)
 - **Plan library**: Unlimited (PostgreSQL partitioned by month)
 
 ---
 
-## 12) What's Next?
+## 12) Architectural Decisions
+
+### VectorIndex Deferred
+
+**Decision**: VectorIndex (semantic embedding search) is deferred until exact-match queries prove insufficient with real usage data.
+
+**Rationale**:
+- **All current queries are structured**: ContextRAG queries Memory Layer components by `intent_type`, `preference_key`, `user_id`, and `created_at` — all indexed PostgreSQL columns. No query requires fuzzy semantic matching.
+- **ContextRAG is a context assembler, not RAG**: Despite the name, ContextRAG makes structured API calls to ProfileStore/History/PlanLibrary and assembles Evidence Items with budget management (≤2KB) and consent tier enforcement. It does not perform embedding-based retrieval.
+- **Embedding latency violates NFRs**: An OpenAI embedding call (~200-500ms) would blow the ContextRAG <150ms p95 latency budget.
+- **Scale doesn't justify it**: A personal agent has ~20-50 intent types and hundreds of plans. At this scale, exact-match by `intent_type` covers the real need. Semantic search adds value at thousands of diverse records.
+- **Architecture slot preserved**: pgvector is in the stack. When exact-match returns empty for novel intents frequently enough to hurt plan quality, VectorIndex can be added as a small lift — not a rewrite.
+
+**Trigger to revisit**: ContextRAG returns empty results for >10% of novel intent queries in production.
+
+### PlanLibrary Has No Embedding Dependencies
+
+**Decision**: PlanLibrary stores and retrieves plans via structured queries only. Embedding generation, storage, and similarity search are removed from PlanLibrary scope.
+
+**Rationale**: Embedding is VectorIndex's responsibility per the MODULAR_ARCHITECTURE separation. PlanLibrary is a foundation Memory Layer component — it provides CRUD operations for plan data. If semantic search is needed later, VectorIndex indexes PlanLibrary data externally (PlanWriter triggers re-indexing).
+
+---
+
+## 13) What's Next?
 
 After reading this HLD, you should:
 
@@ -1060,6 +1127,6 @@ After reading this HLD, you should:
 
 ---
 
-**Document Version**: HLD v4.2 (Simplified n8n-only Architecture)
-**Last Updated**: 2025-01-02
-**Changes from v4.1**: Removed Temporal in favor of n8n-only architecture for all workflows, removed ADR-003 architectural improvements as no longer needed
+**Document Version**: HLD v4.3
+**Last Updated**: 2026-02-11
+**Changes from v4.2**: Deferred VectorIndex (semantic search) until exact-match queries prove insufficient. Clarified ContextRAG as context assembler (structured queries, not embedding-based RAG). Removed embedding dependencies from PlanLibrary. Added §12 Architectural Decisions.

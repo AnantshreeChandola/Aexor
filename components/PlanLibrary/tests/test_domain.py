@@ -16,12 +16,10 @@ from pydantic import ValidationError as PydanticValidationError
 
 from components.PlanLibrary.domain.models import (
     DuplicatePlanError,
-    EmbeddingServiceError,
     ErrorResponse,
     InvalidQueryError,
     InvalidSignatureError,
     PlanDB,
-    PlanEmbeddingDB,
     PlanLibraryError,
     PlanMetricsDB,
     PlanNotFoundError,
@@ -29,8 +27,6 @@ from components.PlanLibrary.domain.models import (
     PlanPattern,
     PlanTooLargeError,
     QueryPlansRequest,
-    SimilarityMatch,
-    SimilaritySearchRequest,
     StorePlanRequest,
     StorePlanResponse,
     SuccessResponse,
@@ -168,29 +164,6 @@ class TestPlanOutcomeDB:
         assert outcome.failed_step == 3
 
 
-class TestPlanEmbeddingDB:
-    """Test PlanEmbeddingDB model validation."""
-
-    def test_valid_embedding(self):
-        """Test creating embedding with correct dimension."""
-        vector = [0.1] * 1536
-        embedding = PlanEmbeddingDB(
-            plan_id=VALID_ULID,
-            vector=vector,
-            vector_norm=1.0,
-        )
-        assert len(embedding.vector) == 1536
-
-    def test_wrong_dimension_rejected(self):
-        """Test embedding with wrong dimension is rejected."""
-        with pytest.raises(PydanticValidationError):
-            PlanEmbeddingDB(
-                plan_id=VALID_ULID,
-                vector=[0.1] * 100,  # Wrong dimension
-                vector_norm=1.0,
-            )
-
-
 class TestPlanMetricsDB:
     """Test PlanMetricsDB model validation."""
 
@@ -261,12 +234,10 @@ class TestStorePlanResponse:
         response = StorePlanResponse(
             plan_id=VALID_ULID,
             stored_at=now,
-            embedding_queued=True,
         )
         serialized = response.model_dump()
         assert serialized["status"] == "ok"
         assert serialized["plan_id"] == VALID_ULID
-        assert serialized["embedding_queued"] is True
 
 
 class TestQueryPlansRequest:
@@ -328,24 +299,6 @@ class TestQueryPlansRequest:
         assert query.recency_days is None
 
 
-class TestSimilaritySearchRequest:
-    """Test SimilaritySearchRequest validation."""
-
-    def test_valid_search(self):
-        """Test valid similarity search request."""
-        search = SimilaritySearchRequest(
-            query_text="book a restaurant for dinner",
-            similarity_threshold=0.6,
-            limit=5,
-        )
-        assert search.query_text == "book a restaurant for dinner"
-
-    def test_empty_query_rejected(self):
-        """Test empty query text is rejected."""
-        with pytest.raises(PydanticValidationError):
-            SimilaritySearchRequest(query_text="")
-
-
 class TestErrorClasses:
     """Test error class hierarchy and attributes."""
 
@@ -354,7 +307,6 @@ class TestErrorClasses:
         assert issubclass(InvalidSignatureError, PlanLibraryError)
         assert issubclass(DuplicatePlanError, PlanLibraryError)
         assert issubclass(PlanTooLargeError, PlanLibraryError)
-        assert issubclass(EmbeddingServiceError, PlanLibraryError)
         assert issubclass(InvalidQueryError, PlanLibraryError)
         assert issubclass(PlanNotFoundError, PlanLibraryError)
 
@@ -376,11 +328,6 @@ class TestErrorClasses:
         error = PlanTooLargeError(plan_id=VALID_ULID, reason="exceeds 100 steps")
         assert error.plan_id == VALID_ULID
         assert error.reason == "exceeds 100 steps"
-
-    def test_embedding_service_error_attributes(self):
-        """Test EmbeddingServiceError has required attributes."""
-        error = EmbeddingServiceError(reason="API timeout")
-        assert error.reason == "API timeout"
 
     def test_invalid_query_error_attributes(self):
         """Test InvalidQueryError has required attributes."""
