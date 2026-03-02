@@ -1,0 +1,80 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Evidence Item Output Schema",
+  "description": "JSON Schema for Evidence Item (GLOBAL_SPEC §2.2 compliance)",
+  "type": "object",
+  "required": [
+    "type",
+    "key",
+    "value",
+    "confidence",
+    "source_ref",
+    "ttl_days",
+    "tier"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "const": "history",
+      "description": "Evidence type (always 'history' for History component)"
+    },
+    "key": {
+      "type": "string",
+      "description": "Evidence key in format {intent_type}_{date}"
+    },
+    "value": {
+      "type": "object",
+      "required": [
+        "fact",
+        "intent_type",
+        "outcome",
+        "entities",
+        "age_days"
+      ],
+      "properties": {
+        "fact": {
+          "type": "string",
+          "description": "PII-light fact text"
+        },
+        "intent_type": {
+          "type": "string",
+          "description": "Intent type classification"
+        },
+        "outcome": {
+          "type": "boolean",
+          "description": "Success or failure of the action"
+        },
+        "entities": {
+          "type": "object",
+          "description": "Structured entities from fact"
+        },
+        "age_days": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Age of fact in days"
+        }
+      }
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "description": "Confidence score (0-1, linear decay over TTL)"
+    },
+    "source_ref": {
+      "type": "string",
+      "pattern": "^history:facts/[0-9a-f-]+$",
+      "description": "Source reference in format history:facts/{fact_id}"
+    },
+    "ttl_days": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Remaining TTL in days"
+    },
+    "tier": {
+      "type": "integer",
+      "const": 3,
+      "description": "Context tier (always 3 for History)"
+    }
+  }
+}

@@ -5,25 +5,35 @@ SQLAlchemy models for core entities used across components.
 These models represent the actual database tables.
 """
 
+from sqlalchemy import UUID as SQLAlchemy_UUID
 from sqlalchemy import (
-    Column, String, Boolean, DateTime, Integer, UUID as SQLAlchemy_UUID, 
-    Index, text, ForeignKey
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
+
 from .adapter import Base
 
 
 class UserTable(Base):
     """
     Users table - core identity for all components.
-    
+
     Owned by Auth/Registration component but referenced by others.
     """
     __tablename__ = "users"
-    
+
     user_id = Column(
-        SQLAlchemy_UUID(as_uuid=True), 
-        primary_key=True, 
+        SQLAlchemy_UUID(as_uuid=True),
+        primary_key=True,
         server_default=text("gen_random_uuid()")
     )
     email = Column(String(255), unique=True, nullable=False)
@@ -44,18 +54,18 @@ class UserTable(Base):
 class PreferenceTable(Base):
     """
     Preferences table - user preference storage.
-    
+
     Owned by ProfileStore component.
     """
     __tablename__ = "preferences"
-    
+
     preference_id = Column(
-        SQLAlchemy_UUID(as_uuid=True), 
-        primary_key=True, 
+        SQLAlchemy_UUID(as_uuid=True),
+        primary_key=True,
         server_default=text("gen_random_uuid()")
     )
     user_id = Column(
-        SQLAlchemy_UUID(as_uuid=True), 
+        SQLAlchemy_UUID(as_uuid=True),
         ForeignKey("users.user_id", ondelete="CASCADE"),
         nullable=False
     )
@@ -67,13 +77,13 @@ class PreferenceTable(Base):
 
     __table_args__ = (
         Index(
-            "idx_preferences_user_key_active", 
-            user_id, key, 
+            "idx_preferences_user_key_active",
+            user_id, key,
             unique=True,
             postgresql_where=deleted_at.is_(None)
         ),
         Index(
-            "idx_preferences_user_id", 
+            "idx_preferences_user_id",
             user_id,
             postgresql_where=deleted_at.is_(None)
         ),
@@ -86,11 +96,11 @@ class PreferenceTable(Base):
 class PlanTable(Base):
     """
     Plans table - stores executed plans with signatures.
-    
+
     Owned by PlanLibrary component.
     """
     __tablename__ = "plans"
-    
+
     plan_id = Column(String(26), primary_key=True)  # ULID format
     canonical_json = Column(JSONB, nullable=False)
     signature_data = Column(JSONB, nullable=False)
@@ -112,18 +122,18 @@ class PlanTable(Base):
 class PlanOutcomeTable(Base):
     """
     Plan outcomes table - stores execution results.
-    
+
     Owned by PlanLibrary component.
     """
     __tablename__ = "plan_outcomes"
-    
+
     outcome_id = Column(
-        SQLAlchemy_UUID(as_uuid=True), 
-        primary_key=True, 
+        SQLAlchemy_UUID(as_uuid=True),
+        primary_key=True,
         server_default=text("gen_random_uuid()")
     )
     plan_id = Column(
-        String(26), 
+        String(26),
         ForeignKey("plans.plan_id", ondelete="CASCADE"),
         nullable=False
     )
@@ -146,24 +156,24 @@ class PlanOutcomeTable(Base):
 class PlanEmbeddingTable(Base):
     """
     Plan embeddings table - stores vector embeddings for similarity search.
-    
+
     Owned by PlanLibrary component. Requires pgvector extension.
     """
     __tablename__ = "plan_embeddings"
-    
+
     embedding_id = Column(
-        SQLAlchemy_UUID(as_uuid=True), 
-        primary_key=True, 
+        SQLAlchemy_UUID(as_uuid=True),
+        primary_key=True,
         server_default=text("gen_random_uuid()")
     )
     plan_id = Column(
-        String(26), 
+        String(26),
         ForeignKey("plans.plan_id", ondelete="CASCADE"),
         nullable=False,
         unique=True  # One embedding per plan
     )
     # Note: vector column will be added via pgvector extension
-    # vector = Column(Vector(1536), nullable=False) 
+    # vector = Column(Vector(1536), nullable=False)
     model_version = Column(String(32), nullable=False, default="text-embedding-ada-002")
     created_at = Column(DateTime, nullable=False, server_default=text("NOW()"))
     vector_norm = Column(String, nullable=False)  # Store as JSON for now
@@ -177,18 +187,18 @@ class PlanEmbeddingTable(Base):
 class PlanMetricsTable(Base):
     """
     Plan metrics table - stores performance metrics.
-    
+
     Owned by PlanLibrary component.
     """
     __tablename__ = "plan_metrics"
-    
+
     metrics_id = Column(
-        SQLAlchemy_UUID(as_uuid=True), 
-        primary_key=True, 
+        SQLAlchemy_UUID(as_uuid=True),
+        primary_key=True,
         server_default=text("gen_random_uuid()")
     )
     plan_id = Column(
-        String(26), 
+        String(26),
         ForeignKey("plans.plan_id", ondelete="CASCADE"),
         nullable=False
     )
@@ -203,7 +213,104 @@ class PlanMetricsTable(Base):
     )
 
 
-# Add more shared models here as needed
-# class HistoryTable(Base):
-#     """History/interaction storage - owned by History component."""
-#     pass
+# History Tables - Owned by History component
+
+class HistoryTable(Base):
+    """
+    History facts table - stores normalized, PII-light facts.
+
+    Owned by History component.
+    """
+    __tablename__ = "history"
+
+    fact_id = Column(
+        SQLAlchemy_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    user_id = Column(
+        SQLAlchemy_UUID(as_uuid=True),
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    fact_text = Column(String, nullable=False)
+    intent_type = Column(String(64), nullable=False)
+    entities = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    outcome = Column(Boolean, nullable=False)
+    source_plan_id = Column(String(26), nullable=True)
+    fact_hash = Column(String(64), nullable=False)
+    ttl_days = Column(Integer, nullable=False, default=30)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=text("NOW()")
+    )
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index(
+            "idx_history_user_intent_active",
+            user_id, intent_type, created_at.desc(),
+            postgresql_where=deleted_at.is_(None),
+        ),
+        Index(
+            "idx_history_user_fact_hash",
+            user_id, fact_hash,
+            unique=True,
+            postgresql_where=deleted_at.is_(None),
+        ),
+        Index(
+            "idx_history_expires_at",
+            expires_at,
+            postgresql_where=deleted_at.is_(None),
+        ),
+        Index(
+            "idx_history_user_entities",
+            entities,
+            postgresql_using="gin",
+            postgresql_where=deleted_at.is_(None),
+        ),
+        Index(
+            "idx_history_source_plan",
+            source_plan_id,
+            postgresql_where=source_plan_id.isnot(None),
+        ),
+    )
+
+
+class FactPatternTable(Base):
+    """
+    Detected recurring patterns - derived from history facts.
+
+    Owned by History component.
+    """
+    __tablename__ = "fact_patterns"
+
+    pattern_id = Column(
+        SQLAlchemy_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    user_id = Column(
+        SQLAlchemy_UUID(as_uuid=True),
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    intent_type = Column(String(64), nullable=False)
+    pattern_key = Column(String(128), nullable=False)
+    pattern_description = Column(String(512), nullable=False)
+    entity_pattern = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    occurrence_count = Column(Integer, nullable=False, default=1)
+    last_seen = Column(DateTime(timezone=True), nullable=False)
+    confidence = Column(Float, nullable=False, default=0.0)
+
+    __table_args__ = (
+        UniqueConstraint(
+            user_id, intent_type, pattern_key,
+            name="uq_fact_patterns_user_intent_key",
+        ),
+        Index(
+            "idx_fact_patterns_user_intent",
+            user_id, intent_type, confidence.desc(),
+        ),
+        Index("idx_fact_patterns_last_seen", last_seen),
+    )
