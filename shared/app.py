@@ -57,6 +57,23 @@ async def lifespan(app: FastAPI):
         encryption_adapter=get_encryption_adapter(),
     )
 
+    # History services
+    from components.History.adapters.db import DatabaseAdapter as HistoryDBAdapter
+    from components.History.service.evidence_service import EvidenceService
+    from components.History.service.fact_service import FactService
+    from components.History.service.pattern_service import PatternService
+
+    history_db = HistoryDBAdapter()
+    evidence_service = EvidenceService()
+    pattern_service = PatternService(db_adapter=history_db)
+    app.state.fact_service = FactService(
+        db_adapter=history_db,
+        evidence_service=evidence_service,
+        pattern_service=pattern_service,
+    )
+    app.state.pattern_service = pattern_service
+    app.state.history_db_adapter = history_db
+
     logger.info("All services initialized")
 
     yield
@@ -82,6 +99,7 @@ def create_app() -> FastAPI:
     app.add_middleware(AuthMiddleware)
 
     # Routers
+    from components.History.api.routes import router as history_router
     from components.PlanLibrary.api.routes import router as plan_router
     from components.ProfileStore.api.routes import router as profile_router
     from shared.api.auth_routes import router as auth_router
@@ -89,6 +107,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_router)
     app.include_router(plan_router)
     app.include_router(profile_router)
+    app.include_router(history_router)
 
     # Root health check
     @app.get("/health")

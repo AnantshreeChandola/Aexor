@@ -30,3 +30,13 @@ def get_analytics_service(request: Request) -> Any:
 def get_preference_service(request: Request) -> Any:
     """Get PreferenceService singleton from app state."""
     return request.app.state.preference_service
+
+
+def get_fact_service(request: Request) -> Any:
+    """Get FactService singleton from app state."""
+    return request.app.state.fact_service
+
+
+def get_pattern_service(request: Request) -> Any:
+    """Get PatternService singleton from app state."""
+    return request.app.state.pattern_service

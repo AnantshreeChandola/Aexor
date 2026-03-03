@@ -69,11 +69,16 @@ Act as a design orchestrator. Use Spec Kit's `/speckit.plan` workflow to generat
      - **`user_id` on all owned entities** (FK to `users.user_id` from SHARED_INFRASTRUCTURE.md §1.2) — required for multi-user isolation, privacy tier enforcement, and user data deletion
      - Schema references
      - Use Pydantic v2 syntax (`min_length` not `min_items`, `datetime.now(timezone.utc)` not `datetime.utcnow()`)
-   - **Database Schema** (REQUIRED for Memory Layer components)
+   - **Database Schema & Migrations** (REQUIRED for Memory Layer components)
      - Complete DDL for all owned tables (CREATE TABLE with types, constraints, defaults)
      - Index definitions (including pgvector HNSW with explicit `m`/`ef_construction` params if applicable)
      - Foreign keys (especially `user_id` FK to `users`)
-     - Migration reference (Alembic)
+     - **Migration File Specification**:
+       - Document SQL migration file needed (e.g., `00X_create_<component>_tables.sql`)
+       - Include complete DDL that matches SQLAlchemy models exactly
+       - Add table/column comments for documentation
+       - Reference migration number sequence (check existing migrations/ directory)
+     - Migration must be created during implementation phase (before PR merge)
    - **Adapters** - External integrations from plan.md
      - Provider integrations
      - Required scopes (read-only for preview, write for execute)
@@ -143,6 +148,7 @@ Act as a design orchestrator. Use Spec Kit's `/speckit.plan` workflow to generat
    - [ ] Every upstream consumer has a documented interface contract
    - [ ] Storage APIs are idempotent (duplicate ID returns original, not error)
    - [ ] DDL included for owned tables with indexes (Memory Layer)
+   - [ ] **Migration file specifications documented** (file number, DDL matches SQLAlchemy models)
    - [ ] Prometheus metrics defined with names and types
    - [ ] No deprecated library versions or API models
    - [ ] Evidence Item keys use deterministic generation (no Python `hash()`)

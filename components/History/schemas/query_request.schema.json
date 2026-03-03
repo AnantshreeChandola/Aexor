@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Query Request Schema",
+  "description": "JSON Schema for querying history facts",
+  "type": "object",
+  "properties": {
+    "intent_type": {
+      "type": ["string", "null"],
+      "maxLength": 64,
+      "description": "Filter by intent type (optional)"
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 500,
+      "default": 50,
+      "description": "Maximum number of results (default 50, max 500)"
+    },
+    "recency_days": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "description": "Only return facts from last N days (optional)"
+    }
+  }
+}
