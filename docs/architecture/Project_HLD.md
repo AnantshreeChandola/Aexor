@@ -1094,7 +1094,763 @@ usecases/<UseCase>/
 
 ---
 
-## 13) What's Next?
+## 13) Asynchronous Execution Architecture
+
+The system uses FastAPI's async capabilities with bounded concurrency and task queue patterns to ensure reliable execution at scale.
+
+### Task Queue Pattern
+
+All execution requests go through an in-memory task queue with bounded concurrency to prevent resource exhaustion:
+
+```python
+from asyncio import Queue, Semaphore
+from typing import Dict, Any
+import asyncio
+
+class ExecutionQueue:
+    """Bounded task queue for plan execution with concurrency control."""
+
+    def __init__(self, max_concurrent: int = 10):
+        self.queue: Queue = Queue(maxsize=100)
+        self.semaphore = Semaphore(max_concurrent)
+        self.active_tasks: Dict[str, asyncio.Task] = {}
+
+    async def enqueue(self, plan_id: str, plan: Dict[str, Any], token: str) -> str:
+        """Add execution request to queue with backpressure."""
+        if self.queue.full():
+            raise QueueFullError("Execution queue at capacity")
+
+        await self.queue.put({
+            "plan_id": plan_id,
+            "plan": plan,
+            "token": token,
+            "enqueued_at": datetime.now(timezone.utc)
+        })
+        return plan_id
+
+    async def worker(self, worker_id: int):
+        """Process execution requests with bounded concurrency."""
+        while True:
+            # Wait for semaphore slot (max_concurrent enforcement)
+            async with self.semaphore:
+                item = await self.queue.get()
+                plan_id = item["plan_id"]
+
+                try:
+                    # Execute plan with timeout
+                    result = await asyncio.wait_for(
+                        self._execute_plan(item["plan"], item["token"]),
+                        timeout=300  # 5 minute max execution
+                    )
+                    await self._store_result(plan_id, result)
+
+                except asyncio.TimeoutError:
+                    await self._handle_timeout(plan_id)
+                except Exception as e:
+                    await self._handle_error(plan_id, e)
+                finally:
+                    self.queue.task_done()
+
+    async def _execute_plan(self, plan: Dict[str, Any], token: str) -> Dict[str, Any]:
+        """Execute plan with n8n orchestration."""
+        # Verify signature and token
+        verify_signature(plan)
+        verify_approval_token(token, plan["plan_hash"])
+
+        # Build n8n workflow
+        workflow = await workflow_builder.build(plan, mode="execute")
+
+        # Execute with n8n
+        result = await n8n_client.execute_workflow(workflow)
+        return result
+```
+
+**Key features**:
+- **Bounded concurrency**: Semaphore limits parallel executions (default: 10)
+- **Backpressure**: Queue size limit (100) prevents memory exhaustion
+- **Timeout protection**: 5-minute max per plan prevents hangs
+- **Graceful degradation**: Returns 503 when queue is full
+
+### Parallel Step Execution
+
+Steps with no dependencies execute in parallel using `asyncio.gather` with bounded parallelism:
+
+```python
+async def execute_parallel_steps(steps: List[Step], max_parallel: int = 5) -> List[Result]:
+    """Execute independent steps in parallel with bounded concurrency."""
+
+    # Group steps by dependency level
+    levels = group_by_dependency_level(steps)
+
+    all_results = []
+    for level_steps in levels:
+        # Execute each level in parallel (bounded by max_parallel)
+        semaphore = Semaphore(max_parallel)
+
+        async def execute_with_limit(step: Step) -> Result:
+            async with semaphore:
+                return await execute_step(step)
+
+        # Gather results for this level
+        results = await asyncio.gather(
+            *[execute_with_limit(s) for s in level_steps],
+            return_exceptions=True
+        )
+
+        # Check for failures before proceeding to next level
+        for step, result in zip(level_steps, results):
+            if isinstance(result, Exception):
+                raise ExecutionError(f"Step {step.step} failed", cause=result)
+
+        all_results.extend(results)
+
+    return all_results
+```
+
+**Benefits**:
+- Parallel execution for independent steps (Steps 1 & 2 in meeting example)
+- Dependency ordering preserved (Step 3 waits for 1 & 2)
+- Bounded parallelism prevents resource exhaustion
+- Fail-fast on errors (halt execution immediately)
+
+### Background Task Monitoring
+
+Long-running n8n workflows are monitored via webhook callbacks:
+
+```python
+from fastapi import BackgroundTasks
+
+@router.post("/execute")
+async def execute_plan(
+    request: ExecuteRequest,
+    background_tasks: BackgroundTasks,
+    service: ExecuteService = Depends(get_execute_service)
+):
+    """Execute plan and monitor completion asynchronously."""
+
+    # Enqueue execution
+    plan_id = await service.enqueue_execution(request.plan, request.token)
+
+    # Monitor completion in background
+    background_tasks.add_task(
+        monitor_execution,
+        plan_id=plan_id,
+        callback_url=request.callback_url
+    )
+
+    return {"plan_id": plan_id, "status": "queued"}
+
+async def monitor_execution(plan_id: str, callback_url: str):
+    """Poll execution status and notify on completion."""
+    max_wait = 3600  # 1 hour max
+    poll_interval = 5  # 5 seconds
+
+    for _ in range(max_wait // poll_interval):
+        status = await n8n_client.get_execution_status(plan_id)
+
+        if status.is_complete:
+            # Notify caller
+            await httpx.post(callback_url, json={
+                "plan_id": plan_id,
+                "status": status.final_status,
+                "result": status.result
+            })
+            return
+
+        await asyncio.sleep(poll_interval)
+
+    # Timeout - notify caller
+    await httpx.post(callback_url, json={
+        "plan_id": plan_id,
+        "status": "timeout",
+        "error": "Execution exceeded 1 hour limit"
+    })
+```
+
+---
+
+## 14) LLM Guardrails and Structured Interaction
+
+The system uses multiple layers of validation and safety mechanisms when interacting with LLMs for planning.
+
+### Validation Layers
+
+All LLM outputs pass through a 3-layer validation pipeline:
+
+```python
+from pydantic import BaseModel, Field, validator
+from typing import List, Dict, Any
+
+class PlanSchema(BaseModel):
+    """Schema for validating planner LLM output."""
+
+    plan_id: str = Field(..., regex=r'^[0-9A-Z]{26}$')  # ULID format
+    intent: Dict[str, Any]
+    graph: List[StepSchema]
+    constraints: ConstraintsSchema
+
+    @validator('graph')
+    def validate_dependencies(cls, steps: List[StepSchema]) -> List[StepSchema]:
+        """Ensure all step dependencies are valid."""
+        step_ids = {s.step for s in steps}
+
+        for step in steps:
+            for dep in step.after:
+                if dep not in step_ids:
+                    raise ValueError(f"Step {step.step} depends on non-existent step {dep}")
+                if dep >= step.step:
+                    raise ValueError(f"Step {step.step} has invalid forward/self dependency")
+
+        return steps
+
+    @validator('graph')
+    def validate_roles(cls, steps: List[StepSchema]) -> List[StepSchema]:
+        """Ensure role assignments are valid."""
+        valid_roles = {"Fetcher", "Analyzer", "Watcher", "Resolver", "Booker", "Notifier"}
+
+        for step in steps:
+            if step.role not in valid_roles:
+                raise ValueError(f"Step {step.step} has invalid role: {step.role}")
+
+        return steps
+
+class PlanValidator:
+    """Multi-layer validation for planner output."""
+
+    async def validate(self, raw_output: str) -> Plan:
+        """Validate LLM output through 3 layers."""
+
+        # Layer 1: JSON parsing
+        try:
+            data = json.loads(raw_output)
+        except json.JSONDecodeError as e:
+            raise ValidationError(f"Invalid JSON from planner: {e}")
+
+        # Layer 2: Schema validation (Pydantic)
+        try:
+            plan = PlanSchema(**data)
+        except ValidationError as e:
+            raise ValidationError(f"Plan schema validation failed: {e}")
+
+        # Layer 3: Business rules
+        await self._validate_business_rules(plan)
+
+        return plan
+
+    async def _validate_business_rules(self, plan: Plan):
+        """Enforce business logic constraints."""
+
+        # Check tool availability
+        for step in plan.graph:
+            if not await plugin_registry.has_tool(step.uses):
+                raise ValidationError(f"Tool {step.uses} not available")
+
+        # Check scope requirements
+        required_scopes = {scope for step in plan.graph
+                          for scope in step.required_scopes}
+        if not await user_has_scopes(plan.intent.user_id, required_scopes):
+            raise ValidationError(f"Missing required scopes: {required_scopes}")
+
+        # Check plan complexity
+        if len(plan.graph) > 50:
+            raise ValidationError("Plan exceeds max 50 steps")
+```
+
+### Circuit Breaker Pattern
+
+Protect against LLM API failures with circuit breaker:
+
+```python
+from enum import Enum
+from datetime import datetime, timedelta
+
+class CircuitState(Enum):
+    CLOSED = "closed"      # Normal operation
+    OPEN = "open"          # Failing, reject requests
+    HALF_OPEN = "half_open"  # Testing recovery
+
+class CircuitBreaker:
+    """Circuit breaker for LLM API calls."""
+
+    def __init__(
+        self,
+        failure_threshold: int = 5,
+        timeout_seconds: int = 60,
+        success_threshold: int = 2
+    ):
+        self.state = CircuitState.CLOSED
+        self.failure_count = 0
+        self.success_count = 0
+        self.last_failure_time = None
+
+        self.failure_threshold = failure_threshold
+        self.timeout = timedelta(seconds=timeout_seconds)
+        self.success_threshold = success_threshold
+
+    async def call(self, func, *args, **kwargs):
+        """Execute function with circuit breaker protection."""
+
+        # Check state before calling
+        if self.state == CircuitState.OPEN:
+            if datetime.now() - self.last_failure_time > self.timeout:
+                self.state = CircuitState.HALF_OPEN
+                self.success_count = 0
+            else:
+                raise CircuitOpenError("LLM service unavailable")
+
+        try:
+            result = await func(*args, **kwargs)
+            await self._on_success()
+            return result
+
+        except Exception as e:
+            await self._on_failure()
+            raise
+
+    async def _on_success(self):
+        """Handle successful call."""
+        if self.state == CircuitState.HALF_OPEN:
+            self.success_count += 1
+            if self.success_count >= self.success_threshold:
+                self.state = CircuitState.CLOSED
+                self.failure_count = 0
+        else:
+            self.failure_count = 0
+
+    async def _on_failure(self):
+        """Handle failed call."""
+        self.failure_count += 1
+        self.last_failure_time = datetime.now()
+
+        if self.failure_count >= self.failure_threshold:
+            self.state = CircuitState.OPEN
+
+# Usage in planner
+planner_circuit = CircuitBreaker(failure_threshold=5, timeout_seconds=60)
+
+async def generate_plan(intent: Intent, evidence: List[Evidence]) -> Plan:
+    """Generate plan with circuit breaker protection."""
+    try:
+        raw_plan = await planner_circuit.call(
+            claude_api.messages.create,
+            model="claude-opus-4-6",
+            temperature=0,
+            messages=[{"role": "user", "content": build_prompt(intent, evidence)}]
+        )
+        return await validator.validate(raw_plan)
+
+    except CircuitOpenError:
+        # Fallback to cached plan
+        return await get_similar_cached_plan(intent)
+```
+
+### Fallback Hierarchy
+
+Multi-level fallback strategy for planner failures:
+
+```python
+class PlannerService:
+    """Planner with fallback hierarchy."""
+
+    async def generate_plan(
+        self,
+        intent: Intent,
+        evidence: List[Evidence]
+    ) -> Plan:
+        """Generate plan with 4-level fallback."""
+
+        # Level 1: Primary planner (Claude Opus with circuit breaker)
+        try:
+            return await self._plan_with_claude_opus(intent, evidence)
+        except CircuitOpenError:
+            logger.warning("Claude Opus circuit open, falling back to Sonnet")
+        except Exception as e:
+            logger.error(f"Claude Opus failed: {e}")
+
+        # Level 2: Fallback to Claude Sonnet (faster, cheaper)
+        try:
+            return await self._plan_with_claude_sonnet(intent, evidence)
+        except Exception as e:
+            logger.error(f"Claude Sonnet failed: {e}")
+
+        # Level 3: Template-based plan from library
+        try:
+            template = await plan_library.get_template(intent.intent_type)
+            return await self._instantiate_template(template, intent, evidence)
+        except TemplateNotFoundError:
+            logger.warning(f"No template for intent: {intent.intent_type}")
+
+        # Level 4: Minimal safe plan (fetch only, no execution)
+        logger.error("All planner fallbacks exhausted, returning minimal plan")
+        return self._create_minimal_plan(intent)
+
+    def _create_minimal_plan(self, intent: Intent) -> Plan:
+        """Create minimal plan that only fetches data."""
+        return Plan(
+            plan_id=generate_ulid(),
+            intent=intent,
+            graph=[
+                Step(
+                    step=1,
+                    mode="interactive",
+                    role="Fetcher",
+                    uses="system.echo",
+                    call="echo",
+                    args={"message": "Planner unavailable, manual action required"},
+                    dry_run=True
+                )
+            ],
+            constraints={"scopes": [], "ttl_s": 300}
+        )
+```
+
+### Constraint Enforcement
+
+Hard limits on planner output to prevent abuse:
+
+```python
+class PlanConstraints:
+    """Enforce hard limits on plan generation."""
+
+    MAX_STEPS = 50
+    MAX_PARALLEL_STEPS = 10
+    MAX_STEP_ARGS_SIZE = 10_000  # 10KB per step
+    MAX_PLAN_SIZE = 100_000  # 100KB total
+    ALLOWED_SCOPES = {
+        "calendar.read", "calendar.write",
+        "contacts.read",
+        "email.send",
+        "shopping.read", "shopping.write"
+    }
+
+    @classmethod
+    def enforce(cls, plan: Plan):
+        """Enforce all constraints, raise on violation."""
+
+        # Step count
+        if len(plan.graph) > cls.MAX_STEPS:
+            raise ConstraintViolation(f"Plan exceeds {cls.MAX_STEPS} steps")
+
+        # Parallel execution limit
+        for step in plan.graph:
+            parallel_peers = [s for s in plan.graph if s.after == step.after]
+            if len(parallel_peers) > cls.MAX_PARALLEL_STEPS:
+                raise ConstraintViolation(f"Too many parallel steps at level {step.after}")
+
+        # Step args size
+        for step in plan.graph:
+            args_size = len(json.dumps(step.args))
+            if args_size > cls.MAX_STEP_ARGS_SIZE:
+                raise ConstraintViolation(f"Step {step.step} args exceed 10KB")
+
+        # Total plan size
+        plan_size = len(json.dumps(plan.dict()))
+        if plan_size > cls.MAX_PLAN_SIZE:
+            raise ConstraintViolation(f"Plan size {plan_size} exceeds 100KB")
+
+        # Scope validation
+        requested_scopes = set(plan.constraints.get("scopes", []))
+        invalid_scopes = requested_scopes - cls.ALLOWED_SCOPES
+        if invalid_scopes:
+            raise ConstraintViolation(f"Invalid scopes requested: {invalid_scopes}")
+```
+
+---
+
+## 15) Advanced Concurrency Patterns
+
+Beyond basic idempotency, the system uses sophisticated concurrency control mechanisms.
+
+### Distributed Locking with Redis
+
+Three lock granularities for different conflict scenarios:
+
+```python
+from redis.asyncio import Redis
+from contextlib import asynccontextmanager
+import uuid
+
+class DistributedLock:
+    """Redis-based distributed lock with automatic release."""
+
+    def __init__(self, redis: Redis, lock_key: str, ttl: int = 30):
+        self.redis = redis
+        self.lock_key = f"lock:{lock_key}"
+        self.lock_value = str(uuid.uuid4())  # Unique token for this lock
+        self.ttl = ttl
+
+    async def acquire(self, timeout: int = 10) -> bool:
+        """Acquire lock with timeout."""
+        end_time = time.time() + timeout
+
+        while time.time() < end_time:
+            # SET NX (set if not exists) with TTL
+            acquired = await self.redis.set(
+                self.lock_key,
+                self.lock_value,
+                nx=True,  # Only set if key doesn't exist
+                ex=self.ttl  # Expire after TTL seconds
+            )
+
+            if acquired:
+                return True
+
+            # Wait before retry
+            await asyncio.sleep(0.1)
+
+        return False
+
+    async def release(self):
+        """Release lock only if we own it."""
+        # Lua script for atomic check-and-delete
+        script = """
+        if redis.call("get", KEYS[1]) == ARGV[1] then
+            return redis.call("del", KEYS[1])
+        else
+            return 0
+        end
+        """
+        await self.redis.eval(script, 1, self.lock_key, self.lock_value)
+
+@asynccontextmanager
+async def resource_lock(redis: Redis, resource: str, entity_id: str):
+    """Context manager for resource-level locking."""
+    lock = DistributedLock(
+        redis,
+        lock_key=f"{resource}.{entity_id}.write",
+        ttl=30
+    )
+
+    acquired = await lock.acquire(timeout=10)
+    if not acquired:
+        raise LockTimeoutError(f"Could not acquire lock for {resource}.{entity_id}")
+
+    try:
+        yield
+    finally:
+        await lock.release()
+
+# Usage examples
+
+# 1. Entity-level lock (finest granularity)
+async with resource_lock(redis, "calendar", "alice@example.com"):
+    await create_event(attendee="alice@example.com", ...)
+
+# 2. Resource-level lock (coarser granularity)
+async with resource_lock(redis, "email", "send"):
+    await send_email(...)  # Rate-limited resource
+
+# 3. Global lock (coarsest - avoid when possible)
+async with resource_lock(redis, "global", "deployment"):
+    await run_migration(...)
+```
+
+**Lock granularity decision tree**:
+- **Entity-level** (`calendar.alice.write`): Use when operations conflict only for specific entities (most common)
+- **Resource-level** (`email.send`): Use for rate-limited resources or global quotas
+- **Global** (`global.deployment`): Use only for system-wide operations (migrations, config updates)
+
+### Enhanced Idempotency with TTL
+
+Idempotency keys with automatic expiration and cleanup:
+
+```python
+class IdempotencyStore:
+    """Redis-based idempotency with automatic cleanup."""
+
+    def __init__(self, redis: Redis):
+        self.redis = redis
+        self.ttl = 86400  # 24 hours
+
+    def _build_key(self, plan_id: str, step: int, args: Dict[str, Any]) -> str:
+        """Generate deterministic idempotency key."""
+        args_hash = hashlib.sha256(
+            json.dumps(args, sort_keys=True).encode()
+        ).hexdigest()[:16]
+
+        return f"idempotency:{plan_id}:{step}:{args_hash}"
+
+    async def check_and_store(
+        self,
+        plan_id: str,
+        step: int,
+        args: Dict[str, Any],
+        result: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Check idempotency and store result atomically."""
+        key = self._build_key(plan_id, step, args)
+
+        # Try to get existing result
+        cached = await self.redis.get(key)
+        if cached:
+            return json.loads(cached)
+
+        # Store new result with TTL
+        await self.redis.setex(
+            key,
+            self.ttl,
+            json.dumps(result)
+        )
+
+        return None
+
+# Usage in executor
+async def execute_step(step: Step, plan_id: str) -> Result:
+    """Execute step with idempotency."""
+
+    # Check if already executed
+    cached_result = await idempotency_store.check_and_store(
+        plan_id=plan_id,
+        step=step.step,
+        args=step.args,
+        result=None  # Check only
+    )
+
+    if cached_result:
+        logger.info(f"Step {step.step} already executed, returning cached result")
+        return Result(**cached_result)
+
+    # Execute step with resource lock
+    async with resource_lock(redis, step.uses, step.get_entity_id()):
+        result = await provider.execute(step)
+
+        # Store result for future idempotency
+        await idempotency_store.check_and_store(
+            plan_id=plan_id,
+            step=step.step,
+            args=step.args,
+            result=result.dict()
+        )
+
+        return result
+```
+
+### Optimistic Locking for Read-Modify-Write
+
+Use database versioning for conflict detection:
+
+```python
+from sqlalchemy import Column, Integer, select, update
+from sqlalchemy.exc import StaleDataError
+
+class ProfileTable(Base):
+    __tablename__ = "profiles"
+
+    profile_id = Column(UUID, primary_key=True)
+    user_id = Column(UUID, nullable=False)
+    preferences = Column(JSONB, nullable=False, default={})
+    version = Column(Integer, nullable=False, default=1)  # Optimistic lock
+
+async def update_preference_optimistic(
+    db: AsyncSession,
+    user_id: UUID,
+    key: str,
+    value: Any,
+    max_retries: int = 3
+) -> Profile:
+    """Update preference with optimistic locking and retry."""
+
+    for attempt in range(max_retries):
+        # Read current version
+        result = await db.execute(
+            select(ProfileTable)
+            .where(ProfileTable.user_id == user_id)
+        )
+        profile = result.scalar_one()
+
+        # Modify locally
+        new_prefs = {**profile.preferences, key: value}
+        current_version = profile.version
+
+        # Write with version check
+        stmt = (
+            update(ProfileTable)
+            .where(
+                ProfileTable.user_id == user_id,
+                ProfileTable.version == current_version  # Check version
+            )
+            .values(
+                preferences=new_prefs,
+                version=current_version + 1  # Increment version
+            )
+            .returning(ProfileTable)
+        )
+
+        result = await db.execute(stmt)
+        updated = result.scalar_one_or_none()
+
+        if updated:
+            await db.commit()
+            return Profile.from_orm(updated)
+
+        # Version mismatch - retry
+        logger.warning(f"Version conflict on attempt {attempt + 1}, retrying")
+        await asyncio.sleep(0.1 * (2 ** attempt))  # Exponential backoff
+
+    raise ConcurrencyError("Failed to update after max retries")
+```
+
+**When to use each pattern**:
+- **Distributed locks**: External API calls (calendar, email) where conflicts must be prevented
+- **Optimistic locking**: Database updates with low contention (user preferences, profile)
+- **Pessimistic locking**: High-contention resources (global counters, rate limits)
+
+### Deadlock Prevention
+
+Enforce consistent lock ordering to prevent deadlocks:
+
+```python
+class LockManager:
+    """Manages multiple locks with consistent ordering."""
+
+    def __init__(self, redis: Redis):
+        self.redis = redis
+
+    @asynccontextmanager
+    async def acquire_multiple(self, resources: List[str]):
+        """Acquire multiple locks in deterministic order."""
+        # Sort resources alphabetically to ensure consistent ordering
+        sorted_resources = sorted(resources)
+
+        locks = [
+            DistributedLock(self.redis, lock_key=res, ttl=30)
+            for res in sorted_resources
+        ]
+
+        # Acquire in order
+        acquired = []
+        try:
+            for lock in locks:
+                if not await lock.acquire(timeout=10):
+                    raise LockTimeoutError(f"Could not acquire lock: {lock.lock_key}")
+                acquired.append(lock)
+
+            yield
+
+        finally:
+            # Release in reverse order
+            for lock in reversed(acquired):
+                await lock.release()
+
+# Usage: Multi-resource operation
+async def book_meeting_with_multiple_attendees(
+    attendees: List[str],
+    time_slot: str
+):
+    """Book meeting for multiple attendees (deadlock-safe)."""
+
+    # Acquire locks in consistent order (alphabetical)
+    resources = [f"calendar.{email}.write" for email in attendees]
+
+    async with lock_manager.acquire_multiple(resources):
+        # All locks acquired - safe to proceed
+        for email in attendees:
+            await create_event(attendee=email, time_slot=time_slot)
+```
+
+---
+
+## 16) What's Next?
 
 After reading this HLD, you should:
 
@@ -1127,6 +1883,6 @@ After reading this HLD, you should:
 
 ---
 
-**Document Version**: HLD v4.3
-**Last Updated**: 2026-02-11
-**Changes from v4.2**: Deferred VectorIndex (semantic search) until exact-match queries prove insufficient. Clarified ContextRAG as context assembler (structured queries, not embedding-based RAG). Removed embedding dependencies from PlanLibrary. Added §12 Architectural Decisions.
+**Document Version**: HLD v4.4
+**Last Updated**: 2026-02-28
+**Changes from v4.3**: Added §13 Asynchronous Execution Architecture (task queues, bounded concurrency, parallel execution patterns), §14 LLM Guardrails and Structured Interaction (validation layers, circuit breakers, fallback hierarchy, constraint enforcement), §15 Advanced Concurrency Patterns (distributed locking, enhanced idempotency, optimistic locking, deadlock prevention). Renumbered "What's Next?" from §13 to §16.
