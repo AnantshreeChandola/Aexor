@@ -1171,47 +1171,90 @@ class ExecutionQueue:
 - **Timeout protection**: 5-minute max per plan prevents hangs
 - **Graceful degradation**: Returns 503 when queue is full
 
-### Parallel Step Execution
+### Parallel Step Execution (via n8n)
 
-Steps with no dependencies execute in parallel using `asyncio.gather` with bounded parallelism:
+Steps with no dependencies execute in parallel **within n8n workflows**. The WorkflowBuilder analyzes the plan graph and generates n8n workflow JSON with parallel branches:
 
 ```python
-async def execute_parallel_steps(steps: List[Step], max_parallel: int = 5) -> List[Result]:
-    """Execute independent steps in parallel with bounded concurrency."""
+class WorkflowBuilder:
+    """Converts plan graph to n8n workflow with parallel execution."""
 
-    # Group steps by dependency level
-    levels = group_by_dependency_level(steps)
+    def build(self, plan: Plan, mode: str) -> Dict[str, Any]:
+        """Build n8n workflow from plan graph."""
 
-    all_results = []
-    for level_steps in levels:
-        # Execute each level in parallel (bounded by max_parallel)
-        semaphore = Semaphore(max_parallel)
+        # Group steps by dependency level
+        levels = self._group_by_dependency_level(plan.graph)
 
-        async def execute_with_limit(step: Step) -> Result:
-            async with semaphore:
-                return await execute_step(step)
+        nodes = []
+        for level_idx, level_steps in enumerate(levels):
+            if len(level_steps) > 1:
+                # Multiple steps at same level → parallel branches
+                nodes.append({
+                    "name": f"split_level_{level_idx}",
+                    "type": "SplitInBatches",
+                    "parameters": {"batchSize": 1},
+                    "typeVersion": 1
+                })
 
-        # Gather results for this level
-        results = await asyncio.gather(
-            *[execute_with_limit(s) for s in level_steps],
-            return_exceptions=True
-        )
+                # Create parallel branches for each step
+                for step in level_steps:
+                    nodes.append(self._step_to_n8n_node(step, mode))
 
-        # Check for failures before proceeding to next level
-        for step, result in zip(level_steps, results):
-            if isinstance(result, Exception):
-                raise ExecutionError(f"Step {step.step} failed", cause=result)
+                # Merge results
+                nodes.append({
+                    "name": f"merge_level_{level_idx}",
+                    "type": "Merge",
+                    "parameters": {},
+                    "typeVersion": 1
+                })
+            else:
+                # Single step at this level → sequential
+                nodes.append(self._step_to_n8n_node(level_steps[0], mode))
 
-        all_results.extend(results)
+        return {
+            "name": f"plan_{plan.plan_id}",
+            "nodes": nodes,
+            "connections": self._build_connections(nodes)
+        }
 
-    return all_results
+    def _group_by_dependency_level(self, steps: List[Step]) -> List[List[Step]]:
+        """Group steps by dependency depth for parallel execution."""
+        levels = []
+        processed = set()
+
+        while len(processed) < len(steps):
+            # Find steps whose dependencies are all processed
+            current_level = [
+                s for s in steps
+                if s.step not in processed
+                and all(dep in processed for dep in s.after)
+            ]
+
+            if not current_level:
+                raise ValueError("Circular dependency detected in plan graph")
+
+            levels.append(current_level)
+            processed.update(s.step for s in current_level)
+
+        return levels
+```
+
+**Example: Meeting plan with parallel fetches**
+```
+Plan graph:
+  Step 1: Get Alice's calendar [after: []]
+  Step 2: Get your calendar    [after: []]
+  Step 3: Find overlap         [after: [1, 2]]
+
+Generated n8n workflow:
+  Split → [Fetch Alice || Fetch You] → Merge → Find Overlap
 ```
 
 **Benefits**:
-- Parallel execution for independent steps (Steps 1 & 2 in meeting example)
-- Dependency ordering preserved (Step 3 waits for 1 & 2)
-- Bounded parallelism prevents resource exhaustion
-- Fail-fast on errors (halt execution immediately)
+- **n8n handles parallelism**: Native parallel execution with visual monitoring
+- **Dependency ordering preserved**: Level-by-level execution
+- **Fault isolation**: n8n's built-in error handling and retry logic
+- **No custom concurrency code**: Leverage n8n's mature orchestration
 
 ### Background Task Monitoring
 
