@@ -17,8 +17,8 @@ A preview-first personal assistant system with deterministic planning, multi-age
 - **aioredis** for async Redis
 
 ### Orchestration
-- **n8n** (self-hosted) for short interactive workflows
-- **Temporal** (Python SDK) for long-running durable tasks
+- **n8n** (self-hosted) for all workflows with built-in persistence and scheduling
+- **ExecutionMonitor** (polling service) for stuck execution detection and workflow-level retries
 
 ### Data Storage
 - **PostgreSQL 16** with pgvector extension
@@ -48,14 +48,15 @@ The system follows a **component-first architecture** with:
 
 - **Preview-first safety model** - all operations preview before execution
 - **Deterministic planning** - same inputs always produce same plan
-- **Six runtime agent roles** for responsibility isolation:
+- **Six runtime agent roles** (logical categories, not separate services):
   - Fetcher (one-time reads)
   - Analyzer (data processing)
   - Watcher (long-running monitoring)
   - Resolver (disambiguation)
-  - Booker (writes with idempotency)
+  - Booker (writes with multi-user safe idempotency)
   - Notifier (updates and alerts)
-- **Dual orchestration runtime** - n8n for short jobs, Temporal for durable workflows
+- **Single orchestration runtime** - n8n for all workflows (short and long-running)
+- **ExecutionMonitor** - detects stuck executions and triggers workflow-level retries
 - **Ed25519 signatures** for plan integrity
 - **Human-in-the-loop gates** for approval workflows
 
@@ -92,7 +93,6 @@ The system follows a **component-first architecture** with:
 - Python 3.11+
 - Docker & Docker Compose
 - n8n instance (local or cloud)
-- Temporal server (local dev)
 - PostgreSQL 16 with pgvector
 - Redis 7
 

@@ -6,16 +6,16 @@
 
 ## 6 Runtime Agent Roles
 
-Runtime agents execute individual plan steps as n8n sub-workflows or Temporal activities.
+Runtime agents are **logical plan-step categories** (not separate services). All execution happens inside n8n workflow nodes.
 
 | Role | Purpose | Examples | Implementation |
 |------|---------|----------|----------------|
-| **Fetcher** | One-time data retrieval | Get calendar availability, fetch contact info, check flight prices | n8n HTTP/connector nodes, Temporal activities |
-| **Analyzer** | Data processing | Find overlapping slots, rank options, compare routes, calculate totals | n8n Function nodes, Temporal activities |
-| **Watcher** | Long-running monitoring | Poll visa slots (2 weeks), monitor price drops (daily), track package delivery | Temporal workflows with ContinueAsNew |
+| **Fetcher** | One-time data retrieval | Get calendar availability, fetch contact info, check flight prices | n8n HTTP/connector nodes |
+| **Analyzer** | Data processing | Find overlapping slots, rank options, compare routes, calculate totals | n8n Function nodes |
+| **Watcher** | Long-running monitoring | Poll visa slots (2 weeks), monitor price drops (daily), track package delivery | n8n workflows with Wait nodes and scheduled triggers |
 | **Resolver** | User interaction | "Which John?", "Pick from 3 options", confirm choice | n8n Wait nodes with webhooks |
-| **Booker** | Write operations | Create events, send emails, make purchases, book appointments | n8n connector nodes, Temporal activities with idempotency |
-| **Notifier** | Updates and alerts | "✓ Meeting booked", "Visa slot found!", progress updates, errors | n8n Slack/email nodes, Temporal activities |
+| **Booker** | Write operations | Create events, send emails, make purchases, book appointments | n8n connector nodes with idempotency |
+| **Notifier** | Updates and alerts | "✓ Meeting booked", "Visa slot found!", progress updates, errors | n8n Slack/email nodes |
 
 ---
 
@@ -25,7 +25,7 @@ Runtime agents execute individual plan steps as n8n sub-workflows or Temporal ac
 |-------|-----------|---------|
 | **Memory** | ProfileStore, History, VectorIndex, PlanLibrary | Stores everything the system knows |
 | **Domain** | Intake, ContextRAG, Planner, Signer, PluginRegistry, PlanWriter | Understands requests and builds plans |
-| **Orchestration** | WorkflowBuilder, PreviewOrchestrator, ApprovalGate, ExecuteOrchestrator, DurableOrchestrator | Previews and executes plans safely |
+| **Orchestration** | WorkflowBuilder, PreviewOrchestrator, ApprovalGate, ExecuteOrchestrator, ExecutionMonitor | Previews and executes plans safely |
 | **Platform** | API Gateway, Audit | Interface and observability |
 
 ---
@@ -50,8 +50,8 @@ User Request → Preview → Approval → Execute → Learn
 
 1. **Preview-first safety**: Never execute without showing user first
 2. **Deterministic planning**: Same inputs → same plan → same signature
-3. **Dual runtime**: n8n (< 15min) vs Temporal (hours/days)
-4. **Idempotency**: Safe retry for all write operations (`plan_id:step:arg_hash`)
+3. **Single runtime**: n8n for all workflows (short and long-running) with ExecutionMonitor
+4. **Idempotency**: Multi-user safe retry (`tenant:user:integration:plan:step:op:hash`)
 5. **Compensation**: Undo failed operations (Saga pattern)
 6. **Fine-grained locking**: Prevent conflicts without blocking parallelism
 7. **Privacy tiers**: Context access controlled by consent level (Tier 1-5)
@@ -291,9 +291,9 @@ async def execute(approved: ApprovedPreview) -> ExecuteWrapper:
 | Category | Technology | Rationale |
 |----------|-----------|-----------|
 | Backend | Python 3.11+, FastAPI | Async, type hints, Pydantic |
-| Orchestration | n8n + Temporal | Short jobs (n8n) + long jobs (Temporal) |
+| Orchestration | n8n | All workflows (short and long-running) with built-in persistence |
 | Database | PostgreSQL 16 + pgvector | Relational + vector in one DB |
-| Cache | Redis 7 | Sessions, tokens, idempotency, preview state |
+| Cache | Redis 7 | Sessions, tokens, idempotency (3-state), preview state |
 | AI | Anthropic Claude | Planning (temperature=0) |
 | Embeddings | OpenAI | Vector search only |
 | Testing | pytest, ruff, mypy | Type safety + fast tests |
@@ -305,12 +305,12 @@ async def execute(approved: ApprovedPreview) -> ExecuteWrapper:
 | Issue | Solution |
 |-------|----------|
 | Preview mutates data | Add `mock=True` to adapter calls |
-| Duplicate operations | Add idempotency key check |
+| Duplicate operations | Add idempotency key check (3-state: IN_FLIGHT/SUCCEEDED/FAILED) |
 | Circular dependencies | Extract shared logic to new component |
 | Tests failing | Check acceptance criteria mapping |
 | CI failing | Run `pytest` + `ruff check` locally |
 | Slow preview | Check ContextRAG budget (≤2KB) |
-| Long execution | Consider Temporal instead of n8n |
+| Stuck execution | ExecutionMonitor detects stuck workflows (5min timeout) and triggers retry |
 
 ---
 
