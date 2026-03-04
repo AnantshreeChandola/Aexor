@@ -49,16 +49,15 @@ Each component's database dependencies, component dependencies, and external ser
     └──────────────────┘  │ • Ext: n8n       │  │   - ApprovalGate │
                           └──────────────────┘  │   - WorkflowBld  │
                                                 │   - PlanWriter   │
-    ┌──────────────────┐  ┌──────────────────┐  │ • Ext: n8n,      │
-    │ ApprovalGate     │  │ Durable          │  │   Temporal       │
-    │                  │  │ Orchestrator     │  └──────────────────┘
+    ┌──────────────────┐  ┌──────────────────┐  │ • Ext: n8n       │
+    │ ApprovalGate     │  │ Execution        │  │                  │
+    │                  │  │ Monitor          │  └──────────────────┘
     │ • DB: Redis      │  │                  │
-    │   (tokens)       │  │ • DB: None       │
-    │ • Deps:          │  │   (Temporal DB)  │
+    │   (tokens)       │  │ • DB: PostgreSQL │
+    │ • Deps:          │  │   (exec tracker) │
     │   - Preview      │  │ • Deps:          │
-    │ • Ext: PyJWT     │  │   - ApprovalGate │
-    └──────────────────┘  │   - PlanWriter   │
-                          │ • Ext: Temporal  │
+    │ • Ext: PyJWT     │  │   - n8n API      │
+    └──────────────────┘  │ • Ext: n8n SDK   │
                           └──────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────┐
@@ -387,11 +386,9 @@ ExecuteOrchestrator
 │   ├── → Signer (signature verification)
 │   ├── → ApprovalGate (token validation + multi-gate HITL)
 │   ├── → WorkflowBuilder (mode="execute" with HITL gates)
-│   ├── → DurableOrchestrator (mode routing)
 │   └── → PlanWriter (outcome persistence)
 └── External Dependencies
-    ├── n8n API (interactive workflows with Wait nodes for HITL)
-    └── Temporal API (durable handoff)
+    └── n8n API (all workflows with Wait nodes for HITL)
 
 NOTE: Execute workflows contain embedded HITL approval gates (gate-A, gate-B, etc.)
       Each gate_id maps to an n8n Wait node that pauses execution until
@@ -399,16 +396,21 @@ NOTE: Execute workflows contain embedded HITL approval gates (gate-A, gate-B, et
       sequential approvals (e.g., shopping: gate-A for cart, gate-B for purchase).
 ```
 
-#### DurableOrchestrator
+#### ExecutionMonitor
 ```
-DurableOrchestrator
+ExecutionMonitor
 ├── Database Dependencies
-│   └── (Temporal server manages state)
+│   └── PostgreSQL (execution_tracker table)
 ├── Component Dependencies
-│   ├── → ApprovalGate (signal integration)
 │   └── → PlanWriter (outcome persistence)
 └── External Dependencies
-    └── Temporal Python SDK + Temporal Server
+    └── n8n REST API (GET /executions for polling)
+
+Purpose: Background polling service (runs every 30s) that:
+- Detects stuck n8n executions (no progress for 5+ minutes)
+- Triggers workflow-level retries with exponential backoff (60s, 300s, 900s)
+- Enforces time budgets (cancel after 60 minutes)
+- Notifies users of terminal failures (max 3 attempts exhausted)
 ```
 
 ---
@@ -488,10 +490,10 @@ DurableOrchestrator
 │  └──────┬───────┘                                               │
 │         │ Approval Token (gate-A)                               │
 │         ▼                                                       │
-│  ┌────────────────────┐       ┌────────────────────┐           │
-│  │Execute Orchestrator│──────►│Durable Orchestrator│           │
-│  │                    │       │   (mode=durable)   │           │
-│  │ ┌────────────────┐ │       └─────────┬──────────┘           │
+│  ┌────────────────────┐                                          │
+│  │Execute Orchestrator│  (triggers n8n workflow)                │
+│  │                    │                                         │
+│  │ ┌────────────────┐ │                                         │
 │  │ │ n8n Workflow   │ │                 │                      │
 │  │ │ with HITL gates│ │                 │                      │
 │  │ │                │ │                 │                      │
@@ -594,7 +596,7 @@ DurableOrchestrator
 ### Group 5: Execution & Persistence
 **Parallel start, converge at end:**
 - ExecuteOrchestrator (depends on all Group 4)
-- DurableOrchestrator (depends on ApprovalGate)
+- ExecutionMonitor (depends on n8n API, execution_tracker table)
 - PlanWriter (depends on Memory Module)
 
 **Timeline:** Sprint 5-6 (3 weeks)
