@@ -1,4 +1,4 @@
-# GLOBAL SPEC — Operating Contract (v2)
+# GLOBAL SPEC — Operating Contract (v2.1)
 
 **Status:** Active  
 **Applies to:** All components in this repository  
@@ -33,16 +33,14 @@ Each `SPEC.md` (component or use case) **inherits** these rules and may only dev
 - Runs **n8n connectors** only in previewable/read-only mode.
 - Returns a **Preview wrapper** with normalized payload + optional evidence.
 
-### Execute (Short Jobs, via n8n)
+### Execute (via n8n)
 - Allowed **only after explicit human approval** with a valid approval token and verified plan signature.
 - Calls real providers under **least-privilege** credentials.
-- Idempotency required (`plan_id:step:arg_hash`).
+- **Idempotency required**: All side-effecting steps (Booker role) use scoped keys (`tenant:user:integration:plan:step:op:hash`) to prevent duplicate operations across users.
+- **Retry safety**: Node-level retries (transient failures) + workflow-level retries (execution failures) with idempotency preventing duplicates.
 - Returns an **Execute wrapper**.
 
-### Durable (Long Jobs, via Temporal)
-- Handles long-running/stateful work (poll, retry, signals, compensation).
-- Deterministic workflow core, Activities for I/O.
-- Resilient to restarts; must support **ContinueAsNew** and compensation.  
+**Note**: MVP uses n8n for all workflows (short and long-running). n8n provides built-in persistence and scheduling. ExecutionMonitor (polling service) detects stuck/failed executions and triggers workflow-level retries.  
 
 ---
 
@@ -149,23 +147,23 @@ Same tuple ⇒ same canonical plan bytes ⇒ same hash/signature.
 
 ### 2.8 Runtime Agent Roles
 
-Runtime agents are **asynchronous execution instances** that execute plan steps. Each step spawns a new agent instance (n8n sub-workflow or Temporal activity). Multiple instances of the same role can run concurrently.
+**Important (MVP)**: Roles are **logical plan-step categories**, NOT separate runtime services. All execution happens inside n8n workflows. Roles determine policies (idempotency, retry, compensation requirements).
 
-**Six roles for responsibility isolation:**
+**Six roles for responsibility classification:**
 
-- **Fetcher** — One-time read operations (preview fetches, API calls, data retrieval)
-- **Analyzer** — Data processing, comparison, research, ranking, synthesis
-- **Watcher** — Long-running monitoring (polls, subscriptions, continuous observation)
-- **Resolver** — Disambiguation, user clarification, conflict resolution
-- **Booker** — Writes with idempotency and compensation
-- **Notifier** — Updates, alerts, summaries, progress reports
+- **Fetcher** — One-time read operations (preview fetches, API calls, data retrieval). No idempotency needed (read-only).
+- **Analyzer** — Data processing, comparison, research, ranking, synthesis. No idempotency needed (pure computation).
+- **Watcher** — Long-running monitoring (polls, subscriptions, continuous observation). Aggressive retry policy.
+- **Resolver** — Disambiguation, user clarification, conflict resolution. Requires HITL (human-in-the-loop).
+- **Booker** — Writes with **idempotency required** and compensation. Resource locking enforced.
+- **Notifier** — Updates, alerts, summaries, progress reports. Best-effort delivery.
 
 **Execution model:**
-- Roles are for **responsibility classification**, not concurrency primitives
-- Parallelism comes from **orchestrator logic** (n8n branches, Temporal child workflows)
-- Steps with `after: []` (no dependencies) execute **immediately in parallel**
-- Steps with `after: [1, 2]` wait for dependencies, then execute
-- Resource locks prevent conflicting writes (fine-grained: `resource.entity.write`)
+- Roles determine **policy metadata** (idempotency requirement, retry strategy, compensation needed)
+- All steps execute as **n8n workflow nodes** (WorkflowBuilder generates n8n JSON)
+- Parallelism: n8n Split/Merge nodes for steps with no dependencies (`after: []`)
+- Dependencies: Steps with `after: [1, 2]` wait for completion before executing
+- Resource locks: Scoped by `user_id:integration_account_id:resource:entity` (prevent cross-user conflicts)
 
 ---
 
@@ -249,6 +247,12 @@ Use-case packets in `usecases/<UseCase>/` (when needed):
 ---
 
 ## 10) End-to-End Examples
-- **Meeting flow:** Intent → ContextRAG → Plan → Preview → Gate A → Execute → Audit/PlanWriter  
-- **Shopping flow:** multi-gate approval before cart/purchase  
-- **Visa watcher:** Temporal watcher signals approval gate → execute booking → notify  
+- **Meeting flow:** Intent → ContextRAG → Plan → Preview → Gate A → Execute → Audit/PlanWriter
+- **Shopping flow:** multi-gate approval before cart/purchase
+- **Visa watcher:** n8n workflow with Wait nodes → polls for slots → signals approval gate → execute booking → notify
+
+---
+
+**Document Version**: GLOBAL_SPEC v2.1
+**Last Updated**: 2026-03-03
+**Changes from v2.0**: MVP scope clarification - (1) Updated §1 Execute to use n8n for all workflows (removed Temporal/Durable distinction for MVP), added idempotency scoping by tenant/user/integration, added retry safety (node-level + workflow-level with ExecutionMonitor). (2) Updated §2.8 Runtime Agent Roles to clarify roles are logical categories (NOT separate services), all execution in n8n, roles determine policy metadata (idempotency, retry, compensation). (3) Updated resource lock scoping to include user_id and integration_account_id.  
