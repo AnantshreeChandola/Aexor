@@ -137,13 +137,13 @@ Legend:
 - Schemas: ✗
 - **Purpose**: Do actual work with idempotency and compensation
 
-### DurableOrchestrator
+### ExecutionMonitor
 - SPEC.md: ✗
 - LLD.md: ✗
 - Code: ✗
 - Tests: ✗
 - Schemas: ✗
-- **Purpose**: Handle long-running tasks (Temporal workflows)
+- **Purpose**: Detect stuck executions and trigger workflow-level retries (polling service)
 
 ---
 
@@ -180,7 +180,7 @@ Legend:
 3. **Phase 3**: Orchestration
    - WorkflowBuilder, PreviewOrchestrator, ApprovalGate, ExecuteOrchestrator
 4. **Phase 4**: Advanced
-   - DurableOrchestrator, History, VectorIndex, PlanWriter, Audit
+   - ExecutionMonitor, History, VectorIndex, PlanWriter, Audit
 
 ---
 
