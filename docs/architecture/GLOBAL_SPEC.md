@@ -215,12 +215,17 @@ Same tuple ⇒ same canonical plan bytes ⇒ same hash/signature.
 ---
 
 ## 8) Safety & Governance
-- **Signature verification** required at Preview/Execute.  
-- **Approval tokens** required for writes (per gate).  
-- **Idempotency** enforced via datastore.  
-- **Compensation** supported when declared in Registry.  
-- **Privacy:** derived facts only; TTL/forget/export enforced.  
-- **Observability:** plan_id correlation, latency/error metrics.  
+- **Signature verification** required at Preview/Execute.
+- **Approval tokens** required for writes (per gate).
+- **Idempotency** enforced via datastore.
+- **Compensation** supported when declared in Registry.
+- **Privacy:** derived facts only; TTL/forget/export enforced.
+- **Observability:** plan_id correlation, latency/error metrics.
+- **Credential isolation:**
+  - Storage: n8n Secrets Vault (self-hosted, encrypted at rest)
+  - LLM boundary: Planner/LLM has **ZERO access** to credential values
+  - Plan format: Plans reference credential IDs, resolved by n8n at execution time
+  - Deployment: Local LLM + local n8n (self-hosted, no cloud dependencies for secrets)
 
 ---
 

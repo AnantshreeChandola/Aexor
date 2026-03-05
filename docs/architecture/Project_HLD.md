@@ -257,11 +257,15 @@ Intake: [ready! triggers planning]
 
 #### Planner
 **What it does**: Creates a deterministic step-by-step plan
-**Input**: Intent + Evidence + Available tools
-**Process**: Calls Claude API (temperature=0) to generate plan
-**Output**: Plan graph with steps, dependencies, and roles
+**Input**: Intent + Evidence + Available tools (from PluginRegistry)
+**Process**: Calls local LLM (temperature=0) to generate plan
+**Output**: Plan graph with steps, dependencies, roles, and **credential ID references**
 
-**Key feature**: Same inputs always produce same plan (deterministic)
+**Key features**:
+- **Deterministic**: Same inputs always produce same plan
+- **No access to credentials**: Plans reference credential IDs (e.g., `"gcal_user_123"`), not actual API tokens or secrets
+- **Credential resolution deferred**: n8n resolves credential IDs to actual values at execution time
+- **Local LLM**: Self-hosted LLM (not cloud API) for plan generation
 
 #### Signer
 **What it does**: Cryptographically signs plans to prevent tampering
@@ -273,11 +277,18 @@ Intake: [ready! triggers planning]
 **Verification**: PreviewOrchestrator and ExecuteOrchestrator verify signature before execution
 
 #### PluginRegistry
-**What it does**: Source of truth for what tools are available
+**What it does**: Source of truth for available tools and their credential requirements
+**Includes**:
+- Tool capabilities (operations, scopes, previewable, idempotent)
+- **Credential ID templates**: Maps user + integration → n8n credential ID
+- n8n node bindings (which n8n node to use for each operation)
+
 **Example entry**:
 ```json
 {
   "tool_id": "google.calendar",
+  "credential_template": "gcal_user_{{user_id}}_{{account_name}}",
+  "n8n_credential_type": "googleCalendarOAuth2Api",
   "operations": {
     "list_free_busy": {
       "n8n_node": "Google Calendar",
@@ -294,6 +305,9 @@ Intake: [ready! triggers planning]
     }
   }
 }
+```
+
+**Security**: PluginRegistry provides credential ID templates to Planner, NOT credential values. Actual credentials (OAuth tokens, API keys) are stored in n8n Secrets Vault and never exposed to the LLM
 ```
 
 **Why important**: Adding new capabilities only requires editing the Registry, not the orchestrators.
@@ -657,7 +671,7 @@ n8n Workflow:
 - Policy (GLOBAL_SPEC version)
 
 **Process**:
-1. Planner calls Claude API with temperature=0
+1. Planner calls local LLM with temperature=0 (self-hosted, not cloud API)
 2. Canonicalize plan JSON (sort keys, deterministic serialization)
 3. Sign with Ed25519 (cryptographic signature)
 4. Hash: SHA-256 of canonical plan bytes
@@ -1074,9 +1088,9 @@ See [README.md Tech Stack section](../../README.md#tech-stack) for the complete 
 
 **Summary**:
 - **Backend**: Python 3.11+ (FastAPI, Pydantic, SQLAlchemy async)
-- **Orchestration**: n8n (all workflows with built-in persistence)
+- **Orchestration**: n8n (self-hosted, all workflows with built-in persistence and Secrets Vault)
 - **Data**: PostgreSQL 16 + pgvector, Redis 7
-- **AI**: Anthropic Claude (planning), OpenAI (embeddings only)
+- **AI**: Local LLM (self-hosted for planning, e.g., Ollama/vLLM); embeddings deferred (VectorIndex not in MVP)
 - **Testing**: pytest, ruff, mypy
 - **Infra**: Docker, GitHub Actions
 
@@ -1462,6 +1476,58 @@ usecases/<UseCase>/
 **Decision**: PlanLibrary stores and retrieves plans via structured queries only. Embedding generation, storage, and similarity search are removed from PlanLibrary scope.
 
 **Rationale**: Embedding is VectorIndex's responsibility per the MODULAR_ARCHITECTURE separation. PlanLibrary is a foundation Memory Layer component — it provides CRUD operations for plan data. If semantic search is needed later, VectorIndex indexes PlanLibrary data externally (PlanWriter triggers re-indexing).
+
+### Secrets Management & LLM Isolation
+
+**Decision**: All credentials, API keys, and secrets are stored exclusively in n8n's Secrets Vault. The LLM/Planner agent has **zero access** to credential values.
+
+**Architecture**:
+- **Storage**: n8n Secrets Vault (self-hosted n8n instance, encrypted at rest)
+- **LLM**: Local LLM (self-hosted) references credential IDs only, never actual values
+- **Plan Format**: Plans contain credential references (e.g., `"credential_id": "gcal_user_123"`)
+- **Execution**: n8n WorkflowBuilder binds credential IDs to actual secrets at runtime
+- **Security Boundary**: Planner generates plans with credential IDs → n8n resolves credentials during execution
+
+**Rationale**:
+- **Prompt injection protection**: LLM prompt injection cannot leak credentials because the LLM never sees actual credential values
+- **Credential rotation**: Credentials can be rotated in n8n Secrets Vault without changing plans (plans reference stable IDs, not ephemeral tokens)
+- **Least-privilege isolation**: Each user's integration accounts are isolated in n8n with separate credential entries
+- **Audit trail**: n8n logs credential usage (which credential ID, when, by which user) without exposing values
+- **Multi-user safety**: User A's Google credentials ≠ User B's Google credentials; credential IDs scoped by `user_id`
+
+**Example Plan Step**:
+```json
+{
+  "step": 1,
+  "role": "Fetcher",
+  "uses": "google.calendar",
+  "call": "list_free_busy",
+  "credential_ref": "gcal_user_{{user_id}}_primary",  // ID only, not actual OAuth token
+  "args": {
+    "calendar_id": "primary",
+    "time_min": "2026-03-01T00:00:00Z"
+  }
+}
+```
+
+**n8n Credential Resolution**:
+When WorkflowBuilder generates the n8n workflow JSON, it maps `credential_ref` to the actual n8n credential ID:
+```json
+{
+  "nodes": [{
+    "type": "n8n-nodes-base.googleCalendar",
+    "credentials": {
+      "googleCalendarOAuth2Api": "gcal_user_123_primary"  // n8n resolves to actual OAuth token
+    },
+    "parameters": { ... }
+  }]
+}
+```
+
+**Deployment Model**:
+- **Local LLM**: Self-hosted (e.g., Ollama, vLLM) for plan generation
+- **Local n8n**: Self-hosted n8n instance with Secrets Vault
+- **No cloud dependencies for secrets**: Credentials never leave the local environment
 
 ---
 
