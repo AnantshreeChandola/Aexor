@@ -1,7 +1,7 @@
 # Component Implementation Status
 
-**Last Updated**: 2026-02-11
-**Total Components**: 16 (across 4 layers)
+**Last Updated**: 2026-02-28
+**Total Components**: 16 (across 4 layers, VectorIndex deferred)
 
 Legend:
 - `✓` - Completed and verified
@@ -24,12 +24,14 @@ Legend:
 - **PR**: [#2](https://github.com/AnantshreeChandola/Personal-agent/pull/2) - ProfileStore implementation with shared infrastructure
 
 ### History
-- SPEC.md: ✗
-- LLD.md: ✗
-- Code: ✗
-- Tests: ✗
-- Schemas: ✗
-- **Purpose**: Remember normalized, PII-light facts about past actions
+- SPEC.md: ✓
+- LLD.md: ✓
+- Code: ✓
+- Tests: ✓
+- Schemas: ✓
+- **Purpose**: Remember normalized, PII-light facts about past actions (Tier 3 data source)
+- **Status**: ✅ **COMPLETED** - Fact storage with pattern detection, 30-day TTL, soft-delete
+- **PR**: [#5](https://github.com/AnantshreeChandola/Personal-agent/pull/5) - History Memory Layer implementation
 
 ### VectorIndex
 - SPEC.md: ✗
@@ -38,6 +40,7 @@ Legend:
 - Tests: ✗
 - Schemas: ✗
 - **Purpose**: Find similar past situations by semantic meaning (pgvector)
+- **Status**: 🔄 **DEFERRED** - Not needed for MVP; ContextRAG uses structured queries (see HLD §12)
 
 ### PlanLibrary
 - SPEC.md: ✓
@@ -162,25 +165,27 @@ Legend:
 ## Summary Statistics
 
 ### By Status
-- ✓ Completed: 2/16 (12%)
+- ✓ Completed: 3/16 (19%)
+- 🔄 Deferred: 1/16 (6% - VectorIndex)
 - WIP In Progress: 0/16 (0%)
-- ✗ Not Started: 14/16 (88%)
+- ✗ Not Started: 12/16 (75%)
 
 ### By Layer
-- Memory Layer: 2/4 completed (ProfileStore ✅, PlanLibrary ✅)
+- Memory Layer: 3/4 completed (ProfileStore ✅, PlanLibrary ✅, History ✅; VectorIndex deferred)
 - Domain Layer: 0/6 started
 - Orchestration Layer: 0/5 started
 - Platform Layer: 0/1 started
 
 ### Critical Path (Recommended Order)
 1. **Phase 1**: Foundation
-   - ~~ProfileStore~~ ✅, ~~PlanLibrary~~ ✅, PluginRegistry, Signer
+   - ~~ProfileStore~~ ✅, ~~PlanLibrary~~ ✅, ~~History~~ ✅, PluginRegistry, Signer
 2. **Phase 2**: Planning
    - Intake, ContextRAG, Planner
 3. **Phase 3**: Orchestration
    - WorkflowBuilder, PreviewOrchestrator, ApprovalGate, ExecuteOrchestrator
 4. **Phase 4**: Advanced
-   - ExecutionMonitor, History, VectorIndex, PlanWriter, Audit
+   - ExecutionMonitor, PlanWriter, Audit
+   - ~~VectorIndex~~ 🔄 (Deferred - not needed for MVP, see HLD §12)
 
 ---
 
@@ -192,6 +197,15 @@ Legend:
 - See `docs/architecture/Project_HLD.md` for detailed component descriptions
 
 ## Recent Achievements
+
+### History (✅ Completed - Feb 2026)
+- **Tier 3 data source** with normalized, PII-light fact storage
+- **Pattern detection**: Detects recurring behavioral patterns (e.g., "usually meets Alice on Tuesdays")
+- **30-day TTL with soft-delete**: Facts expire after 30 days, supports forget/export
+- **Idempotent fact storage**: SHA256 hash deduplication prevents duplicate facts
+- **PostgreSQL tables**: `history` (facts) and `fact_patterns` (detected patterns)
+- **Migration**: Database schema created with proper indexes for query performance
+- **PR**: [#5](https://github.com/AnantshreeChandola/Personal-agent/pull/5) - History Memory Layer implementation
 
 ### PlanLibrary (✅ Completed - Feb 2026)
 - **Tier 3 data source** with Evidence Item format for ContextRAG integration
