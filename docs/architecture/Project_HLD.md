@@ -14,6 +14,9 @@ User Request → Preview → Approval → Execute → Learn
   [Intent]   [Show Me]  [Confirm]  [Do It]  [Remember]
 ```
 
+### Deployment Model
+**Self-hosted, single-tenant, multi-user.** One deployment instance serves multiple users, each with their own integration accounts. There is no multi-tenancy — `tenant_id` is not used anywhere in the system.
+
 ### Core Idea
 1. **Never do anything without showing the user first** (Preview-first safety)
 2. **Plans are deterministic and signed** (Same inputs → same plan → same signature)
@@ -735,16 +738,15 @@ else:
 **CRITICAL**: Keys MUST include multi-user scope to prevent cross-user collisions:
 
 ```
-idem:{tenant_id}:{user_id}:{integration_account_id}:{plan_execution_id}:{step_id}:{operation}:{input_hash}
+idem:{user_id}:{integration_account_id}:{plan_execution_id}:{step_id}:{operation}:{input_hash}
 ```
 
 **Example**:
 ```
-idem:tenant-1:user-123:gcal-acct-xyz:plan-01HX:5:create_event:hash-a1b2
+idem:user-123:gcal-acct-xyz:plan-01HX:5:create_event:hash-a1b2
 ```
 
 **Why each component matters**:
-- `tenant_id`: Deployment isolation (MVP: single tenant, but architecture supports multi-tenant)
 - `user_id`: **Prevents User A's retry from returning User B's cached result**
 - `integration_account_id`: **Prevents cross-account pollution** (User A's Google ≠ User B's Google)
 - `plan_execution_id`: Unique execution instance (ULID)
@@ -905,7 +907,7 @@ nodes:
 
 **Benefits**:
 - ✅ Safe workflow-level retry (skips already-executed steps)
-- ✅ Multi-user safe (keys scoped by workspace/user/integration)
+- ✅ Multi-user safe (keys scoped by user/integration)
 - ✅ Prevents thundering herd (IN_FLIGHT blocks concurrent executions)
 - ✅ Stale execution recovery (takeover after timeout)
 - ✅ Retry intelligence (FAILED state tracks attempt count)
@@ -2455,6 +2457,7 @@ After reading this HLD, you should:
 
 ---
 
-**Document Version**: HLD v4.5
-**Last Updated**: 2026-03-03
-**Changes from v4.4**: **MVP scope clarification for multi-user single-tenant deployment.** Major architectural updates: (1) Reframed runtime roles as logical plan-step categories (§4) - all execution happens in n8n, not separate services. (2) Multi-user safe idempotency (§5) - 3-state records (IN_FLIGHT/SUCCEEDED/FAILED) with scoping by tenant/user/integration account, atomic claim pattern prevents duplicate operations on workflow retry. (3) Dual retry strategy (§5) - node-level retries (n8n config) + workflow-level retries (ExecutionMonitor with exponential backoff: 60s, 300s, 900s). (4) Added ExecutionMonitor component (§3, §8, §10, §13) - polls n8n API every 30s, detects stuck executions (5min timeout), triggers workflow retries (max 3 attempts), enforces time budgets (60min). Replaced DurableOrchestrator with ExecutionMonitor. (5) Removed workspace_id from idempotency and locking keys (no workspace concept in project). (6) Clarified n8n persistence capabilities (§8) - stores execution state but doesn't auto-retry workflows or detect stuck executions. (7) Updated §13 - replaced task queue pattern with ExecutionMonitor pattern, clarified parallel execution happens in n8n (WorkflowBuilder generates Split/Merge nodes), single Planner instance uses async/await for I/O concurrency (no threading/multiprocessing needed).
+**Document Version**: HLD v4.6
+**Last Updated**: 2026-03-05
+**Changes from v4.5**: (1) Added explicit Deployment Model section: self-hosted, single-tenant, multi-user. (2) Removed `tenant_id` from idempotency key structure and examples — system scopes by `user_id:integration_account_id` only. (3) Aligned with GLOBAL_SPEC v2.2.
+**Changes from v4.4**: **MVP scope clarification for multi-user single-tenant deployment.** Major architectural updates: (1) Reframed runtime roles as logical plan-step categories (§4) - all execution happens in n8n, not separate services. (2) Multi-user safe idempotency (§5) - 3-state records (IN_FLIGHT/SUCCEEDED/FAILED) with scoping by user/integration account, atomic claim pattern prevents duplicate operations on workflow retry. (3) Dual retry strategy (§5) - node-level retries (n8n config) + workflow-level retries (ExecutionMonitor with exponential backoff: 60s, 300s, 900s). (4) Added ExecutionMonitor component (§3, §8, §10, §13) - polls n8n API every 30s, detects stuck executions (5min timeout), triggers workflow retries (max 3 attempts), enforces time budgets (60min). Replaced DurableOrchestrator with ExecutionMonitor. (5) Removed workspace_id from idempotency and locking keys (no workspace concept in project). (6) Clarified n8n persistence capabilities (§8) - stores execution state but doesn't auto-retry workflows or detect stuck executions. (7) Updated §13 - replaced task queue pattern with ExecutionMonitor pattern, clarified parallel execution happens in n8n (WorkflowBuilder generates Split/Merge nodes), single Planner instance uses async/await for I/O concurrency (no threading/multiprocessing needed).

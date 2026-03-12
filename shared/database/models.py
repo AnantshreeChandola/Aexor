@@ -18,7 +18,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 
 from .adapter import Base
 
@@ -314,3 +314,99 @@ class FactPatternTable(Base):
         ),
         Index("idx_fact_patterns_last_seen", last_seen),
     )
+
+
+# PluginRegistry Tables - Owned by PluginRegistry component
+
+class ToolTable(Base):
+    """
+    Tools table - registered external integrations.
+
+    Owned by PluginRegistry component.
+    Stores credential ID templates only, NEVER actual secrets.
+    """
+    __tablename__ = "tools"
+
+    tool_id = Column(String(128), primary_key=True)
+    display_name = Column(String(255), nullable=False)
+    credential_template = Column(String(512), nullable=False)
+    n8n_credential_type = Column(String(128), nullable=False)
+    active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("NOW()"),
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("NOW()"),
+    )
+
+    __table_args__ = (
+        Index(
+            "idx_tools_active",
+            tool_id,
+            postgresql_where=text("active = TRUE"),
+        ),
+    )
+
+
+class OperationTable(Base):
+    """
+    Operations table - capabilities of a registered tool.
+
+    Owned by PluginRegistry component.
+    """
+    __tablename__ = "operations"
+
+    id = Column(
+        SQLAlchemy_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    operation_id = Column(String(128), nullable=False)
+    tool_id = Column(
+        String(128),
+        ForeignKey("tools.tool_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    n8n_node = Column(String(255), nullable=False)
+    previewable = Column(Boolean, nullable=False, default=False)
+    idempotent = Column(Boolean, nullable=False, default=False)
+    scopes = Column(
+        ARRAY(String),
+        nullable=False,
+        server_default=text("'{}'"),
+    )
+    compensation = Column(String(128), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("NOW()"),
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "tool_id", "operation_id",
+            name="uq_operations_tool_operation",
+        ),
+        Index("idx_operations_tool", tool_id),
+    )
+
+
+class RegistryVersionTable(Base):
+    """
+    Registry versions table - monotonically increasing version counter.
+
+    Owned by PluginRegistry component.
+    """
+    __tablename__ = "registry_versions"
+
+    version = Column(Integer, primary_key=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("NOW()"),
+    )
+    change_summary = Column(String(512), nullable=False)

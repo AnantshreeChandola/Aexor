@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Operation",
+  "description": "Schema for a tool operation (capability).",
+  "type": "object",
+  "required": ["n8n_node"],
+  "properties": {
+    "operation_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{1,126}$",
+      "description": "Operation identifier, unique within its parent tool."
+    },
+    "n8n_node": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "description": "n8n node type for workflow generation."
+    },
+    "previewable": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether this operation can run in preview (read-only) mode."
+    },
+    "idempotent": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether this operation is safe to retry."
+    },
+    "scopes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "Required OAuth/permission scopes."
+    },
+    "compensation": {
+      "type": ["string", "null"],
+      "default": null,
+      "description": "Operation ID of the undo operation on the same tool."
+    }
+  },
+  "additionalProperties": false
+}
