@@ -31,9 +31,7 @@ class SignatureVerifier:
             public_key_hex: Hex-encoded Ed25519 public key.
                            Reads PLAN_SIGNING_PUBLIC_KEY env if None.
         """
-        self.public_key_hex = public_key_hex or os.getenv(
-            "PLAN_SIGNING_PUBLIC_KEY", ""
-        )
+        self.public_key_hex = public_key_hex or os.getenv("PLAN_SIGNING_PUBLIC_KEY", "")
         logger.info(
             "Signature verifier initialized",
             extra={"component": "PlanLibrary"},
@@ -73,9 +71,7 @@ class SignatureVerifier:
         if signature_data.get("algorithm") != "ed25519":
             raise InvalidSignatureError(
                 plan_id=plan_id,
-                reason=(
-                    f"Unsupported algorithm: {signature_data.get('algorithm')}"
-                ),
+                reason=(f"Unsupported algorithm: {signature_data.get('algorithm')}"),
             )
 
         try:
@@ -130,9 +126,7 @@ class SignatureVerifier:
             signature_bytes = bytes.fromhex(signature_data["signature_hex"])
 
             # Load public key and verify
-            public_key = Ed25519PublicKey.from_public_bytes(
-                public_key_bytes
-            )
+            public_key = Ed25519PublicKey.from_public_bytes(public_key_bytes)
             public_key.verify(signature_bytes, message_bytes)
 
             logger.info(

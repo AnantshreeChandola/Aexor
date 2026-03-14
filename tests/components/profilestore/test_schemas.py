@@ -6,6 +6,7 @@ These tests will FAIL until SchemaRegistry is implemented (TDD Red phase).
 """
 
 import pytest
+
 from components.ProfileStore.adapters.schema_registry import SchemaRegistry
 
 

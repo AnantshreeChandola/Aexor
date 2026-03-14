@@ -9,7 +9,6 @@ Reference: LLD.md, tasks.md T102
 
 import json
 from datetime import datetime
-from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError as PydanticValidationError
@@ -33,7 +32,6 @@ from components.PlanLibrary.domain.models import (
     canonicalize_plan,
     compute_plan_hash,
 )
-
 
 # Valid ULID for testing (Crockford base32, 26 chars)
 VALID_ULID = "01HX1234567890ABCDEFGHJKMN"
@@ -195,8 +193,12 @@ class TestStorePlanRequest:
         request = StorePlanRequest(
             plan={"plan_id": VALID_ULID, "graph": [], "meta": {"intent_type": "test"}},
             signature={"algorithm": "ed25519", "public_key": "abc", "signature_hex": "def"},
-            outcome={"success": True, "execution_start": "2025-01-01T00:00:00Z",
-                      "execution_end": "2025-01-01T00:01:00Z", "total_steps": 5},
+            outcome={
+                "success": True,
+                "execution_start": "2025-01-01T00:00:00Z",
+                "execution_end": "2025-01-01T00:01:00Z",
+                "total_steps": 5,
+            },
             metrics={"execute_latency_ms": 500},
         )
         assert request.plan["plan_id"] == VALID_ULID
@@ -216,8 +218,12 @@ class TestStorePlanRequest:
         request = StorePlanRequest(
             plan={"plan_id": VALID_ULID, "graph": [{"step": 1}], "meta": {"intent_type": "test"}},
             signature={"algorithm": "ed25519", "public_key": "abc", "signature_hex": "def"},
-            outcome={"success": True, "execution_start": "2025-01-01T00:00:00Z",
-                      "execution_end": "2025-01-01T00:01:00Z", "total_steps": 1},
+            outcome={
+                "success": True,
+                "execution_start": "2025-01-01T00:00:00Z",
+                "execution_end": "2025-01-01T00:01:00Z",
+                "total_steps": 1,
+            },
             metrics={"execute_latency_ms": 100},
         )
         serialized = request.model_dump()

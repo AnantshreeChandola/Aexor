@@ -7,8 +7,9 @@ Uses mocked adapters.
 Reference: tasks.md T204
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from components.PlanLibrary.domain.models import PerformanceTrends
 from components.PlanLibrary.service.analytics_service import AnalyticsService
@@ -32,9 +33,7 @@ class TestSuccessRates:
     """Tests for AnalyticsService.calculate_success_rates()."""
 
     @pytest.mark.asyncio
-    async def test_success_rates_calculated(
-        self, analytics_service, mock_db_adapter
-    ):
+    async def test_success_rates_calculated(self, analytics_service, mock_db_adapter):
         """Success rates calculated correctly (US-4 scenario 1)."""
         mock_db_adapter.get_success_rates.return_value = {
             "schedule_meeting": 0.85,
@@ -42,9 +41,7 @@ class TestSuccessRates:
             "send_email": 0.95,
         }
 
-        result = await analytics_service.calculate_success_rates(
-            timeframe_days=30
-        )
+        result = await analytics_service.calculate_success_rates(timeframe_days=30)
 
         assert isinstance(result, dict)
         assert result["schedule_meeting"] == 0.85
@@ -52,9 +49,7 @@ class TestSuccessRates:
         assert result["send_email"] == 0.95
 
     @pytest.mark.asyncio
-    async def test_success_rates_empty(
-        self, analytics_service, mock_db_adapter
-    ):
+    async def test_success_rates_empty(self, analytics_service, mock_db_adapter):
         """Success rates return empty dict when no data."""
         mock_db_adapter.get_success_rates.return_value = {}
 
@@ -62,33 +57,25 @@ class TestSuccessRates:
         assert result == {}
 
     @pytest.mark.asyncio
-    async def test_success_rates_custom_timeframe(
-        self, analytics_service, mock_db_adapter
-    ):
+    async def test_success_rates_custom_timeframe(self, analytics_service, mock_db_adapter):
         """Success rates respect custom timeframe."""
         await analytics_service.calculate_success_rates(timeframe_days=7)
 
-        mock_db_adapter.get_success_rates.assert_called_once_with(
-            timeframe_days=7
-        )
+        mock_db_adapter.get_success_rates.assert_called_once_with(timeframe_days=7)
 
 
 class TestPerformanceTrends:
     """Tests for AnalyticsService.get_performance_trends()."""
 
     @pytest.mark.asyncio
-    async def test_performance_trends_aggregated(
-        self, analytics_service, mock_db_adapter
-    ):
+    async def test_performance_trends_aggregated(self, analytics_service, mock_db_adapter):
         """Performance trends aggregated (US-4 scenario 2)."""
         mock_db_adapter.get_success_rates.return_value = {
             "schedule_meeting": 0.85,
             "book_restaurant": 0.72,
         }
 
-        result = await analytics_service.get_performance_trends(
-            intent_type="schedule_meeting"
-        )
+        result = await analytics_service.get_performance_trends(intent_type="schedule_meeting")
 
         assert isinstance(result, PerformanceTrends)
         assert result.intent_type == "schedule_meeting"
@@ -96,9 +83,7 @@ class TestPerformanceTrends:
         assert result.trend_period_days == 30
 
     @pytest.mark.asyncio
-    async def test_performance_trends_all_intents(
-        self, analytics_service, mock_db_adapter
-    ):
+    async def test_performance_trends_all_intents(self, analytics_service, mock_db_adapter):
         """Performance trends for all intents averages success rates."""
         mock_db_adapter.get_success_rates.return_value = {
             "a": 0.8,

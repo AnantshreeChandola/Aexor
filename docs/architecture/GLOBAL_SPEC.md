@@ -1,7 +1,8 @@
 # GLOBAL SPEC — Operating Contract (v2.1)
 
-**Status:** Active  
-**Applies to:** All components in this repository  
+**Status:** Active
+**Applies to:** All components in this repository
+**Deployment model:** Self-hosted, single-tenant, multi-user (no `tenant_id` — one instance, many users, each with their own integration accounts)
 **Default timezone:** America/Chicago
 
 ---
@@ -36,7 +37,7 @@ Each `SPEC.md` (component or use case) **inherits** these rules and may only dev
 ### Execute (via n8n)
 - Allowed **only after explicit human approval** with a valid approval token and verified plan signature.
 - Calls real providers under **least-privilege** credentials.
-- **Idempotency required**: All side-effecting steps (Booker role) use scoped keys (`tenant:user:integration:plan:step:op:hash`) to prevent duplicate operations across users.
+- **Idempotency required**: All side-effecting steps (Booker role) use scoped keys (`user:integration:plan:step:op:hash`) to prevent duplicate operations across users.
 - **Retry safety**: Node-level retries (transient failures) + workflow-level retries (execution failures) with idempotency preventing duplicates.
 - Returns an **Execute wrapper**.
 
@@ -163,7 +164,7 @@ Same tuple ⇒ same canonical plan bytes ⇒ same hash/signature.
 - All steps execute as **n8n workflow nodes** (WorkflowBuilder generates n8n JSON)
 - Parallelism: n8n Split/Merge nodes for steps with no dependencies (`after: []`)
 - Dependencies: Steps with `after: [1, 2]` wait for completion before executing
-- Resource locks: Scoped by `user_id:integration_account_id:resource:entity` (prevent cross-user conflicts)
+- Resource locks: Scoped by `user_id:integration_account_id:resource:entity` (prevent cross-user conflicts within the single-tenant deployment)
 
 ---
 
@@ -258,6 +259,7 @@ Use-case packets in `usecases/<UseCase>/` (when needed):
 
 ---
 
-**Document Version**: GLOBAL_SPEC v2.1
-**Last Updated**: 2026-03-03
-**Changes from v2.0**: MVP scope clarification - (1) Updated §1 Execute to use n8n for all workflows (removed Temporal/Durable distinction for MVP), added idempotency scoping by tenant/user/integration, added retry safety (node-level + workflow-level with ExecutionMonitor). (2) Updated §2.8 Runtime Agent Roles to clarify roles are logical categories (NOT separate services), all execution in n8n, roles determine policy metadata (idempotency, retry, compensation). (3) Updated resource lock scoping to include user_id and integration_account_id.  
+**Document Version**: GLOBAL_SPEC v2.2
+**Last Updated**: 2026-03-05
+**Changes from v2.1**: (1) Defined deployment model as self-hosted, single-tenant, multi-user. (2) Removed `tenant_id` from idempotency key scoping — system uses `user:integration:plan:step:op:hash`. (3) Added deployment model line to document header.
+**Changes from v2.0**: MVP scope clarification - (1) Updated §1 Execute to use n8n for all workflows (removed Temporal/Durable distinction for MVP), added idempotency scoping by user/integration, added retry safety (node-level + workflow-level with ExecutionMonitor). (2) Updated §2.8 Runtime Agent Roles to clarify roles are logical categories (NOT separate services), all execution in n8n, roles determine policy metadata (idempotency, retry, compensation). (3) Updated resource lock scoping to include user_id and integration_account_id.

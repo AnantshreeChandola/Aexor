@@ -7,13 +7,10 @@ Uses mocked adapters following ProfileStore test patterns.
 Reference: tasks.md T204
 """
 
-import pytest
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import uuid4
+from unittest.mock import AsyncMock, MagicMock
 
-from shared.database.error_handler import DatabaseIntegrityError
-from shared.schemas.evidence import EvidenceItem
+import pytest
 
 from components.PlanLibrary.domain.models import (
     DuplicatePlanError,
@@ -23,7 +20,8 @@ from components.PlanLibrary.domain.models import (
     StorePlanResponse,
 )
 from components.PlanLibrary.service.plan_service import PlanService
-
+from shared.database.error_handler import DatabaseIntegrityError
+from shared.schemas.evidence import EvidenceItem
 
 # Test constants
 VALID_ULID = "01HX1234567890ABCDEFGHJKMN"
@@ -142,12 +140,10 @@ class TestStorePlan:
         assert outcome_arg.success is False
 
     @pytest.mark.asyncio
-    async def test_store_plan_duplicate_raises_error(
-        self, plan_service, mock_db_adapter
-    ):
+    async def test_store_plan_duplicate_raises_error(self, plan_service, mock_db_adapter):
         """Store plan with duplicate plan_id -- DuplicatePlanError (DR 4)."""
-        mock_db_adapter.store_plan_transaction.side_effect = (
-            DatabaseIntegrityError("duplicate key violates unique constraint")
+        mock_db_adapter.store_plan_transaction.side_effect = DatabaseIntegrityError(
+            "duplicate key violates unique constraint"
         )
 
         with pytest.raises(DuplicatePlanError) as exc_info:
@@ -161,12 +157,10 @@ class TestStorePlan:
         assert exc_info.value.plan_id == VALID_ULID
 
     @pytest.mark.asyncio
-    async def test_store_plan_invalid_signature(
-        self, plan_service, mock_signature_verifier
-    ):
+    async def test_store_plan_invalid_signature(self, plan_service, mock_signature_verifier):
         """Store plan with invalid signature -- InvalidSignatureError (US-1 scenario 4)."""
-        mock_signature_verifier.verify_signature.side_effect = (
-            InvalidSignatureError(plan_id=VALID_ULID, reason="bad sig")
+        mock_signature_verifier.verify_signature.side_effect = InvalidSignatureError(
+            plan_id=VALID_ULID, reason="bad sig"
         )
 
         with pytest.raises(InvalidSignatureError):
@@ -228,9 +222,7 @@ class TestGetPlansByIntent:
     """Tests for PlanService.get_plans_by_intent()."""
 
     @pytest.mark.asyncio
-    async def test_query_returns_filtered_results(
-        self, plan_service, mock_db_adapter
-    ):
+    async def test_query_returns_filtered_results(self, plan_service, mock_db_adapter):
         """Query by intent with success threshold returns filtered results (US-2 s1)."""
         mock_db_adapter.get_plans_by_intent.return_value = [
             {
@@ -254,9 +246,7 @@ class TestGetPlansByIntent:
         assert result[0].tier == 3
 
     @pytest.mark.asyncio
-    async def test_query_filters_by_intent(
-        self, plan_service, mock_db_adapter
-    ):
+    async def test_query_filters_by_intent(self, plan_service, mock_db_adapter):
         """Query filters to matching intent types only (US-2 s2)."""
         mock_db_adapter.get_plans_by_intent.return_value = []
 
@@ -267,9 +257,7 @@ class TestGetPlansByIntent:
         assert len(result) == 0
 
     @pytest.mark.asyncio
-    async def test_query_with_recency(
-        self, plan_service, mock_db_adapter
-    ):
+    async def test_query_with_recency(self, plan_service, mock_db_adapter):
         """Query with recency preference (US-2 scenario 3)."""
         await plan_service.get_plans_by_intent(
             intent_type="test",
@@ -318,9 +306,7 @@ class TestEvidenceItemFormat:
     """Tests for Evidence Item output format compliance."""
 
     @pytest.mark.asyncio
-    async def test_evidence_item_type_plan(
-        self, plan_service, mock_db_adapter
-    ):
+    async def test_evidence_item_type_plan(self, plan_service, mock_db_adapter):
         """Evidence Items have type='plan'."""
         mock_db_adapter.get_plans_by_intent.return_value = [
             {

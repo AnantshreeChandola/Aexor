@@ -57,6 +57,13 @@ async def lifespan(app: FastAPI):
         encryption_adapter=get_encryption_adapter(),
     )
 
+    # PluginRegistry services
+    from components.PluginRegistry.adapters.db import RegistryDatabaseAdapter
+    from components.PluginRegistry.service.registry_service import RegistryService
+
+    registry_db = RegistryDatabaseAdapter()
+    app.state.registry_service = RegistryService(db_adapter=registry_db)
+
     # History services
     from components.History.adapters.db import DatabaseAdapter as HistoryDBAdapter
     from components.History.service.evidence_service import EvidenceService
@@ -101,6 +108,7 @@ def create_app() -> FastAPI:
     # Routers
     from components.History.api.routes import router as history_router
     from components.PlanLibrary.api.routes import router as plan_router
+    from components.PluginRegistry.api.routes import router as registry_router
     from components.ProfileStore.api.routes import router as profile_router
     from shared.api.auth_routes import router as auth_router
 
@@ -108,6 +116,7 @@ def create_app() -> FastAPI:
     app.include_router(plan_router)
     app.include_router(profile_router)
     app.include_router(history_router)
+    app.include_router(registry_router)
 
     # Root health check
     @app.get("/health")

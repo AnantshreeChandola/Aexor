@@ -8,7 +8,6 @@ Reference: tasks.md T302
 """
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from components.PlanLibrary.adapters.signature_verifier import (
     SignatureVerifier,
@@ -16,7 +15,6 @@ from components.PlanLibrary.adapters.signature_verifier import (
 from components.PlanLibrary.domain.models import (
     InvalidSignatureError,
 )
-
 
 VALID_ULID = "01HX1234567890ABCDEFGHJKMN"
 
@@ -29,6 +27,7 @@ class TestSignatureVerifier:
         from cryptography.hazmat.primitives.asymmetric.ed25519 import (
             Ed25519PrivateKey,
         )
+
         from components.PlanLibrary.domain.models import canonicalize_plan
 
         # Generate a real Ed25519 keypair

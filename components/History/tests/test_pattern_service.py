@@ -150,7 +150,7 @@ async def test_get_patterns_filtered_by_intent(pattern_service, mock_db_adapter)
     ]
     mock_db_adapter.query_patterns.return_value = patterns
 
-    response = await pattern_service.get_patterns(
+    await pattern_service.get_patterns(
         user_id=user_id,
         intent_type="schedule_meeting",
         min_confidence=0.5,

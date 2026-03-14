@@ -1,0 +1,59 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Tool Definition",
+  "description": "Schema for a registered external integration tool.",
+  "type": "object",
+  "required": [
+    "tool_id",
+    "display_name",
+    "credential_template",
+    "n8n_credential_type",
+    "operations"
+  ],
+  "properties": {
+    "tool_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*\\.[a-z][a-z0-9_]*$",
+      "maxLength": 128,
+      "description": "Unique tool identifier in provider.service format."
+    },
+    "display_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "description": "Human-readable tool name."
+    },
+    "credential_template": {
+      "type": "string",
+      "maxLength": 512,
+      "description": "Mustache-style credential ID template. NEVER actual secrets."
+    },
+    "n8n_credential_type": {
+      "type": "string",
+      "maxLength": 128,
+      "description": "n8n credential type identifier."
+    },
+    "active": {
+      "type": "boolean",
+      "default": true,
+      "description": "Whether the tool is active in the catalog."
+    },
+    "operations": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "operation.schema.json"
+      },
+      "minProperties": 1,
+      "description": "Map of operation_id to operation definition."
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false
+}

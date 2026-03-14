@@ -40,3 +40,8 @@ def get_fact_service(request: Request) -> Any:
 def get_pattern_service(request: Request) -> Any:
     """Get PatternService singleton from app state."""
     return request.app.state.pattern_service
+
+
+def get_registry_service(request: Request) -> Any:
+    """Get RegistryService singleton from app state."""
+    return request.app.state.registry_service

@@ -19,19 +19,17 @@ from shared.schemas.evidence import EvidenceItem
 from ..adapters.db import DatabaseAdapter
 from ..adapters.signature_verifier import SignatureVerifier
 from ..domain.models import (
+    MAX_PLAN_SIZE_BYTES,
+    MAX_STEP_COUNT,
+    ULID_PATTERN,
     DuplicatePlanError,
-    InvalidSignatureError,
     PlanDB,
     PlanMetricsDB,
-    PlanNotFoundError,
     PlanOutcomeDB,
     PlanTooLargeError,
     StorePlanResponse,
     canonicalize_plan,
     compute_plan_hash,
-    MAX_PLAN_SIZE_BYTES,
-    MAX_STEP_COUNT,
-    ULID_PATTERN,
 )
 from .evidence_service import EvidenceService
 
@@ -107,7 +105,7 @@ class PlanService:
 
         # Decision Rule 1: Validate plan_id is valid ULID
         if not plan_id or not ULID_PATTERN.match(plan_id):
-            raise ValueError(f"Invalid plan_id: must be valid ULID format")
+            raise ValueError("Invalid plan_id: must be valid ULID format")
 
         # Decision Rule 2: Validate required fields
         required_fields = {"plan_id", "graph", "meta"}
@@ -134,10 +132,7 @@ class PlanService:
         if size_bytes > MAX_PLAN_SIZE_BYTES:
             raise PlanTooLargeError(
                 plan_id=plan_id,
-                reason=(
-                    f"Plan size {size_bytes} bytes exceeds "
-                    f"maximum {MAX_PLAN_SIZE_BYTES}"
-                ),
+                reason=(f"Plan size {size_bytes} bytes exceeds maximum {MAX_PLAN_SIZE_BYTES}"),
             )
 
         # Decision Rule 7: Compute SHA-256 hash
@@ -150,11 +145,7 @@ class PlanService:
         meta = plan.get("meta", {})
         intent_type = meta.get("intent_type", "unknown")
         created_at_str = meta.get("created_at")
-        created_at = (
-            datetime.fromisoformat(created_at_str)
-            if created_at_str
-            else datetime.utcnow()
-        )
+        created_at = datetime.fromisoformat(created_at_str) if created_at_str else datetime.utcnow()
 
         now = datetime.utcnow()
 
@@ -177,12 +168,8 @@ class PlanService:
             success=outcome.get("success", False),
             error_type=outcome.get("error_type"),
             error_details=outcome.get("error_details"),
-            execution_start=datetime.fromisoformat(
-                outcome["execution_start"]
-            ),
-            execution_end=datetime.fromisoformat(
-                outcome["execution_end"]
-            ),
+            execution_start=datetime.fromisoformat(outcome["execution_start"]),
+            execution_end=datetime.fromisoformat(outcome["execution_end"]),
             total_steps=outcome.get("total_steps", step_count),
             failed_step=outcome.get("failed_step"),
             context_data=outcome.get("context_data"),

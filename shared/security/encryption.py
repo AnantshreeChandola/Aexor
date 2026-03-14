@@ -7,10 +7,11 @@ Thread-safe and reusable across components.
 Reference: SHARED_INFRASTRUCTURE.md §3.1
 """
 
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-import os
 import base64
 import logging
+import os
+
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ class EncryptionService:
     Thread-safe: Yes (AESGCM is stateless)
     """
 
-    def __init__(self, key: bytes = None):
+    def __init__(self, key: bytes | None = None):
         """
         Initialize encryption service with AES-256 key.
 
@@ -56,9 +57,7 @@ class EncryptionService:
             key = base64.b64decode(key_b64)
 
         if len(key) != 32:
-            raise ValueError(
-                f"Encryption key must be 32 bytes (256 bits), got {len(key)} bytes"
-            )
+            raise ValueError(f"Encryption key must be 32 bytes (256 bits), got {len(key)} bytes")
 
         self.cipher = AESGCM(key)
         logger.info("Encryption service initialized with AES-256-GCM")

@@ -325,7 +325,7 @@ class DatabaseAdapter:
             return patterns
 
     @with_db_error_handling
-    async def cleanup_expired_facts(self, batch_size: int = 500) -> int:
+    async def cleanup_expired_facts(self, batch_size: int = 500) -> int:  # noqa: ARG002
         """
         Soft-delete facts past expires_at.
 
@@ -360,7 +360,7 @@ class DatabaseAdapter:
     async def hard_delete_old_facts(
         self,
         days_after_expiry: int = 90,
-        batch_size: int = 500,
+        batch_size: int = 500,  # noqa: ARG002
     ) -> int:
         """
         Hard-delete facts soft-deleted more than N days ago.

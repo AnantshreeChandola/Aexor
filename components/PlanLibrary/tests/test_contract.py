@@ -8,13 +8,10 @@ Reference: tasks.md T600
 """
 
 import json
-import pytest
 from datetime import datetime
-from uuid import uuid4
 
+import pytest
 from pydantic import ValidationError as PydanticValidationError
-
-from shared.schemas.evidence import EvidenceItem
 
 from components.PlanLibrary.domain.models import (
     DuplicatePlanError,
@@ -28,7 +25,7 @@ from components.PlanLibrary.domain.models import (
     compute_plan_hash,
 )
 from components.PlanLibrary.service.evidence_service import EvidenceService
-
+from shared.schemas.evidence import EvidenceItem
 
 VALID_ULID = "01HX1234567890ABCDEFGHJKMN"
 
@@ -132,13 +129,15 @@ class TestGlobalSpecCompliance:
     def test_source_ref_format(self):
         """Test source_ref follows planlibrary:plans/{id} pattern."""
         service = EvidenceService()
-        evidence = service.to_evidence_item({
-            "plan_id": VALID_ULID,
-            "intent_type": "test",
-            "step_count": 3,
-            "success_rate": 0.8,
-            "avg_execution_time_ms": 100.0,
-        })
+        evidence = service.to_evidence_item(
+            {
+                "plan_id": VALID_ULID,
+                "intent_type": "test",
+                "step_count": 3,
+                "success_rate": 0.8,
+                "avg_execution_time_ms": 100.0,
+            }
+        )
         assert evidence.source_ref == f"planlibrary:plans/{VALID_ULID}"
 
 
@@ -158,9 +157,7 @@ class TestErrorCodeContract:
         }
 
         for code, error_class in error_map.items():
-            assert issubclass(error_class, Exception), (
-                f"Error code {code} has no error class"
-            )
+            assert issubclass(error_class, Exception), f"Error code {code} has no error class"
 
     def test_invalid_signature_error_attributes(self):
         """InvalidSignatureError has required attributes for API response."""
@@ -277,12 +274,8 @@ class TestPreviewExecuteModelCompliance:
         preview_methods = [m for m in methods if m.startswith("preview_")]
         execute_methods = [m for m in methods if m.startswith("execute_")]
 
-        assert len(preview_methods) == 0, (
-            f"PlanService has preview methods: {preview_methods}"
-        )
-        assert len(execute_methods) == 0, (
-            f"PlanService has execute methods: {execute_methods}"
-        )
+        assert len(preview_methods) == 0, f"PlanService has preview methods: {preview_methods}"
+        assert len(execute_methods) == 0, f"PlanService has execute methods: {execute_methods}"
 
     def test_direct_operation_methods_exist(self):
         """PlanService has direct operation methods."""
@@ -293,19 +286,22 @@ class TestPreviewExecuteModelCompliance:
         assert "get_plans_by_intent" in methods
         assert "get_plan_by_id" in methods
 
+
 class TestEvidenceServiceContract:
     """Test EvidenceService compliance with GLOBAL_SPEC."""
 
     def test_to_evidence_item_output_format(self):
         """to_evidence_item returns correct Evidence Item format."""
         service = EvidenceService()
-        evidence = service.to_evidence_item({
-            "plan_id": VALID_ULID,
-            "intent_type": "schedule_meeting",
-            "step_count": 6,
-            "success_rate": 0.85,
-            "avg_execution_time_ms": 1200.0,
-        })
+        evidence = service.to_evidence_item(
+            {
+                "plan_id": VALID_ULID,
+                "intent_type": "schedule_meeting",
+                "step_count": 6,
+                "success_rate": 0.85,
+                "avg_execution_time_ms": 1200.0,
+            }
+        )
 
         assert evidence.type == "plan"
         assert evidence.tier == 3

@@ -4,9 +4,10 @@ Tests for Encryption Service (AES-256-GCM)
 Tests encryption/decryption roundtrip, error handling, and edge cases.
 """
 
-import pytest
 import base64
 import os
+
+import pytest
 from cryptography.exceptions import InvalidTag
 
 from shared.security.encryption import EncryptionService, get_encryption_service

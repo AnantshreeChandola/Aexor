@@ -1,8 +1,8 @@
 # Modular Architecture — Layered Component Tree
 
 **Status:** Active
-**Version:** 1.1
-**Conforms to:** GLOBAL_SPEC.md v2, Project_HLD.md v4.3
+**Version:** 1.2
+**Conforms to:** GLOBAL_SPEC.md v2.2, Project_HLD.md v4.6
 
 ---
 
@@ -79,11 +79,12 @@ Each component's database dependencies, component dependencies, and external ser
     │                  │  ┌──────────────────┐  ┌──────────────────┐
     └──────────────────┘  │ PluginRegistry   │  │ Audit            │
                           │                  │  │                  │
-                          │ • DB: None       │  │ • DB: PostgreSQL │
-                          │   (file-based)   │  │   (audit_events) │
-                          │ • Deps: None     │  │ • Deps: None     │
-                          │ • Ext: None      │  │ • Ext:           │
-                          └──────────────────┘  │   Logging,       │
+                          │ • DB: PostgreSQL │  │ • DB: PostgreSQL │
+                          │   (tools, ops,   │  │   (audit_events) │
+                          │    reg_versions) │  │ • Deps: None     │
+                          │ • Deps: None     │  │ • Ext:           │
+                          │ • Ext: None      │  │   Logging,       │
+                          └──────────────────┘
                                                 │   Prometheus     │
     ┌──────────────────┐                        └──────────────────┘
     │ PlanWriter       │
@@ -177,8 +178,12 @@ class MemoryLayer:
 | `plan_signatures` | `public` | PlanLibrary | Ed25519 signatures |
 | `plan_outcomes` | `public` | PlanLibrary | Execution results |
 | `vectors` | `public` | VectorIndex | Embedding vectors (plans, facts, prefs) |
+| `tools` | `public` | PluginRegistry | Registered external integrations |
+| `operations` | `public` | PluginRegistry | Tool operation metadata (n8n bindings, scopes) |
+| `registry_versions` | `public` | PluginRegistry | Monotonic version counter for registry changes |
+| `user_integrations` | `public` | Shared (PluginRegistry) | User-to-tool credential ID mapping |
 | `audit_events` | `public` | Audit | System audit trail |
-| `sessions` | `public` | Intake | (Optional - if not Redis) |ik
+| `sessions` | `public` | Intake | (Optional - if not Redis) |
 
 ### Redis Key Patterns
 
@@ -305,7 +310,7 @@ Signer
 ```
 PluginRegistry
 ├── Database Dependencies
-│   └── (none - file-based YAML catalog)
+│   └── PostgreSQL: tools, operations, registry_versions
 ├── Component Dependencies
 │   └── (none - configuration source)
 └── External Dependencies
@@ -563,7 +568,7 @@ Purpose: Background polling service (runs every 30s) that:
 ### Group 2: Security & Configuration
 **Can build in parallel:**
 - Signer (cryptography primitive)
-- PluginRegistry (YAML catalog)
+- PluginRegistry (tool catalog — PostgreSQL + Redis cache)
 - Audit (logging infrastructure)
 
 **Timeline:** Sprint 1 (concurrent with Memory Module)
@@ -956,6 +961,17 @@ CREATE TABLE vectors (
     metadata JSONB
 );
 CREATE INDEX idx_vectors_embedding ON vectors USING hnsw (embedding vector_cosine_ops);
+```
+
+### Phase 1.5: PluginRegistry & User Integrations Tables
+```sql
+-- PluginRegistry
+CREATE TABLE tools (tool_id VARCHAR(128) PRIMARY KEY, ...);
+CREATE TABLE operations (id UUID PRIMARY KEY, tool_id VARCHAR(128) REFERENCES tools, ...);
+CREATE TABLE registry_versions (version INTEGER PRIMARY KEY, ...);
+
+-- User Integrations (shared infrastructure)
+CREATE TABLE user_integrations (id UUID PRIMARY KEY, user_id UUID REFERENCES users, tool_id VARCHAR(128), ...);
 ```
 
 ### Phase 2: Planning Tables

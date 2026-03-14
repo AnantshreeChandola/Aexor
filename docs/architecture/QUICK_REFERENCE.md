@@ -51,7 +51,7 @@ User Request → Preview → Approval → Execute → Learn
 1. **Preview-first safety**: Never execute without showing user first
 2. **Deterministic planning**: Same inputs → same plan → same signature
 3. **Single runtime**: n8n for all workflows (short and long-running) with ExecutionMonitor
-4. **Idempotency**: Multi-user safe retry (`tenant:user:integration:plan:step:op:hash`)
+4. **Idempotency**: Multi-user safe retry (`user:integration:plan:step:op:hash`)
 5. **Compensation**: Undo failed operations (Saga pattern)
 6. **Fine-grained locking**: Prevent conflicts without blocking parallelism
 7. **Privacy tiers**: Context access controlled by consent level (Tier 1-5)

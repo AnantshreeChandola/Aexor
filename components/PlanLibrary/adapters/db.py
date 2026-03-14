@@ -11,7 +11,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import func, select, text
+from sqlalchemy import select, text
 
 from shared.database.adapter import get_database_adapter
 from shared.database.error_handler import with_db_error_handling
@@ -66,41 +66,47 @@ class DatabaseAdapter:
         async with self.shared_db.get_session() as session:
             async with session.begin():
                 # Insert plan
-                session.add(PlanTable(
-                    plan_id=plan.plan_id,
-                    canonical_json=plan.canonical_json,
-                    signature_data=plan.signature_data,
-                    intent_type=plan.intent_type,
-                    step_count=plan.step_count,
-                    plan_hash=plan.plan_hash,
-                    size_bytes=plan.size_bytes,
-                    created_at=plan.created_at,
-                    stored_at=plan.stored_at,
-                ))
+                session.add(
+                    PlanTable(
+                        plan_id=plan.plan_id,
+                        canonical_json=plan.canonical_json,
+                        signature_data=plan.signature_data,
+                        intent_type=plan.intent_type,
+                        step_count=plan.step_count,
+                        plan_hash=plan.plan_hash,
+                        size_bytes=plan.size_bytes,
+                        created_at=plan.created_at,
+                        stored_at=plan.stored_at,
+                    )
+                )
 
                 # Insert outcome
-                session.add(PlanOutcomeTable(
-                    outcome_id=outcome.outcome_id,
-                    plan_id=outcome.plan_id,
-                    success=outcome.success,
-                    error_type=outcome.error_type,
-                    error_details=outcome.error_details,
-                    execution_start=outcome.execution_start,
-                    execution_end=outcome.execution_end,
-                    total_steps=outcome.total_steps,
-                    failed_step=outcome.failed_step,
-                    context_data=outcome.context_data,
-                ))
+                session.add(
+                    PlanOutcomeTable(
+                        outcome_id=outcome.outcome_id,
+                        plan_id=outcome.plan_id,
+                        success=outcome.success,
+                        error_type=outcome.error_type,
+                        error_details=outcome.error_details,
+                        execution_start=outcome.execution_start,
+                        execution_end=outcome.execution_end,
+                        total_steps=outcome.total_steps,
+                        failed_step=outcome.failed_step,
+                        context_data=outcome.context_data,
+                    )
+                )
 
                 # Insert metrics
-                session.add(PlanMetricsTable(
-                    metrics_id=metrics.metrics_id,
-                    plan_id=metrics.plan_id,
-                    preview_latency_ms=metrics.preview_latency_ms,
-                    execute_latency_ms=metrics.execute_latency_ms,
-                    step_timings=metrics.step_timings,
-                    resource_usage=metrics.resource_usage,
-                ))
+                session.add(
+                    PlanMetricsTable(
+                        metrics_id=metrics.metrics_id,
+                        plan_id=metrics.plan_id,
+                        preview_latency_ms=metrics.preview_latency_ms,
+                        execute_latency_ms=metrics.execute_latency_ms,
+                        step_timings=metrics.step_timings,
+                        resource_usage=metrics.resource_usage,
+                    )
+                )
 
             logger.info(
                 "Plan stored successfully",
@@ -258,9 +264,7 @@ class DatabaseAdapter:
             ]
 
     @with_db_error_handling
-    async def get_plan_outcomes(
-        self, plan_id: str
-    ) -> list[PlanOutcomeDB]:
+    async def get_plan_outcomes(self, plan_id: str) -> list[PlanOutcomeDB]:
         """
         Get all outcomes for a specific plan.
 
@@ -296,9 +300,7 @@ class DatabaseAdapter:
             ]
 
     @with_db_error_handling
-    async def get_success_rates(
-        self, timeframe_days: int = 30
-    ) -> dict[str, float]:
+    async def get_success_rates(self, timeframe_days: int = 30) -> dict[str, float]:
         """
         Calculate success rates grouped by intent type.
 
@@ -324,10 +326,7 @@ class DatabaseAdapter:
             result = await session.execute(query, {"cutoff": cutoff})
             rows = result.fetchall()
 
-            return {
-                row.intent_type: float(row.success_rate)
-                for row in rows
-            }
+            return {row.intent_type: float(row.success_rate) for row in rows}
 
     async def health_check(self) -> bool:
         """Check database connectivity using shared adapter."""
