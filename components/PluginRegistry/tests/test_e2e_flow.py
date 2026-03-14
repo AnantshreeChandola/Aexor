@@ -9,18 +9,14 @@ Reference: LLD.md Section 8.5
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
-
-import pytest
 
 from components.PluginRegistry.domain.models import (
     CreateToolRequest,
     OperationModel,
     ToolModel,
     UpdateToolRequest,
-    ValidationIssue,
-    ValidationResult,
 )
 from components.PluginRegistry.service.registry_service import (
     RegistryService,
@@ -28,7 +24,7 @@ from components.PluginRegistry.service.registry_service import (
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _make_adapter() -> MagicMock:
@@ -90,9 +86,7 @@ class TestPlannerFlow:
         req = CreateToolRequest(
             tool_id="google.calendar",
             display_name="Google Calendar",
-            credential_template=(
-                "gcal_{{user_id}}_{{account_name}}"
-            ),
+            credential_template=("gcal_{{user_id}}_{{account_name}}"),
             n8n_credential_type="googleCalendarOAuth2Api",
             operations={
                 "create_event": OperationModel(
@@ -162,7 +156,7 @@ class TestAdminFlow:
         adapter = _make_adapter()
         service = RegistryService(db_adapter=adapter)
 
-        now = _now()
+        _now()
         tool_v1 = _tool()
 
         # Create
@@ -172,9 +166,7 @@ class TestAdminFlow:
         req = CreateToolRequest(
             tool_id="google.calendar",
             display_name="Google Calendar",
-            credential_template=(
-                "gcal_{{user_id}}_{{account_name}}"
-            ),
+            credential_template=("gcal_{{user_id}}_{{account_name}}"),
             n8n_credential_type="googleCalendarOAuth2Api",
             operations={
                 "create_event": OperationModel(

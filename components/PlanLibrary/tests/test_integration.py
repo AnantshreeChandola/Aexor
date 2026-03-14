@@ -7,21 +7,14 @@ Tests service layer integration.
 Reference: tasks.md T601
 """
 
-import pytest
-from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
-from uuid import uuid4
 
-from shared.schemas.evidence import EvidenceItem
+import pytest
 
-from components.PlanLibrary.domain.models import (
-    PlanDB,
-    StorePlanResponse,
-)
 from components.PlanLibrary.service.analytics_service import AnalyticsService
 from components.PlanLibrary.service.evidence_service import EvidenceService
 from components.PlanLibrary.service.plan_service import PlanService
-
+from shared.schemas.evidence import EvidenceItem
 
 VALID_ULID = "01HX1234567890ABCDEFGHJKMN"
 VALID_ULID_2 = "01HX9876543210ZYXWVTSRQPNM"
@@ -85,9 +78,7 @@ class TestStoreThenQuery:
     """Test store plan -> query by intent flow."""
 
     @pytest.mark.asyncio
-    async def test_store_and_query_by_intent(
-        self, mock_db, mock_sig_verifier
-    ):
+    async def test_store_and_query_by_intent(self, mock_db, mock_sig_verifier):
         """Store plan then query by intent returns evidence items."""
         service = PlanService(
             db_adapter=mock_db,
@@ -115,9 +106,7 @@ class TestStoreThenQuery:
             },
         ]
 
-        evidence = await service.get_plans_by_intent(
-            intent_type="schedule_meeting"
-        )
+        evidence = await service.get_plans_by_intent(intent_type="schedule_meeting")
 
         assert len(evidence) == 1
         assert isinstance(evidence[0], EvidenceItem)
@@ -129,9 +118,7 @@ class TestStoreThenAnalytics:
     """Test store multiple plans -> analytics flow."""
 
     @pytest.mark.asyncio
-    async def test_store_and_get_success_rates(
-        self, mock_db, mock_sig_verifier
-    ):
+    async def test_store_and_get_success_rates(self, mock_db, mock_sig_verifier):
         """Store multiple plans then check analytics."""
         service = PlanService(
             db_adapter=mock_db,
@@ -161,9 +148,7 @@ class TestStoreFailureOutcome:
     """Test storing plans with failure outcomes."""
 
     @pytest.mark.asyncio
-    async def test_failure_outcome_filters_below_threshold(
-        self, mock_db, mock_sig_verifier
-    ):
+    async def test_failure_outcome_filters_below_threshold(self, mock_db, mock_sig_verifier):
         """Plans with failure outcomes filtered by success threshold."""
         service = PlanService(
             db_adapter=mock_db,

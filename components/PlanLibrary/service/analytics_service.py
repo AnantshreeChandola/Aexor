@@ -7,7 +7,6 @@ Reference: LLD.md, tasks.md T202
 """
 
 import logging
-from typing import Any
 
 from ..adapters.db import DatabaseAdapter
 from ..domain.models import PerformanceTrends
@@ -51,9 +50,7 @@ class AnalyticsService:
         Returns:
             Dict mapping intent_type -> success_rate (0.0 to 1.0)
         """
-        rates = await self.db.get_success_rates(
-            timeframe_days=timeframe_days
-        )
+        rates = await self.db.get_success_rates(timeframe_days=timeframe_days)
 
         logger.info(
             "Success rates calculated",

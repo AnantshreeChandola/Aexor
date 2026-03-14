@@ -7,26 +7,23 @@ Uses dependency_overrides following FastAPI testing patterns.
 Reference: tasks.md T402
 """
 
-import pytest
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
-from shared.schemas.evidence import EvidenceItem
-from shared.dependencies import get_plan_service, get_analytics_service
 
 from components.PlanLibrary.api.routes import router
 from components.PlanLibrary.domain.models import (
     DuplicatePlanError,
     InvalidSignatureError,
     PlanDB,
-    PlanNotFoundError,
     PlanTooLargeError,
     StorePlanResponse,
 )
-
+from shared.dependencies import get_analytics_service, get_plan_service
+from shared.schemas.evidence import EvidenceItem
 
 VALID_ULID = "01HX1234567890ABCDEFGHJKMN"
 
@@ -98,9 +95,7 @@ class TestStorePlanEndpoint:
         """POST /plans with invalid signature -- 400."""
         mock_service = MagicMock()
         mock_service.store_plan = AsyncMock(
-            side_effect=InvalidSignatureError(
-                plan_id=VALID_ULID, reason="bad sig"
-            )
+            side_effect=InvalidSignatureError(plan_id=VALID_ULID, reason="bad sig")
         )
 
         app = _create_test_app(plan_service=mock_service)
@@ -115,9 +110,7 @@ class TestStorePlanEndpoint:
     def test_store_plan_duplicate(self):
         """POST /plans with duplicate plan_id -- 409."""
         mock_service = MagicMock()
-        mock_service.store_plan = AsyncMock(
-            side_effect=DuplicatePlanError(plan_id=VALID_ULID)
-        )
+        mock_service.store_plan = AsyncMock(side_effect=DuplicatePlanError(plan_id=VALID_ULID))
 
         app = _create_test_app(plan_service=mock_service)
         client = TestClient(app)
@@ -132,9 +125,7 @@ class TestStorePlanEndpoint:
         """POST /plans with oversized plan -- 413."""
         mock_service = MagicMock()
         mock_service.store_plan = AsyncMock(
-            side_effect=PlanTooLargeError(
-                plan_id=VALID_ULID, reason="exceeds 100 steps"
-            )
+            side_effect=PlanTooLargeError(plan_id=VALID_ULID, reason="exceeds 100 steps")
         )
 
         app = _create_test_app(plan_service=mock_service)
@@ -162,9 +153,7 @@ class TestGetPlansByIntentEndpoint:
             tier=3,
         )
         mock_service = MagicMock()
-        mock_service.get_plans_by_intent = AsyncMock(
-            return_value=[evidence]
-        )
+        mock_service.get_plans_by_intent = AsyncMock(return_value=[evidence])
 
         app = _create_test_app(plan_service=mock_service)
         client = TestClient(app)
@@ -245,9 +234,7 @@ class TestErrorResponseFormat:
         """All error responses match ErrorResponse schema."""
         mock_service = MagicMock()
         mock_service.store_plan = AsyncMock(
-            side_effect=InvalidSignatureError(
-                plan_id=VALID_ULID, reason="test"
-            )
+            side_effect=InvalidSignatureError(plan_id=VALID_ULID, reason="test")
         )
 
         app = _create_test_app(plan_service=mock_service)

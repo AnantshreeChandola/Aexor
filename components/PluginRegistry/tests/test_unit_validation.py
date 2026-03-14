@@ -6,7 +6,7 @@ Reference: LLD.md Section 8.5 item 3
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 import pytest
@@ -16,9 +16,6 @@ from components.PluginRegistry.domain.models import (
     ToolModel,
     ToolNotFoundError,
 )
-from components.PluginRegistry.service.registry_service import (
-    RegistryService,
-)
 
 
 def _tool(
@@ -26,7 +23,7 @@ def _tool(
     active: bool = True,
     scopes: list[str] | None = None,
 ) -> ToolModel:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     ops = {}
     if scopes is not None:
         ops["main_op"] = OperationModel(
@@ -50,20 +47,19 @@ def _tool(
 # Pre-execution validation
 # ------------------------------------------------------------------
 
+
 class TestValidatePlanTools:
     """Tests for service.validate_plan_tools()."""
 
     async def test_validate_all_tools_active(
-        self, registry_service, mock_db_adapter,
+        self,
+        registry_service,
+        mock_db_adapter,
     ):
         mock_db_adapter.get_tools_by_ids = AsyncMock(
             return_value={
-                "google.calendar": _tool(
-                    "google.calendar", active=True
-                ),
-                "slack.messaging": _tool(
-                    "slack.messaging", active=True
-                ),
+                "google.calendar": _tool("google.calendar", active=True),
+                "slack.messaging": _tool("slack.messaging", active=True),
             },
         )
         mock_db_adapter.get_current_version = AsyncMock(
@@ -81,16 +77,14 @@ class TestValidatePlanTools:
         assert result.issues == []
 
     async def test_validate_deactivated_tool(
-        self, registry_service, mock_db_adapter,
+        self,
+        registry_service,
+        mock_db_adapter,
     ):
         mock_db_adapter.get_tools_by_ids = AsyncMock(
             return_value={
-                "google.calendar": _tool(
-                    "google.calendar", active=True
-                ),
-                "slack.messaging": _tool(
-                    "slack.messaging", active=False
-                ),
+                "google.calendar": _tool("google.calendar", active=True),
+                "slack.messaging": _tool("slack.messaging", active=False),
             },
         )
         mock_db_adapter.get_current_version = AsyncMock(
@@ -110,13 +104,13 @@ class TestValidatePlanTools:
         assert result.issues[0].reason == "TOOL_DEACTIVATED"
 
     async def test_validate_missing_tool(
-        self, registry_service, mock_db_adapter,
+        self,
+        registry_service,
+        mock_db_adapter,
     ):
         mock_db_adapter.get_tools_by_ids = AsyncMock(
             return_value={
-                "google.calendar": _tool(
-                    "google.calendar", active=True
-                ),
+                "google.calendar": _tool("google.calendar", active=True),
             },
         )
         mock_db_adapter.get_current_version = AsyncMock(
@@ -130,21 +124,17 @@ class TestValidatePlanTools:
             ],
         )
         assert result.valid is False
-        assert any(
-            i.reason == "TOOL_NOT_FOUND" for i in result.issues
-        )
+        assert any(i.reason == "TOOL_NOT_FOUND" for i in result.issues)
 
     async def test_validate_mixed_results(
-        self, registry_service, mock_db_adapter,
+        self,
+        registry_service,
+        mock_db_adapter,
     ):
         mock_db_adapter.get_tools_by_ids = AsyncMock(
             return_value={
-                "google.calendar": _tool(
-                    "google.calendar", active=True
-                ),
-                "slack.messaging": _tool(
-                    "slack.messaging", active=False
-                ),
+                "google.calendar": _tool("google.calendar", active=True),
+                "slack.messaging": _tool("slack.messaging", active=False),
             },
         )
         mock_db_adapter.get_current_version = AsyncMock(
@@ -165,7 +155,9 @@ class TestValidatePlanTools:
         assert "TOOL_NOT_FOUND" in reasons
 
     async def test_validate_empty_tool_list(
-        self, registry_service, mock_db_adapter,
+        self,
+        registry_service,
+        mock_db_adapter,
     ):
         mock_db_adapter.get_current_version = AsyncMock(
             return_value=5,
@@ -178,7 +170,9 @@ class TestValidatePlanTools:
         assert result.issues == []
 
     async def test_validate_returns_current_version(
-        self, registry_service, mock_db_adapter,
+        self,
+        registry_service,
+        mock_db_adapter,
     ):
         mock_db_adapter.get_tools_by_ids = AsyncMock(
             return_value={},
@@ -197,11 +191,14 @@ class TestValidatePlanTools:
 # Scope verification
 # ------------------------------------------------------------------
 
+
 class TestVerifyScopes:
     """Tests for service.verify_scopes()."""
 
     async def test_verify_scopes_all_present(
-        self, registry_service, mock_db_adapter,
+        self,
+        registry_service,
+        mock_db_adapter,
     ):
         tool = _tool(
             "google.calendar",
@@ -217,7 +214,9 @@ class TestVerifyScopes:
         assert result.missing_scopes == []
 
     async def test_verify_scopes_missing_scope(
-        self, registry_service, mock_db_adapter,
+        self,
+        registry_service,
+        mock_db_adapter,
     ):
         tool = _tool(
             "google.calendar",
@@ -233,10 +232,14 @@ class TestVerifyScopes:
         assert "calendar.write" in result.missing_scopes
 
     async def test_verify_scopes_tool_not_found(
-        self, registry_service, mock_db_adapter,
+        self,
+        registry_service,
+        mock_db_adapter,
     ):
         mock_db_adapter.get_tool = AsyncMock(return_value=None)
         with pytest.raises(ToolNotFoundError):
             await registry_service.verify_scopes(
-                "nonexistent.tool", "op", ["scope"],
+                "nonexistent.tool",
+                "op",
+                ["scope"],
             )

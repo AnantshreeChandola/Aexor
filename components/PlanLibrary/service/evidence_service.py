@@ -81,4 +81,3 @@ class EvidenceService:
             List of Evidence Items
         """
         return [self.to_evidence_item(plan) for plan in plans]
-

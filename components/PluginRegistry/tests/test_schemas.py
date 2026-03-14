@@ -36,7 +36,8 @@ def _schema_registry() -> Registry:
     for path in _SCHEMA_DIR.glob("*.schema.json"):
         contents = json.loads(path.read_text())
         resource = Resource.from_contents(
-            contents, default_specification=DRAFT7,
+            contents,
+            default_specification=DRAFT7,
         )
         pairs.append((path.name, resource))
     return Registry().with_resources(pairs)
@@ -61,6 +62,7 @@ def validation_result_schema() -> dict:
 # Tool definition schema tests
 # ------------------------------------------------------------------
 
+
 class TestToolDefinitionSchema:
     """Tests for tool_definition.schema.json."""
 
@@ -81,7 +83,8 @@ class TestToolDefinitionSchema:
         }
         # Should not raise
         validator = jsonschema.Draft7Validator(
-            tool_schema, registry=_schema_registry(),
+            tool_schema,
+            registry=_schema_registry(),
         )
         validator.validate(doc)
 
@@ -94,7 +97,8 @@ class TestToolDefinitionSchema:
             "operations": {"op": {"n8n_node": "N"}},
         }
         validator = jsonschema.Draft7Validator(
-            tool_schema, registry=_schema_registry(),
+            tool_schema,
+            registry=_schema_registry(),
         )
         with pytest.raises(jsonschema.ValidationError):
             validator.validate(doc)
@@ -113,7 +117,8 @@ class TestToolDefinitionSchema:
             "operations": {"op": {"n8n_node": "N"}},
         }
         validator = jsonschema.Draft7Validator(
-            tool_schema, registry=_schema_registry(),
+            tool_schema,
+            registry=_schema_registry(),
         )
         with pytest.raises(jsonschema.ValidationError):
             validator.validate(doc)
@@ -122,6 +127,7 @@ class TestToolDefinitionSchema:
 # ------------------------------------------------------------------
 # Operation schema tests
 # ------------------------------------------------------------------
+
 
 class TestOperationSchema:
     """Tests for operation.schema.json."""
@@ -150,6 +156,7 @@ class TestOperationSchema:
 # Validation result schema tests
 # ------------------------------------------------------------------
 
+
 class TestValidationResultSchema:
     """Tests for validation_result.schema.json."""
 
@@ -157,9 +164,7 @@ class TestValidationResultSchema:
         doc = {"valid": True, "current_version": 5}
         jsonschema.validate(doc, validation_result_schema)
 
-    def test_valid_fail_result_with_issues(
-        self, validation_result_schema
-    ):
+    def test_valid_fail_result_with_issues(self, validation_result_schema):
         doc = {
             "valid": False,
             "current_version": 7,
@@ -172,9 +177,7 @@ class TestValidationResultSchema:
         }
         jsonschema.validate(doc, validation_result_schema)
 
-    def test_missing_valid_field_rejected(
-        self, validation_result_schema
-    ):
+    def test_missing_valid_field_rejected(self, validation_result_schema):
         doc = {"current_version": 5}
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate(doc, validation_result_schema)
@@ -184,6 +187,7 @@ class TestValidationResultSchema:
 # Pydantic model tests
 # ------------------------------------------------------------------
 
+
 class TestPydanticModels:
     """Verify Pydantic models serialize/deserialize correctly."""
 
@@ -191,9 +195,7 @@ class TestPydanticModels:
         data = sample_tool_model.model_dump(mode="json")
         restored = ToolModel.model_validate(data)
         assert restored.tool_id == sample_tool_model.tool_id
-        assert len(restored.operations) == len(
-            sample_tool_model.operations
-        )
+        assert len(restored.operations) == len(sample_tool_model.operations)
 
     def test_tool_id_pattern_rejects_uppercase(self):
         with pytest.raises(ValidationError):

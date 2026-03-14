@@ -6,7 +6,7 @@ Reference: LLD.md Section 8.5 item 2
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 import pytest
@@ -16,16 +16,13 @@ from components.PluginRegistry.domain.models import (
     ToolModel,
     ToolNotFoundError,
 )
-from components.PluginRegistry.service.registry_service import (
-    RegistryService,
-)
 
 
 def _make_tool(
     template: str = "gcal_user_{{user_id}}_{{account_name}}",
     active: bool = True,
 ) -> ToolModel:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return ToolModel(
         tool_id="google.calendar",
         display_name="Google Calendar",
@@ -41,7 +38,9 @@ class TestResolveTemplateHappyPath:
     """Happy-path template resolution tests."""
 
     async def test_resolve_template_happy_path(
-        self, registry_service, mock_db_adapter,
+        self,
+        registry_service,
+        mock_db_adapter,
     ):
         mock_db_adapter.get_tool = AsyncMock(
             return_value=_make_tool(),
@@ -52,12 +51,12 @@ class TestResolveTemplateHappyPath:
         )
         assert result.credential_id == "gcal_user_u-123_work"
         assert result.tool_id == "google.calendar"
-        assert (
-            result.n8n_credential_type == "googleCalendarOAuth2Api"
-        )
+        assert result.n8n_credential_type == "googleCalendarOAuth2Api"
 
     async def test_resolve_template_extra_variables_ignored(
-        self, registry_service, mock_db_adapter,
+        self,
+        registry_service,
+        mock_db_adapter,
     ):
         mock_db_adapter.get_tool = AsyncMock(
             return_value=_make_tool(),
@@ -73,7 +72,9 @@ class TestResolveTemplateHappyPath:
         assert result.credential_id == "gcal_user_u-123_work"
 
     async def test_resolve_template_sanitization_allows_hyphen(
-        self, registry_service, mock_db_adapter,
+        self,
+        registry_service,
+        mock_db_adapter,
     ):
         mock_db_adapter.get_tool = AsyncMock(
             return_value=_make_tool(),
@@ -85,7 +86,9 @@ class TestResolveTemplateHappyPath:
         assert result.credential_id == "gcal_user_u-123_my-work"
 
     async def test_resolve_template_sanitization_allows_underscore(
-        self, registry_service, mock_db_adapter,
+        self,
+        registry_service,
+        mock_db_adapter,
     ):
         mock_db_adapter.get_tool = AsyncMock(
             return_value=_make_tool(),
@@ -101,7 +104,9 @@ class TestResolveTemplateErrors:
     """Error-path template resolution tests."""
 
     async def test_resolve_template_missing_variable(
-        self, registry_service, mock_db_adapter,
+        self,
+        registry_service,
+        mock_db_adapter,
     ):
         mock_db_adapter.get_tool = AsyncMock(
             return_value=_make_tool(),
@@ -114,7 +119,9 @@ class TestResolveTemplateErrors:
         assert "account_name" in exc_info.value.missing_variables
 
     async def test_resolve_template_sanitization_rejects_slashes(
-        self, registry_service, mock_db_adapter,
+        self,
+        registry_service,
+        mock_db_adapter,
     ):
         mock_db_adapter.get_tool = AsyncMock(
             return_value=_make_tool(),
@@ -126,7 +133,9 @@ class TestResolveTemplateErrors:
             )
 
     async def test_resolve_template_sanitization_rejects_braces(
-        self, registry_service, mock_db_adapter,
+        self,
+        registry_service,
+        mock_db_adapter,
     ):
         mock_db_adapter.get_tool = AsyncMock(
             return_value=_make_tool(),
@@ -138,7 +147,9 @@ class TestResolveTemplateErrors:
             )
 
     async def test_resolve_template_sanitization_rejects_spaces(
-        self, registry_service, mock_db_adapter,
+        self,
+        registry_service,
+        mock_db_adapter,
     ):
         mock_db_adapter.get_tool = AsyncMock(
             return_value=_make_tool(),
@@ -150,7 +161,9 @@ class TestResolveTemplateErrors:
             )
 
     async def test_resolve_template_sanitization_rejects_semicolon(
-        self, registry_service, mock_db_adapter,
+        self,
+        registry_service,
+        mock_db_adapter,
     ):
         mock_db_adapter.get_tool = AsyncMock(
             return_value=_make_tool(),
@@ -165,7 +178,9 @@ class TestResolveTemplateErrors:
             )
 
     async def test_resolve_template_empty_variable_value(
-        self, registry_service, mock_db_adapter,
+        self,
+        registry_service,
+        mock_db_adapter,
     ):
         mock_db_adapter.get_tool = AsyncMock(
             return_value=_make_tool(),
@@ -177,7 +192,9 @@ class TestResolveTemplateErrors:
             )
 
     async def test_resolve_template_tool_not_found(
-        self, registry_service, mock_db_adapter,
+        self,
+        registry_service,
+        mock_db_adapter,
     ):
         mock_db_adapter.get_tool = AsyncMock(return_value=None)
         with pytest.raises(ToolNotFoundError):
@@ -191,7 +208,9 @@ class TestCredentialIsolation:
     """Verify resolved credential is an opaque string reference."""
 
     async def test_credential_id_never_contains_secrets(
-        self, registry_service, mock_db_adapter,
+        self,
+        registry_service,
+        mock_db_adapter,
     ):
         mock_db_adapter.get_tool = AsyncMock(
             return_value=_make_tool(),

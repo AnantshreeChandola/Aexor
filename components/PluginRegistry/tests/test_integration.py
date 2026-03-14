@@ -13,6 +13,4 @@ import pytest
 
 # Integration tests are skipped by default.
 # Run with: pytest -m integration --override-ini="addopts="
-pytestmark = pytest.mark.skip(
-    reason="Integration tests require a running PostgreSQL instance"
-)
+pytestmark = pytest.mark.skip(reason="Integration tests require a running PostgreSQL instance")

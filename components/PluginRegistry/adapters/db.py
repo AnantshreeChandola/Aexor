@@ -10,7 +10,7 @@ Reference: LLD.md Section 6.1
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import delete, func, select, update
 
@@ -76,9 +76,7 @@ class RegistryDatabaseAdapter:
             if tool_row is None:
                 return None
 
-            ops_stmt = select(OperationTable).where(
-                OperationTable.tool_id == tool_id
-            )
+            ops_stmt = select(OperationTable).where(OperationTable.tool_id == tool_id)
             result = await session.execute(ops_stmt)
             op_rows = list(result.scalars().all())
             return _row_to_tool(tool_row, op_rows)
@@ -91,9 +89,9 @@ class RegistryDatabaseAdapter:
         """Return paginated active tools and total count."""
         async with self.shared_db.get_session() as session:
             # Count
-            count_stmt = select(func.count()).select_from(
-                ToolTable
-            ).where(ToolTable.active.is_(True))
+            count_stmt = (
+                select(func.count()).select_from(ToolTable).where(ToolTable.active.is_(True))
+            )
             total = (await session.execute(count_stmt)).scalar() or 0
 
             # Paginate
@@ -111,21 +109,14 @@ class RegistryDatabaseAdapter:
             tool_ids = [r.tool_id for r in rows]
             ops: list[OperationTable] = []
             if tool_ids:
-                ops_stmt = select(OperationTable).where(
-                    OperationTable.tool_id.in_(tool_ids)
-                )
-                ops = list(
-                    (await session.execute(ops_stmt)).scalars().all()
-                )
+                ops_stmt = select(OperationTable).where(OperationTable.tool_id.in_(tool_ids))
+                ops = list((await session.execute(ops_stmt)).scalars().all())
 
             ops_by_tool: dict[str, list[OperationTable]] = {}
             for op in ops:
                 ops_by_tool.setdefault(op.tool_id, []).append(op)
 
-            tools = [
-                _row_to_tool(r, ops_by_tool.get(r.tool_id, []))
-                for r in rows
-            ]
+            tools = [_row_to_tool(r, ops_by_tool.get(r.tool_id, [])) for r in rows]
             return tools, total
 
     async def get_tools_by_ids(
@@ -134,9 +125,7 @@ class RegistryDatabaseAdapter:
     ) -> dict[str, ToolModel]:
         """Retrieve tools by IDs (for validation). Returns a map."""
         async with self.shared_db.get_session() as session:
-            stmt = select(ToolTable).where(
-                ToolTable.tool_id.in_(tool_ids)
-            )
+            stmt = select(ToolTable).where(ToolTable.tool_id.in_(tool_ids))
             rows = (await session.execute(stmt)).scalars().all()
             result: dict[str, ToolModel] = {}
             for row in rows:
@@ -161,11 +150,7 @@ class RegistryDatabaseAdapter:
     async def get_current_version(self) -> int:
         """Return MAX(version). Returns 0 if table is empty."""
         async with self.shared_db.get_session() as session:
-            stmt = select(
-                func.coalesce(
-                    func.max(RegistryVersionTable.version), 0
-                )
-            )
+            stmt = select(func.coalesce(func.max(RegistryVersionTable.version), 0))
             return (await session.execute(stmt)).scalar() or 0
 
     # ------------------------------------------------------------------
@@ -177,22 +162,22 @@ class RegistryDatabaseAdapter:
         tool_def: CreateToolRequest,
     ) -> tuple[ToolModel, int]:
         """Insert tool + operations + version in one transaction."""
-        now = datetime.now(timezone.utc)
-        async with self.shared_db.get_session() as session:
-            async with session.begin():
-                tool_row = ToolTable(
-                    tool_id=tool_def.tool_id,
-                    display_name=tool_def.display_name,
-                    credential_template=tool_def.credential_template,
-                    n8n_credential_type=tool_def.n8n_credential_type,
-                    active=True,
-                    created_at=now,
-                    updated_at=now,
-                )
-                session.add(tool_row)
+        now = datetime.now(UTC)
+        async with self.shared_db.get_session() as session, session.begin():
+            tool_row = ToolTable(
+                tool_id=tool_def.tool_id,
+                display_name=tool_def.display_name,
+                credential_template=tool_def.credential_template,
+                n8n_credential_type=tool_def.n8n_credential_type,
+                active=True,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(tool_row)
 
-                for op_id, op in tool_def.operations.items():
-                    session.add(OperationTable(
+            for op_id, op in tool_def.operations.items():
+                session.add(
+                    OperationTable(
                         operation_id=op_id,
                         tool_id=tool_def.tool_id,
                         n8n_node=op.n8n_node,
@@ -201,12 +186,13 @@ class RegistryDatabaseAdapter:
                         scopes=list(op.scopes),
                         compensation=op.compensation,
                         created_at=now,
-                    ))
-
-                new_version = await self._increment_version(
-                    session,
-                    f"added {tool_def.tool_id}",
+                    )
                 )
+
+            new_version = await self._increment_version(
+                session,
+                f"added {tool_def.tool_id}",
+            )
 
         tool = await self.get_tool(tool_def.tool_id)
         return tool, new_version
@@ -217,36 +203,26 @@ class RegistryDatabaseAdapter:
         updates: UpdateToolRequest,
     ) -> tuple[ToolModel, int]:
         """Update tool metadata/operations + version in one txn."""
-        now = datetime.now(timezone.utc)
-        async with self.shared_db.get_session() as session:
-            async with session.begin():
-                values: dict[str, object] = {"updated_at": now}
-                if updates.display_name is not None:
-                    values["display_name"] = updates.display_name
-                if updates.credential_template is not None:
-                    values["credential_template"] = (
-                        updates.credential_template
-                    )
-                if updates.n8n_credential_type is not None:
-                    values["n8n_credential_type"] = (
-                        updates.n8n_credential_type
-                    )
+        now = datetime.now(UTC)
+        async with self.shared_db.get_session() as session, session.begin():
+            values: dict[str, object] = {"updated_at": now}
+            if updates.display_name is not None:
+                values["display_name"] = updates.display_name
+            if updates.credential_template is not None:
+                values["credential_template"] = updates.credential_template
+            if updates.n8n_credential_type is not None:
+                values["n8n_credential_type"] = updates.n8n_credential_type
 
-                stmt = (
-                    update(ToolTable)
-                    .where(ToolTable.tool_id == tool_id)
-                    .values(**values)
-                )
-                await session.execute(stmt)
+            stmt = update(ToolTable).where(ToolTable.tool_id == tool_id).values(**values)
+            await session.execute(stmt)
 
-                # Replace operations if provided
-                if updates.operations is not None:
-                    del_stmt = delete(OperationTable).where(
-                        OperationTable.tool_id == tool_id
-                    )
-                    await session.execute(del_stmt)
-                    for op_id, op in updates.operations.items():
-                        session.add(OperationTable(
+            # Replace operations if provided
+            if updates.operations is not None:
+                del_stmt = delete(OperationTable).where(OperationTable.tool_id == tool_id)
+                await session.execute(del_stmt)
+                for op_id, op in updates.operations.items():
+                    session.add(
+                        OperationTable(
                             operation_id=op_id,
                             tool_id=tool_id,
                             n8n_node=op.n8n_node,
@@ -255,12 +231,13 @@ class RegistryDatabaseAdapter:
                             scopes=list(op.scopes),
                             compensation=op.compensation,
                             created_at=now,
-                        ))
+                        )
+                    )
 
-                new_version = await self._increment_version(
-                    session,
-                    f"updated {tool_id}",
-                )
+            new_version = await self._increment_version(
+                session,
+                f"updated {tool_id}",
+            )
 
         tool = await self.get_tool(tool_id)
         return tool, new_version
@@ -270,20 +247,19 @@ class RegistryDatabaseAdapter:
         tool_id: str,
     ) -> tuple[ToolModel, int]:
         """Set active=false + version increment in one txn."""
-        now = datetime.now(timezone.utc)
-        async with self.shared_db.get_session() as session:
-            async with session.begin():
-                stmt = (
-                    update(ToolTable)
-                    .where(ToolTable.tool_id == tool_id)
-                    .values(active=False, updated_at=now)
-                )
-                await session.execute(stmt)
+        now = datetime.now(UTC)
+        async with self.shared_db.get_session() as session, session.begin():
+            stmt = (
+                update(ToolTable)
+                .where(ToolTable.tool_id == tool_id)
+                .values(active=False, updated_at=now)
+            )
+            await session.execute(stmt)
 
-                new_version = await self._increment_version(
-                    session,
-                    f"deactivated {tool_id}",
-                )
+            new_version = await self._increment_version(
+                session,
+                f"deactivated {tool_id}",
+            )
 
         tool = await self.get_tool(tool_id)
         return tool, new_version
@@ -298,17 +274,15 @@ class RegistryDatabaseAdapter:
         change_summary: str,
     ) -> int:
         """Insert new version row inside an existing transaction."""
-        cur = select(
-            func.coalesce(
-                func.max(RegistryVersionTable.version), 0
-            )
-        )
+        cur = select(func.coalesce(func.max(RegistryVersionTable.version), 0))
         current = (await session.execute(cur)).scalar() or 0
         new_version = current + 1
-        session.add(RegistryVersionTable(
-            version=new_version,
-            change_summary=change_summary,
-        ))
+        session.add(
+            RegistryVersionTable(
+                version=new_version,
+                change_summary=change_summary,
+            )
+        )
         # Flush to ensure the version row is written
         await session.flush()
         return new_version

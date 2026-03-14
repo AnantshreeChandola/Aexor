@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -20,13 +20,9 @@ from referencing.jsonschema import DRAFT7
 
 from components.PluginRegistry.domain.models import (
     OperationModel,
-    ToolAlreadyExistsError,
     ToolModel,
     ValidationIssue,
     ValidationResult,
-)
-from components.PluginRegistry.service.registry_service import (
-    RegistryService,
 )
 
 _SCHEMA_DIR = Path(__file__).resolve().parent.parent / "schemas"
@@ -42,14 +38,15 @@ def _schema_registry() -> Registry:
     for path in _SCHEMA_DIR.glob("*.schema.json"):
         contents = json.loads(path.read_text())
         resource = Resource.from_contents(
-            contents, default_specification=DRAFT7,
+            contents,
+            default_specification=DRAFT7,
         )
         pairs.append((path.name, resource))
     return Registry().with_resources(pairs)
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _make_tool(active: bool = True) -> ToolModel:
@@ -81,6 +78,7 @@ def _make_tool(active: bool = True) -> ToolModel:
 # Schema compliance (SC-007)
 # ------------------------------------------------------------------
 
+
 class TestSchemaCompliance:
     """All outputs conform to JSON schemas."""
 
@@ -89,7 +87,8 @@ class TestSchemaCompliance:
         tool = _make_tool()
         data = tool.model_dump(mode="json")
         validator = jsonschema.Draft7Validator(
-            schema, registry=_schema_registry(),
+            schema,
+            registry=_schema_registry(),
         )
         validator.validate(data)
 
@@ -126,6 +125,7 @@ class TestSchemaCompliance:
 # Credential isolation (SC-006)
 # ------------------------------------------------------------------
 
+
 class TestCredentialIsolation:
     """Verify zero credential value leakage."""
 
@@ -140,7 +140,9 @@ class TestCredentialIsolation:
         assert "secret" not in serialized
 
     async def test_no_credential_values_in_resolve_response(
-        self, registry_service, mock_db_adapter,
+        self,
+        registry_service,
+        mock_db_adapter,
     ):
         mock_db_adapter.get_tool = AsyncMock(
             return_value=_make_tool(),
@@ -188,11 +190,14 @@ class TestCredentialIsolation:
 # Invariant tests
 # ------------------------------------------------------------------
 
+
 class TestInvariants:
     """Verify SPEC invariants."""
 
     async def test_version_monotonicity(
-        self, registry_service, mock_db_adapter,
+        self,
+        registry_service,
+        mock_db_adapter,
     ):
         """Version should never decrease."""
         versions = []
@@ -220,18 +225,18 @@ class TestInvariants:
         with dict[str, OperationModel] guarantees this.
         """
         ops = {
-            "create_event": OperationModel(
-                operation_id="create_event", n8n_node="N"
-            ),
-            "create_event": OperationModel(
-                operation_id="create_event", n8n_node="M"
-            ),
+            "create_event": OperationModel(operation_id="create_event", n8n_node="N"),
+            "update_event": OperationModel(operation_id="update_event", n8n_node="M"),
         }
-        # Second entry overwrites first -- dict behavior
-        assert len(ops) == 1
+        # Dict keys are inherently unique — each operation_id appears once
+        assert len(ops) == 2
+        assert "create_event" in ops
+        assert "update_event" in ops
 
     async def test_template_resolution_all_or_nothing(
-        self, registry_service, mock_db_adapter,
+        self,
+        registry_service,
+        mock_db_adapter,
     ):
         """No partial interpolation -- either all vars or error."""
         from components.PluginRegistry.domain.models import (
@@ -249,7 +254,9 @@ class TestInvariants:
             )
 
     async def test_deactivation_is_soft_delete(
-        self, registry_service, mock_db_adapter,
+        self,
+        registry_service,
+        mock_db_adapter,
     ):
         """Deactivated tools remain in DB (active=false)."""
         tool = _make_tool(active=False)

@@ -7,8 +7,9 @@ Used by ProfileStore, History, ContextRAG, and Planner.
 Reference: GLOBAL_SPEC.md §2.2
 """
 
+from typing import Any, Literal
+
 from pydantic import BaseModel, Field, field_validator
-from typing import Literal, Any
 
 
 class EvidenceItem(BaseModel):
@@ -41,46 +42,29 @@ class EvidenceItem(BaseModel):
     """
 
     type: Literal["preference", "history", "contact", "plan", "exemplar"] = Field(
-        ...,
-        description="Type of evidence item"
+        ..., description="Type of evidence item"
     )
 
     key: str = Field(
-        ...,
-        min_length=1,
-        max_length=128,
-        description="Unique key identifying this evidence"
+        ..., min_length=1, max_length=128, description="Unique key identifying this evidence"
     )
 
-    value: Any = Field(
-        ...,
-        description="Evidence value (can be any JSON-serializable type)"
-    )
+    value: Any = Field(..., description="Evidence value (can be any JSON-serializable type)")
 
     confidence: float = Field(
-        ...,
-        ge=0.0,
-        le=1.0,
-        description="Confidence score (0.0 = uncertain, 1.0 = certain)"
+        ..., ge=0.0, le=1.0, description="Confidence score (0.0 = uncertain, 1.0 = certain)"
     )
 
     source_ref: str = Field(
-        ...,
-        min_length=1,
-        description="Reference to data source (e.g., 'profilestore:prefs/key')"
+        ..., min_length=1, description="Reference to data source (e.g., 'profilestore:prefs/key')"
     )
 
     ttl_days: int | None = Field(
-        default=None,
-        ge=1,
-        description="Time-to-live in days (None = no expiry)"
+        default=None, ge=1, description="Time-to-live in days (None = no expiry)"
     )
 
     tier: int = Field(
-        ...,
-        ge=1,
-        le=4,
-        description="Context tier (1=session, 2=prefs, 3=history, 4=live)"
+        ..., ge=1, le=4, description="Context tier (1=session, 2=prefs, 3=history, 4=live)"
     )
 
     @field_validator("tier")
@@ -109,7 +93,7 @@ class EvidenceItem(BaseModel):
                     "confidence": 1.0,
                     "source_ref": "profilestore:prefs/meeting_duration_min",
                     "ttl_days": None,
-                    "tier": 2
+                    "tier": 2,
                 },
                 {
                     "type": "history",
@@ -118,7 +102,7 @@ class EvidenceItem(BaseModel):
                     "confidence": 0.95,
                     "source_ref": "history:interactions/alice-123",
                     "ttl_days": 30,
-                    "tier": 3
+                    "tier": 3,
                 },
                 {
                     "type": "contact",
@@ -127,8 +111,8 @@ class EvidenceItem(BaseModel):
                     "confidence": 1.0,
                     "source_ref": "contacts:alice",
                     "ttl_days": None,
-                    "tier": 2
-                }
+                    "tier": 2,
+                },
             ]
         }
     }

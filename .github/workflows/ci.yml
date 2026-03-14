@@ -138,9 +138,9 @@ jobs:
           fetch-depth: 0
 
       - name: Check PR has SPEC and LLD links
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
         run: |
-          PR_BODY="${{ github.event.pull_request.body }}"
-
           # Check for SPEC.md link
           if echo "$PR_BODY" | grep -q "components/.*SPEC\.md\|usecases/.*SPEC\.md"; then
             echo "✓ SPEC.md link found"

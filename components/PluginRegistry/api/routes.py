@@ -11,6 +11,7 @@ Reference: LLD.md Section 3.1
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, Query, Request, status
 from fastapi.responses import JSONResponse
@@ -30,7 +31,9 @@ from ..domain.models import (
     UpdateToolRequest,
     ValidatePlanToolsRequest,
 )
-from ..service.registry_service import RegistryService
+
+if TYPE_CHECKING:
+    from ..service.registry_service import RegistryService
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +43,7 @@ router = APIRouter(prefix="/registry", tags=["registry"])
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
+
 
 def _ok(data: object) -> dict:
     """Wrap a successful response."""
@@ -109,6 +113,7 @@ def _handle_domain_error(exc: Exception) -> JSONResponse:
 # Read endpoints
 # ------------------------------------------------------------------
 
+
 @router.get("/tools/{tool_id}")
 async def get_tool(
     tool_id: str,
@@ -139,7 +144,9 @@ async def list_catalog(
     """Retrieve the full catalog of active tools."""
     plan_id = request.headers.get("X-Plan-ID")
     catalog = await service.list_catalog(
-        page=page, page_size=page_size, plan_id=plan_id,
+        page=page,
+        page_size=page_size,
+        plan_id=plan_id,
     )
     return _ok(catalog.model_dump(mode="json"))
 
@@ -157,6 +164,7 @@ async def get_version(
 # ------------------------------------------------------------------
 # Validation / resolution endpoints
 # ------------------------------------------------------------------
+
 
 @router.post("/validate")
 async def validate_plan_tools(
@@ -196,6 +204,7 @@ async def resolve_credential(
 # ------------------------------------------------------------------
 # Write endpoints (admin CRUD)
 # ------------------------------------------------------------------
+
 
 @router.post("/tools")
 async def create_tool(
@@ -254,6 +263,7 @@ async def deactivate_tool(
 # ------------------------------------------------------------------
 # Health
 # ------------------------------------------------------------------
+
 
 @router.get("/health")
 async def health_check():

@@ -7,8 +7,8 @@ Reference: LLD.md Section 8.5
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, patch
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import FastAPI
@@ -31,10 +31,10 @@ from components.PluginRegistry.domain.models import (
     ValidationResult,
 )
 
-
 # ------------------------------------------------------------------
 # Test app setup
 # ------------------------------------------------------------------
+
 
 def _create_test_app(mock_service) -> FastAPI:
     """Create a minimal FastAPI app for testing."""
@@ -72,14 +72,12 @@ def client(mock_service):
         "context_tier": 1,
         "email": "test@example.com",
     }
-    app.dependency_overrides[get_registry_service] = (
-        lambda: mock_service
-    )
+    app.dependency_overrides[get_registry_service] = lambda: mock_service
     return TestClient(app)
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _sample_tool() -> ToolModel:
@@ -105,6 +103,7 @@ def _sample_tool() -> ToolModel:
 # GET /registry/tools/{tool_id}
 # ------------------------------------------------------------------
 
+
 class TestGetTool:
     def test_returns_200_with_data(self, client, mock_service):
         mock_service.get_tool.return_value = _sample_tool()
@@ -115,9 +114,7 @@ class TestGetTool:
         assert body["data"]["tool_id"] == "google.calendar"
 
     def test_returns_404_when_not_found(self, client, mock_service):
-        mock_service.get_tool.side_effect = ToolNotFoundError(
-            "google.calendar"
-        )
+        mock_service.get_tool.side_effect = ToolNotFoundError("google.calendar")
         resp = client.get("/registry/tools/google.calendar")
         assert resp.status_code == 404
         body = resp.json()
@@ -125,11 +122,11 @@ class TestGetTool:
         assert body["error_code"] == "TOOL_NOT_FOUND"
 
     def test_invalid_id_format_returns_400(
-        self, client, mock_service,
+        self,
+        client,
+        mock_service,
     ):
-        mock_service.get_tool.side_effect = (
-            InvalidToolIdFormatError("INVALID")
-        )
+        mock_service.get_tool.side_effect = InvalidToolIdFormatError("INVALID")
         resp = client.get("/registry/tools/INVALID")
         assert resp.status_code == 400
         assert resp.json()["error_code"] == "INVALID_TOOL_ID_FORMAT"
@@ -138,6 +135,7 @@ class TestGetTool:
 # ------------------------------------------------------------------
 # GET /registry/catalog
 # ------------------------------------------------------------------
+
 
 class TestListCatalog:
     def test_returns_200_with_tools(self, client, mock_service):
@@ -183,6 +181,7 @@ class TestListCatalog:
 # GET /registry/version
 # ------------------------------------------------------------------
 
+
 class TestGetVersion:
     def test_returns_200(self, client, mock_service):
         mock_service.get_version.return_value = 5
@@ -196,10 +195,11 @@ class TestGetVersion:
 # POST /registry/validate
 # ------------------------------------------------------------------
 
+
 class TestValidate:
     def test_returns_200_valid(self, client, mock_service):
-        mock_service.validate_plan_tools.return_value = (
-            ValidationResult(valid=True, current_version=7)
+        mock_service.validate_plan_tools.return_value = ValidationResult(
+            valid=True, current_version=7
         )
         resp = client.post(
             "/registry/validate",
@@ -212,19 +212,19 @@ class TestValidate:
         assert resp.json()["data"]["valid"] is True
 
     def test_returns_200_invalid_with_issues(
-        self, client, mock_service,
+        self,
+        client,
+        mock_service,
     ):
-        mock_service.validate_plan_tools.return_value = (
-            ValidationResult(
-                valid=False,
-                current_version=7,
-                issues=[
-                    {
-                        "tool_id": "slack.messaging",
-                        "reason": "TOOL_DEACTIVATED",
-                    }
-                ],
-            )
+        mock_service.validate_plan_tools.return_value = ValidationResult(
+            valid=False,
+            current_version=7,
+            issues=[
+                {
+                    "tool_id": "slack.messaging",
+                    "reason": "TOOL_DEACTIVATED",
+                }
+            ],
         )
         resp = client.post(
             "/registry/validate",
@@ -241,16 +241,17 @@ class TestValidate:
 # POST /registry/resolve
 # ------------------------------------------------------------------
 
+
 class TestResolve:
     def test_returns_200_with_credential_id(
-        self, client, mock_service,
+        self,
+        client,
+        mock_service,
     ):
-        mock_service.resolve_credential_template.return_value = (
-            ResolvedCredential(
-                credential_id="gcal_user_u-123_work",
-                tool_id="google.calendar",
-                n8n_credential_type="googleCalendarOAuth2Api",
-            )
+        mock_service.resolve_credential_template.return_value = ResolvedCredential(
+            credential_id="gcal_user_u-123_work",
+            tool_id="google.calendar",
+            n8n_credential_type="googleCalendarOAuth2Api",
         )
         resp = client.post(
             "/registry/resolve",
@@ -264,19 +265,17 @@ class TestResolve:
         )
         assert resp.status_code == 200
         body = resp.json()
-        assert body["data"]["credential_id"] == (
-            "gcal_user_u-123_work"
-        )
+        assert body["data"]["credential_id"] == ("gcal_user_u-123_work")
 
     def test_returns_error_for_missing_var(
-        self, client, mock_service,
+        self,
+        client,
+        mock_service,
     ):
-        mock_service.resolve_credential_template.side_effect = (
-            TemplateResolutionError(
-                tool_id="google.calendar",
-                template="gcal_{{user_id}}_{{account_name}}",
-                missing_variables=["account_name"],
-            )
+        mock_service.resolve_credential_template.side_effect = TemplateResolutionError(
+            tool_id="google.calendar",
+            template="gcal_{{user_id}}_{{account_name}}",
+            missing_variables=["account_name"],
         )
         resp = client.post(
             "/registry/resolve",
@@ -286,14 +285,13 @@ class TestResolve:
             },
         )
         assert resp.status_code == 400
-        assert (
-            resp.json()["error_code"] == "TEMPLATE_RESOLUTION_ERROR"
-        )
+        assert resp.json()["error_code"] == "TEMPLATE_RESOLUTION_ERROR"
 
 
 # ------------------------------------------------------------------
 # POST /registry/tools (create)
 # ------------------------------------------------------------------
+
 
 class TestCreateTool:
     def test_returns_200(self, client, mock_service):
@@ -321,9 +319,7 @@ class TestCreateTool:
         assert resp.json()["data"]["tool_id"] == "slack.messaging"
 
     def test_returns_409_duplicate(self, client, mock_service):
-        mock_service.create_tool.side_effect = (
-            ToolAlreadyExistsError("slack.messaging")
-        )
+        mock_service.create_tool.side_effect = ToolAlreadyExistsError("slack.messaging")
         resp = client.post(
             "/registry/tools",
             json={
@@ -342,9 +338,7 @@ class TestCreateTool:
         assert resp.status_code == 409
 
     def test_returns_400_schema_error(self, client, mock_service):
-        mock_service.create_tool.side_effect = (
-            SchemaValidationError("bad field")
-        )
+        mock_service.create_tool.side_effect = SchemaValidationError("bad field")
         resp = client.post(
             "/registry/tools",
             json={
@@ -367,6 +361,7 @@ class TestCreateTool:
 # PUT /registry/tools/{tool_id}
 # ------------------------------------------------------------------
 
+
 class TestUpdateTool:
     def test_returns_200(self, client, mock_service):
         mock_service.update_tool.return_value = UpdateToolResponse(
@@ -385,15 +380,14 @@ class TestUpdateTool:
 # DELETE /registry/tools/{tool_id}
 # ------------------------------------------------------------------
 
+
 class TestDeactivateTool:
     def test_returns_200(self, client, mock_service):
-        mock_service.deactivate_tool.return_value = (
-            DeactivateToolResponse(
-                tool_id="google.calendar",
-                active=False,
-                registry_version=8,
-                deactivated_at=_now(),
-            )
+        mock_service.deactivate_tool.return_value = DeactivateToolResponse(
+            tool_id="google.calendar",
+            active=False,
+            registry_version=8,
+            deactivated_at=_now(),
         )
         resp = client.delete("/registry/tools/google.calendar")
         assert resp.status_code == 200
@@ -403,6 +397,7 @@ class TestDeactivateTool:
 # ------------------------------------------------------------------
 # Health check
 # ------------------------------------------------------------------
+
 
 class TestHealth:
     def test_health_endpoint_returns_ok(self, client):
@@ -415,9 +410,12 @@ class TestHealth:
 # Response envelope tests
 # ------------------------------------------------------------------
 
+
 class TestResponseEnvelopes:
     def test_response_format_matches_spec(
-        self, client, mock_service,
+        self,
+        client,
+        mock_service,
     ):
         mock_service.get_version.return_value = 0
         resp = client.get("/registry/version")
@@ -427,11 +425,11 @@ class TestResponseEnvelopes:
         assert "data" in body
 
     def test_error_response_format_matches_spec(
-        self, client, mock_service,
+        self,
+        client,
+        mock_service,
     ):
-        mock_service.get_tool.side_effect = ToolNotFoundError(
-            "x.y"
-        )
+        mock_service.get_tool.side_effect = ToolNotFoundError("x.y")
         resp = client.get("/registry/tools/x.y")
         body = resp.json()
         assert body["status"] == "error"

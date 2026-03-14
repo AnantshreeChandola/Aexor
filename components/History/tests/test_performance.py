@@ -6,6 +6,7 @@ Performance targets from SPEC SC-001 through SC-003.
 Reference: tasks.md T602
 """
 
+import contextlib
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -188,12 +189,12 @@ async def test_pattern_detection_performance(pattern_service, mock_db_adapter):
 @pytest.mark.asyncio
 async def test_large_fact_validation_performance(fact_service):
     """Test 4KB fact validation is fast."""
-    user_id = uuid4()
+    uuid4()
 
     # Create fact at size limit (4096 bytes)
     large_fact_text = "a" * 4096
 
-    request = StoreFactRequest(
+    StoreFactRequest(
         fact_text=large_fact_text,
         intent_type="test",
         entities={},
@@ -206,17 +207,14 @@ async def test_large_fact_validation_performance(fact_service):
 
     # This will trigger size validation
 
-    try:
+    with contextlib.suppress(Exception):
         # Try to create fact slightly over limit
-        oversized_request = StoreFactRequest(
+        StoreFactRequest(
             fact_text="a" * 4097,
             intent_type="test",
             entities={},
             outcome=True,
         )
-    except Exception:
-        # Expected - validation should reject quickly
-        pass
 
 
 # Test Evidence Item conversion performance
@@ -284,7 +282,7 @@ async def test_pattern_update_performance(pattern_service, mock_db_adapter):
 async def test_service_overhead_minimal(fact_service, mock_db_adapter):
     """Test service layer overhead is minimal."""
     user_id = uuid4()
-    now = datetime.now(UTC)
+    datetime.now(UTC)
 
     # Setup mocks to return immediately
     mock_db_adapter.query_facts.return_value = []
@@ -325,10 +323,10 @@ def test_hash_computation_performance():
 @pytest.mark.asyncio
 async def test_pii_detection_performance(fact_service):
     """Test PII detection doesn't add significant overhead."""
-    user_id = uuid4()
+    uuid4()
 
     # PII detection uses regex - should be fast (< 5ms)
-    request = StoreFactRequest(
+    StoreFactRequest(
         fact_text="Clean fact without PII",
         intent_type="test",
         entities={},

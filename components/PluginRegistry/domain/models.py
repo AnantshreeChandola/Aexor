@@ -7,16 +7,14 @@ Custom exceptions for domain-specific error handling.
 Reference: LLD.md Section 5.4
 """
 
-from __future__ import annotations
-
 from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-
 # ---------------------------------------------------------------------------
 # Domain models
 # ---------------------------------------------------------------------------
+
 
 class OperationModel(BaseModel):
     """A single operation (capability) of a tool."""
@@ -54,6 +52,7 @@ class RegistryVersionModel(BaseModel):
 # Request models
 # ---------------------------------------------------------------------------
 
+
 class CreateToolRequest(BaseModel):
     """Request to create a new tool."""
 
@@ -90,6 +89,7 @@ class ValidatePlanToolsRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # Response models
 # ---------------------------------------------------------------------------
+
 
 class CatalogResponse(BaseModel):
     """Paginated catalog response."""
@@ -160,6 +160,7 @@ class ScopeVerificationResult(BaseModel):
 # Custom exceptions
 # ---------------------------------------------------------------------------
 
+
 class ToolNotFoundError(Exception):
     """Tool ID does not exist or is inactive."""
 
@@ -198,8 +199,7 @@ class TemplateResolutionError(Exception):
         self.missing_variables = missing_variables
         missing = ", ".join(missing_variables)
         super().__init__(
-            f"Missing variable(s) '{missing}' in credential template "
-            f"for tool '{tool_id}'"
+            f"Missing variable(s) '{missing}' in credential template for tool '{tool_id}'"
         )
 
 
@@ -215,10 +215,7 @@ class ScopeNotSupportedError(Exception):
         self.tool_id = tool_id
         self.operation_id = operation_id
         self.missing_scopes = missing_scopes
-        super().__init__(
-            f"Scopes {missing_scopes} not supported by "
-            f"'{tool_id}.{operation_id}'"
-        )
+        super().__init__(f"Scopes {missing_scopes} not supported by '{tool_id}.{operation_id}'")
 
 
 class InvalidToolIdFormatError(Exception):
@@ -227,6 +224,5 @@ class InvalidToolIdFormatError(Exception):
     def __init__(self, tool_id: str) -> None:
         self.tool_id = tool_id
         super().__init__(
-            f"Invalid tool_id format: '{tool_id}'. "
-            f"Expected 'provider.service' (lowercase)."
+            f"Invalid tool_id format: '{tool_id}'. Expected 'provider.service' (lowercase)."
         )

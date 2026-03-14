@@ -16,7 +16,6 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, field_validator
 
-
 # --- Constants ---
 
 ULID_PATTERN = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}$")
@@ -116,9 +115,7 @@ class PlanDB(BaseModel):
     def validate_size_bytes(cls, v: int) -> int:
         """Validate plan size within limits."""
         if v > MAX_PLAN_SIZE_BYTES:
-            raise ValueError(
-                f"size_bytes exceeds maximum of {MAX_PLAN_SIZE_BYTES}"
-            )
+            raise ValueError(f"size_bytes exceeds maximum of {MAX_PLAN_SIZE_BYTES}")
         return v
 
 
@@ -162,18 +159,10 @@ class PlanMetricsDB(BaseModel):
 class StorePlanRequest(BaseModel):
     """Request model for storing an executed plan."""
 
-    plan: dict[str, Any] = Field(
-        ..., description="Plan JSON with plan_id, graph, meta"
-    )
-    signature: dict[str, Any] = Field(
-        ..., description="Ed25519 signature data"
-    )
-    outcome: dict[str, Any] = Field(
-        ..., description="Execution outcome data"
-    )
-    metrics: dict[str, Any] = Field(
-        ..., description="Performance metrics data"
-    )
+    plan: dict[str, Any] = Field(..., description="Plan JSON with plan_id, graph, meta")
+    signature: dict[str, Any] = Field(..., description="Ed25519 signature data")
+    outcome: dict[str, Any] = Field(..., description="Execution outcome data")
+    metrics: dict[str, Any] = Field(..., description="Performance metrics data")
 
     @field_validator("plan")
     @classmethod
@@ -192,6 +181,8 @@ class StorePlanResponse(BaseModel):
     status: Literal["ok"] = "ok"
     plan_id: str
     stored_at: datetime
+
+
 class QueryPlansRequest(BaseModel):
     """Request model for querying plans by intent."""
 
@@ -205,9 +196,7 @@ class QueryPlansRequest(BaseModel):
     def validate_intent_type(cls, v: str) -> str:
         """Validate intent type format."""
         if not v.replace("_", "").replace("-", "").isalnum():
-            raise ValueError(
-                "intent_type must be alphanumeric with underscores/hyphens"
-            )
+            raise ValueError("intent_type must be alphanumeric with underscores/hyphens")
         return v
 
 

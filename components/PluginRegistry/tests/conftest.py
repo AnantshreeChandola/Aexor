@@ -4,7 +4,7 @@ Shared test fixtures for PluginRegistry component tests.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -20,10 +20,10 @@ from components.PluginRegistry.service.registry_service import (
     RegistryService,
 )
 
-
 # ------------------------------------------------------------------
 # Sample data builders
 # ------------------------------------------------------------------
+
 
 def _gcal_operations() -> dict[str, OperationModel]:
     return {
@@ -60,9 +60,7 @@ def sample_tool_def() -> CreateToolRequest:
     return CreateToolRequest(
         tool_id="google.calendar",
         display_name="Google Calendar",
-        credential_template=(
-            "gcal_user_{{user_id}}_{{account_name}}"
-        ),
+        credential_template=("gcal_user_{{user_id}}_{{account_name}}"),
         n8n_credential_type="googleCalendarOAuth2Api",
         operations=_gcal_operations(),
     )
@@ -74,9 +72,7 @@ def sample_slack_tool_def() -> CreateToolRequest:
     return CreateToolRequest(
         tool_id="slack.messaging",
         display_name="Slack Messaging",
-        credential_template=(
-            "slack_user_{{user_id}}_{{account_name}}"
-        ),
+        credential_template=("slack_user_{{user_id}}_{{account_name}}"),
         n8n_credential_type="slackOAuth2Api",
         operations={
             "send_message": OperationModel(
@@ -94,13 +90,11 @@ def sample_slack_tool_def() -> CreateToolRequest:
 @pytest.fixture()
 def sample_tool_model() -> ToolModel:
     """A fully populated ToolModel for assertion comparisons."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return ToolModel(
         tool_id="google.calendar",
         display_name="Google Calendar",
-        credential_template=(
-            "gcal_user_{{user_id}}_{{account_name}}"
-        ),
+        credential_template=("gcal_user_{{user_id}}_{{account_name}}"),
         n8n_credential_type="googleCalendarOAuth2Api",
         active=True,
         operations=_gcal_operations(),
@@ -136,6 +130,7 @@ def sample_resolve_request() -> ResolveCredentialRequest:
 # ------------------------------------------------------------------
 # Mock adapter and service
 # ------------------------------------------------------------------
+
 
 @pytest.fixture()
 def mock_db_adapter() -> MagicMock:

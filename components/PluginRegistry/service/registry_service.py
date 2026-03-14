@@ -310,9 +310,7 @@ class RegistryService:
                     template=template,
                     missing_variables=[var_name],
                 )
-            resolved = resolved.replace(
-                "{{" + var_name + "}}", safe_value
-            )
+            resolved = resolved.replace("{{" + var_name + "}}", safe_value)
 
         latency = int((time.monotonic() - start) * 1000)
         logger.info(
@@ -337,16 +335,14 @@ class RegistryService:
 
     async def validate_plan_tools(
         self,
-        plan_registry_version: int,
+        plan_registry_version: int,  # noqa: ARG002
         referenced_tool_ids: list[str],
     ) -> ValidationResult:
         """Verify all referenced tools are still active."""
         start = time.monotonic()
         if not referenced_tool_ids:
             version = await self._db.get_current_version()
-            return ValidationResult(
-                valid=True, current_version=version
-            )
+            return ValidationResult(valid=True, current_version=version)
 
         tools_map = await self._db.get_tools_by_ids(referenced_tool_ids)
         current_version = await self._db.get_current_version()
@@ -354,17 +350,9 @@ class RegistryService:
         issues: list[ValidationIssue] = []
         for tid in referenced_tool_ids:
             if tid not in tools_map:
-                issues.append(
-                    ValidationIssue(
-                        tool_id=tid, reason="TOOL_NOT_FOUND"
-                    )
-                )
+                issues.append(ValidationIssue(tool_id=tid, reason="TOOL_NOT_FOUND"))
             elif not tools_map[tid].active:
-                issues.append(
-                    ValidationIssue(
-                        tool_id=tid, reason="TOOL_DEACTIVATED"
-                    )
-                )
+                issues.append(ValidationIssue(tool_id=tid, reason="TOOL_DEACTIVATED"))
 
         latency = int((time.monotonic() - start) * 1000)
         logger.info(
@@ -402,9 +390,7 @@ class RegistryService:
 
         op = tool.operations.get(operation_id)
         if op is None:
-            raise ToolNotFoundError(
-                f"{tool_id}.{operation_id}"
-            )
+            raise ToolNotFoundError(f"{tool_id}.{operation_id}")
 
         available = set(op.scopes)
         missing = [s for s in required_scopes if s not in available]

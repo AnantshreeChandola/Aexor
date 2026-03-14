@@ -188,11 +188,11 @@ async def test_store_fact_empty_text_rejected(fact_service):
     """Test empty fact_text is rejected by Pydantic validation."""
     from pydantic import ValidationError
 
-    user_id = uuid4()
+    uuid4()
 
     # Pydantic validates before service layer
     with pytest.raises(ValidationError):
-        request = StoreFactRequest(
+        StoreFactRequest(
             fact_text="",
             intent_type="test",
             entities={},
@@ -208,14 +208,14 @@ async def test_store_fact_exceeding_4kb(fact_service):
     """Test fact exceeding 4KB is rejected by Pydantic validation."""
     from pydantic import ValidationError
 
-    user_id = uuid4()
+    uuid4()
 
     # 4097 bytes (exceeds 4KB)
     large_text = "a" * 4097
 
     # Pydantic validates before service layer
     with pytest.raises(ValidationError):
-        request = StoreFactRequest(
+        StoreFactRequest(
             fact_text=large_text,
             intent_type="test",
             entities={},
@@ -436,7 +436,7 @@ async def test_query_facts_no_cross_intent_leakage(fact_service, mock_db_adapter
     mock_db_adapter.query_facts.return_value = facts
     mock_db_adapter.count_facts.return_value = 1
 
-    response = await fact_service.get_facts_by_intent(
+    await fact_service.get_facts_by_intent(
         user_id=user_id,
         intent_type="schedule_meeting",
         limit=50,
