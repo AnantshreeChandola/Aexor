@@ -89,11 +89,19 @@ Act as a design orchestrator. Use Spec Kit's `/speckit.plan` workflow to generat
          1. Initialize their service in `shared/app.py` lifespan function
          2. Add a `Depends()` function in `shared/dependencies.py`
          3. Use `Depends(get_<service>)` in route handlers — never construct services in routes
-       - Database: Use shared/database/adapter.py (never duplicate connection setup)
-       - Error handling: Use decorators from shared/database/error_handler.py
-       - API errors: Use shared/api/error_handlers.py (ErrorHandlerMixin)
-       - Models: Import shared tables from shared/database/models.py
+       - **Database & transactions (MANDATORY pattern)** — use `shared/database/` utilities, never duplicate connection/transaction logic:
+         - `SharedDatabaseAdapter` from `shared/database/adapter.py` — connection pooling, `get_session()` for async sessions. Never create your own engine or session factory.
+         - `@with_db_error_handling` from `shared/database/error_handler.py` — apply to all adapter methods. Provides auto-commit, auto-rollback on error, and translates `SQLAlchemyError` → `DatabaseConnectionError` / `DatabaseIntegrityError`.
+         - `execute_with_retry` from `shared/database/error_handler.py` — use for transient-failure-prone operations (exponential backoff).
+         - Shared exception types (`DatabaseError`, `DatabaseConnectionError`, `DatabaseIntegrityError`) — catch these in the API layer via `APIErrorHandler.handle_database_error()` rather than catching raw SQLAlchemy exceptions.
+         - Shared table models from `shared/database/models.py` — import, never redefine.
+       - **API error handling (MANDATORY pattern)**:
+         - Use `ErrorResponse` from `shared/api/error_handlers.py` for **all** error response formatting — never build `{"status": "error", ...}` dicts manually
+         - Keep a local `_handle_domain_error()` in routes that maps component-specific domain exceptions to HTTP status codes + `ErrorResponse` instances (the mapping is component-owned, the response shape is shared)
+         - Use `APIErrorHandler.handle_generic_error()` as the fallback for unexpected errors
+         - Domain errors are defined in the component's `domain/models.py` — the shared module must NOT import component internals
        - Schemas: Import from shared/schemas/ where they exist
+       - **General rule**: Before creating any local helper, check `shared/` for existing utilities. Duplicating shared infrastructure is an anti-pattern (see PYTHON_GUIDE.md)
      - **Signature verification**: Prefer calling Signer component's API over local Ed25519 implementation. Document deviation if Signer is unavailable.
    - **Sequences** - Flow diagrams
      - Happy path
@@ -112,7 +120,7 @@ Act as a design orchestrator. Use Spec Kit's `/speckit.plan` workflow to generat
    - **Observability & Safety** - From plan.md
      - Structured logging (correlation: plan_id/step/role)
      - No PII in logs
-     - Error classes
+     - Error classes — define domain exceptions in `domain/models.py`; document that API layer formats them via `shared/api/error_handlers.ErrorResponse`
      - **Prometheus metrics**: Define specific metric names, types (histogram/counter/gauge), and labels. At minimum: operation duration, error counter, queue depth (if queues exist), circuit breaker state (if applicable).
      - HITL gates (if applicable)
    - **Caching Strategy** (REQUIRED if component uses Redis)
@@ -152,6 +160,8 @@ Act as a design orchestrator. Use Spec Kit's `/speckit.plan` workflow to generat
    - [ ] Prometheus metrics defined with names and types
    - [ ] No deprecated library versions or API models
    - [ ] Evidence Item keys use deterministic generation (no Python `hash()`)
+   - [ ] Error handling uses `ErrorResponse` from `shared/api/error_handlers.py` — no manual dict construction for error responses
+   - [ ] Database adapter uses `SharedDatabaseAdapter`, `@with_db_error_handling`, and shared exception types from `shared/database/` — no local connection setup or raw SQLAlchemy error handling
 
    Fix any failures before writing. Document intentional deviations in Risks with rationale.
 

@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, Query, Request, status
 from fastapi.responses import JSONResponse
 
 from shared.api.auth import get_auth_context
+from shared.api.error_handlers import APIErrorHandler, ErrorResponse
 from shared.dependencies import get_registry_service
 
 from ..domain.models import (
@@ -45,70 +46,63 @@ def _ok(data: object) -> dict:
     return {"status": "ok", "data": data}
 
 
-def _error_response(
-    http_status: int,
-    error_code: str,
-    message: str,
-    details: dict | None = None,
-) -> JSONResponse:
-    body: dict = {
-        "status": "error",
-        "error_code": error_code,
-        "message": message,
-    }
-    if details is not None:
-        body["details"] = details
-    return JSONResponse(status_code=http_status, content=body)
-
-
 def _handle_domain_error(exc: Exception) -> JSONResponse:
-    """Map domain exceptions to HTTP error responses."""
+    """Map domain exceptions to HTTP error responses.
+
+    Uses ``shared.api.error_handlers.ErrorResponse`` for consistent
+    response formatting across all components.
+    """
     if isinstance(exc, ToolNotFoundError):
-        return _error_response(
-            status.HTTP_404_NOT_FOUND,
-            "TOOL_NOT_FOUND",
-            str(exc),
-            {"tool_id": exc.tool_id},
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content=ErrorResponse(
+                error_code="TOOL_NOT_FOUND",
+                message=str(exc),
+                details={"tool_id": exc.tool_id},
+            ).model_dump(),
         )
     if isinstance(exc, ToolAlreadyExistsError):
-        return _error_response(
-            status.HTTP_409_CONFLICT,
-            "TOOL_ALREADY_EXISTS",
-            str(exc),
-            {"tool_id": exc.tool_id},
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content=ErrorResponse(
+                error_code="TOOL_ALREADY_EXISTS",
+                message=str(exc),
+                details={"tool_id": exc.tool_id},
+            ).model_dump(),
         )
     if isinstance(exc, InvalidToolIdFormatError):
-        return _error_response(
-            status.HTTP_400_BAD_REQUEST,
-            "INVALID_TOOL_ID_FORMAT",
-            str(exc),
-            {"tool_id": exc.tool_id},
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content=ErrorResponse(
+                error_code="INVALID_TOOL_ID_FORMAT",
+                message=str(exc),
+                details={"tool_id": exc.tool_id},
+            ).model_dump(),
         )
     if isinstance(exc, SchemaValidationError):
-        return _error_response(
-            status.HTTP_400_BAD_REQUEST,
-            "SCHEMA_VALIDATION_ERROR",
-            str(exc),
-            {"details": exc.details},
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content=ErrorResponse(
+                error_code="SCHEMA_VALIDATION_ERROR",
+                message=str(exc),
+                details={"details": exc.details},
+            ).model_dump(),
         )
     if isinstance(exc, TemplateResolutionError):
-        return _error_response(
-            status.HTTP_400_BAD_REQUEST,
-            "TEMPLATE_RESOLUTION_ERROR",
-            str(exc),
-            {
-                "tool_id": exc.tool_id,
-                "template": exc.template,
-                "missing_variables": exc.missing_variables,
-            },
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content=ErrorResponse(
+                error_code="TEMPLATE_RESOLUTION_ERROR",
+                message=str(exc),
+                details={
+                    "tool_id": exc.tool_id,
+                    "template": exc.template,
+                    "missing_variables": exc.missing_variables,
+                },
+            ).model_dump(),
         )
-    # Fallback
-    logger.error("Unhandled domain error", exc_info=exc)
-    return _error_response(
-        status.HTTP_500_INTERNAL_SERVER_ERROR,
-        "INTERNAL_ERROR",
-        "An unexpected error occurred",
-    )
+    # Fallback — delegate to shared handler for unknown errors
+    return APIErrorHandler.handle_generic_error(exc)
 
 
 # ------------------------------------------------------------------

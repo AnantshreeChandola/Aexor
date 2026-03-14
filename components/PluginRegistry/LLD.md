@@ -1018,6 +1018,12 @@ def sanitize_variable(name: str, value: str) -> str:
 
 ### 7.4 Error Handling
 
+**Shared Error Infrastructure**: The API layer uses `shared/api/error_handlers.py` for consistent response formatting:
+- `ErrorResponse` (Pydantic model) — standardises the `{status, error_code, message, details}` envelope used by all components.
+- `APIErrorHandler.handle_generic_error()` — fallback for unexpected/unhandled errors.
+- Component-specific domain errors (e.g. `ToolNotFoundError` → 404) are mapped in a local `_handle_domain_error()` helper that constructs `ErrorResponse` instances, keeping the HTTP-status ↔ domain-error mapping close to the routes while reusing the shared response model.
+- Database adapter methods should apply `@with_db_error_handling` from `shared/database/error_handler.py` for consistent DB error wrapping.
+
 **Error Codes** (from SPEC FR-001):
 - `TOOL_ID_REQUIRED`: tool_id missing from request
 - `INVALID_TOOL_ID_FORMAT`: tool_id does not match `provider.service` format
@@ -1028,7 +1034,7 @@ def sanitize_variable(name: str, value: str) -> str:
 - `SCOPE_NOT_SUPPORTED`: tool operation does not support requested scope
 - `TOOL_DEACTIVATED`: tool exists but has been deactivated
 
-**Error Response Format**:
+**Error Response Format** (via `shared.api.error_handlers.ErrorResponse`):
 ```json
 {
   "status": "error",
@@ -1262,7 +1268,7 @@ Once global dependencies are ready, implement PluginRegistry in this order:
 - [ ] Implement admin auth dependency (`api/dependencies.py`)
 - [ ] Add Pydantic request/response models
 - [ ] Wire up RegistryService
-- [ ] Add error handling and structured logging
+- [ ] Use shared error handlers (`ErrorResponse`, `APIErrorHandler`) for consistent error formatting
 - [ ] Write API integration tests
 
 **Phase 4: Schema Validation & Contract Testing** (3-4 hours)
