@@ -14,12 +14,7 @@ import pytest
 
 from components.Signer.service.signer_service import SignerService
 
-SCHEMA_PATH = (
-    Path(__file__).resolve().parents[3]
-    / "shared"
-    / "schemas"
-    / "signature.schema.json"
-)
+SCHEMA_PATH = Path(__file__).resolve().parents[3] / "shared" / "schemas" / "signature.schema.json"
 
 
 @pytest.fixture(scope="session")
@@ -45,9 +40,7 @@ class TestSignatureContract:
         """Signed plan output validates against JSON schema."""
         sig = await signer_service.sign_plan(sample_plan)
         sig_dict = sig.model_dump()
-        jsonschema.validate(
-            instance=sig_dict, schema=signature_schema
-        )
+        jsonschema.validate(instance=sig_dict, schema=signature_schema)
 
     async def test_signature_algo_field_matches_enum(
         self,
@@ -68,9 +61,7 @@ class TestSignatureContract:
         """nonce matches ULID regex ^[0-9A-HJKMNP-TV-Z]{26}$."""
         sig = await signer_service.sign_plan(sample_plan)
         pattern = r"^[0-9A-HJKMNP-TV-Z]{26}$"
-        assert re.match(pattern, sig.nonce), (
-            f"nonce {sig.nonce!r} does not match ULID pattern"
-        )
+        assert re.match(pattern, sig.nonce), f"nonce {sig.nonce!r} does not match ULID pattern"
 
     async def test_signature_plan_hash_matches_hex_pattern(
         self,
@@ -111,9 +102,7 @@ class TestSignatureContract:
         """model_dump() has no extra fields beyond schema."""
         sig = await signer_service.sign_plan(sample_plan)
         sig_dict = sig.model_dump()
-        schema_keys = set(
-            signature_schema["properties"].keys()
-        )
+        schema_keys = set(signature_schema["properties"].keys())
         dump_keys = set(sig_dict.keys())
         extra = dump_keys - schema_keys
         assert not extra, f"Extra fields found: {extra}"

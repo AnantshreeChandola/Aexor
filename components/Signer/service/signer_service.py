@@ -168,9 +168,7 @@ class SignerService:
                     "plan_hash_computed": computed_hash,
                 },
             )
-            raise InvalidSignatureError(
-                reason="signature_verification_failed"
-            )
+            raise InvalidSignatureError(reason="signature_verification_failed")
 
         logger.info(
             "signature_verified",
@@ -201,33 +199,21 @@ def create_signer_service(pubkey_id: str = "k1") -> SignerService:
     """
     private_hex = os.environ.get("PLAN_SIGNING_PRIVATE_KEY")
     if not private_hex:
-        raise SigningKeyNotConfiguredError(
-            "PLAN_SIGNING_PRIVATE_KEY not set"
-        )
+        raise SigningKeyNotConfiguredError("PLAN_SIGNING_PRIVATE_KEY not set")
 
     public_hex = os.environ.get("PLAN_SIGNING_PUBLIC_KEY")
     if not public_hex:
-        raise SigningKeyNotConfiguredError(
-            "PLAN_SIGNING_PUBLIC_KEY not set"
-        )
+        raise SigningKeyNotConfiguredError("PLAN_SIGNING_PUBLIC_KEY not set")
 
     try:
-        private_key = Ed25519PrivateKey.from_private_bytes(
-            bytes.fromhex(private_hex)
-        )
+        private_key = Ed25519PrivateKey.from_private_bytes(bytes.fromhex(private_hex))
     except (ValueError, Exception) as exc:
-        raise SigningKeyNotConfiguredError(
-            f"Invalid private key hex: {exc}"
-        )
+        raise SigningKeyNotConfiguredError(f"Invalid private key hex: {exc}")
 
     try:
-        public_key = Ed25519PublicKey.from_public_bytes(
-            bytes.fromhex(public_hex)
-        )
+        public_key = Ed25519PublicKey.from_public_bytes(bytes.fromhex(public_hex))
     except (ValueError, Exception) as exc:
-        raise SigningKeyNotConfiguredError(
-            f"Invalid public key hex: {exc}"
-        )
+        raise SigningKeyNotConfiguredError(f"Invalid public key hex: {exc}")
 
     logger.info(
         "signer_service_created",

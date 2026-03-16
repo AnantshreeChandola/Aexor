@@ -116,9 +116,7 @@ class TestSignPlan:
         sample_plan: dict,
     ) -> None:
         """Custom identity is used when provided."""
-        result = await signer_service.sign_plan(
-            sample_plan, signer_identity="admin@ops"
-        )
+        result = await signer_service.sign_plan(sample_plan, signer_identity="admin@ops")
         assert result.signer == "admin@ops"
 
     async def test_sign_empty_plan_raises_value_error(
@@ -172,9 +170,7 @@ class TestVerifySignature:
     ) -> None:
         """Sign then verify succeeds."""
         sig = await signer_service.sign_plan(sample_plan)
-        result = await signer_service.verify_signature(
-            sample_plan, sig.model_dump()
-        )
+        result = await signer_service.verify_signature(sample_plan, sig.model_dump())
         assert result is True
 
     async def test_verify_tampered_plan_raises(
@@ -186,9 +182,7 @@ class TestVerifySignature:
         sig = await signer_service.sign_plan(sample_plan)
         tampered = {**sample_plan, "plan_id": "TAMPERED"}
         with pytest.raises(InvalidSignatureError) as exc_info:
-            await signer_service.verify_signature(
-                tampered, sig.model_dump()
-            )
+            await signer_service.verify_signature(tampered, sig.model_dump())
         assert exc_info.value.reason == "hash_mismatch"
 
     async def test_verify_wrong_algo_raises_unsupported(
@@ -201,9 +195,7 @@ class TestVerifySignature:
         sig_dict = sig.model_dump()
         sig_dict["algo"] = "RSA"
         with pytest.raises(UnsupportedAlgorithmError) as exc_info:
-            await signer_service.verify_signature(
-                sample_plan, sig_dict
-            )
+            await signer_service.verify_signature(sample_plan, sig_dict)
         assert exc_info.value.algo == "RSA"
 
     async def test_verify_malformed_base64_raises(
@@ -216,9 +208,7 @@ class TestVerifySignature:
         sig_dict = sig.model_dump()
         sig_dict["signature"] = "!!!not-valid-base64!!!"
         with pytest.raises(InvalidSignatureError) as exc_info:
-            await signer_service.verify_signature(
-                sample_plan, sig_dict
-            )
+            await signer_service.verify_signature(sample_plan, sig_dict)
         assert exc_info.value.reason == "malformed_signature"
 
     async def test_verify_wrong_signature_bytes(
@@ -233,12 +223,8 @@ class TestVerifySignature:
         wrong_sig = base64.b64encode(b"\x00" * 64).decode()
         sig_dict["signature"] = wrong_sig
         with pytest.raises(InvalidSignatureError) as exc_info:
-            await signer_service.verify_signature(
-                sample_plan, sig_dict
-            )
-        assert (
-            exc_info.value.reason == "signature_verification_failed"
-        )
+            await signer_service.verify_signature(sample_plan, sig_dict)
+        assert exc_info.value.reason == "signature_verification_failed"
 
     async def test_verify_plan_hash_mismatch_explicit(
         self,
@@ -250,9 +236,7 @@ class TestVerifySignature:
         sig_dict = sig.model_dump()
         sig_dict["plan_hash"] = "a" * 64
         with pytest.raises(InvalidSignatureError) as exc_info:
-            await signer_service.verify_signature(
-                sample_plan, sig_dict
-            )
+            await signer_service.verify_signature(sample_plan, sig_dict)
         assert exc_info.value.reason == "hash_mismatch"
 
     async def test_verify_different_key_fails(
@@ -268,9 +252,5 @@ class TestVerifySignature:
         other_svc = SignerService(other_priv, other_pub)
 
         with pytest.raises(InvalidSignatureError) as exc_info:
-            await other_svc.verify_signature(
-                sample_plan, sig.model_dump()
-            )
-        assert (
-            exc_info.value.reason == "signature_verification_failed"
-        )
+            await other_svc.verify_signature(sample_plan, sig.model_dump())
+        assert exc_info.value.reason == "signature_verification_failed"

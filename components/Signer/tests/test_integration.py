@@ -23,9 +23,7 @@ class TestSignThenVerify:
     ) -> None:
         """Sign a plan then verify with same service."""
         sig = await signer_service.sign_plan(sample_plan)
-        result = await signer_service.verify_signature(
-            sample_plan, sig.model_dump()
-        )
+        result = await signer_service.verify_signature(sample_plan, sig.model_dump())
         assert result is True
 
     async def test_sign_then_verify_with_complex_plan(
@@ -78,9 +76,7 @@ class TestSignThenVerify:
         }
 
         sig = await signer_service.sign_plan(complex_plan)
-        result = await signer_service.verify_signature(
-            complex_plan, sig.model_dump()
-        )
+        result = await signer_service.verify_signature(complex_plan, sig.model_dump())
         assert result is True
 
     async def test_audit_verification_scenario(
@@ -99,9 +95,7 @@ class TestSignThenVerify:
         restored_plan = json.loads(plan_json)
         restored_sig = json.loads(sig_json)
 
-        result = await signer_service.verify_signature(
-            restored_plan, restored_sig
-        )
+        result = await signer_service.verify_signature(restored_plan, restored_sig)
         assert result is True
 
     async def test_audit_detects_post_storage_tampering(
@@ -121,9 +115,7 @@ class TestSignThenVerify:
         restored_sig = json.loads(sig_json)
 
         with pytest.raises(InvalidSignatureError) as exc_info:
-            await signer_service.verify_signature(
-                restored_plan, restored_sig
-            )
+            await signer_service.verify_signature(restored_plan, restored_sig)
         assert exc_info.value.reason == "hash_mismatch"
 
     async def test_replay_protection_unique_nonces(
@@ -132,10 +124,7 @@ class TestSignThenVerify:
         sample_plan: dict,
     ) -> None:
         """Signing same plan 10 times produces 10 unique nonces."""
-        sigs = [
-            await signer_service.sign_plan(sample_plan)
-            for _ in range(10)
-        ]
+        sigs = [await signer_service.sign_plan(sample_plan) for _ in range(10)]
         nonces = [s.nonce for s in sigs]
         assert len(set(nonces)) == 10
 
@@ -151,22 +140,14 @@ class TestSignThenVerify:
         sig_b = await signer_service.sign_plan(plan_b)
 
         # Self-verify succeeds
-        assert await signer_service.verify_signature(
-            plan_a, sig_a.model_dump()
-        )
-        assert await signer_service.verify_signature(
-            plan_b, sig_b.model_dump()
-        )
+        assert await signer_service.verify_signature(plan_a, sig_a.model_dump())
+        assert await signer_service.verify_signature(plan_b, sig_b.model_dump())
 
         # Cross-verify fails
         with pytest.raises(InvalidSignatureError):
-            await signer_service.verify_signature(
-                plan_a, sig_b.model_dump()
-            )
+            await signer_service.verify_signature(plan_a, sig_b.model_dump())
         with pytest.raises(InvalidSignatureError):
-            await signer_service.verify_signature(
-                plan_b, sig_a.model_dump()
-            )
+            await signer_service.verify_signature(plan_b, sig_a.model_dump())
 
     async def test_sign_then_verify_minimal_plan(
         self,
@@ -175,9 +156,7 @@ class TestSignThenVerify:
     ) -> None:
         """Minimal plan can be signed and verified."""
         sig = await signer_service.sign_plan(sample_plan_minimal)
-        result = await signer_service.verify_signature(
-            sample_plan_minimal, sig.model_dump()
-        )
+        result = await signer_service.verify_signature(sample_plan_minimal, sig.model_dump())
         assert result is True
 
     async def test_verify_with_different_service_same_keys(
@@ -191,7 +170,5 @@ class TestSignThenVerify:
         svc2 = SignerService(priv, pub, pubkey_id="k1")
 
         sig = await svc1.sign_plan(sample_plan)
-        result = await svc2.verify_signature(
-            sample_plan, sig.model_dump()
-        )
+        result = await svc2.verify_signature(sample_plan, sig.model_dump())
         assert result is True

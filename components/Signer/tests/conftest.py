@@ -15,9 +15,7 @@ from components.Signer.service.signer_service import SignerService
 
 
 @pytest.fixture(scope="session")
-def test_key_pair() -> (
-    tuple[Ed25519PrivateKey, "Ed25519PrivateKey"]
-):
+def test_key_pair() -> tuple[Ed25519PrivateKey, "Ed25519PrivateKey"]:
     """Generate a fresh Ed25519 key pair for tests.
 
     Returns:

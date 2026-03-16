@@ -30,9 +30,15 @@ def _all_log_text(records: list[logging.LogRecord]) -> str:
     parts: list[str] = []
     for r in records:
         parts.append(r.getMessage())
-        for key in ("plan_hash", "pubkey_id", "signer", "nonce",
-                     "reason", "plan_hash_expected",
-                     "plan_hash_computed"):
+        for key in (
+            "plan_hash",
+            "pubkey_id",
+            "signer",
+            "nonce",
+            "reason",
+            "plan_hash_expected",
+            "plan_hash_computed",
+        ):
             val = getattr(r, key, None)
             if val is not None:
                 parts.append(str(val))
@@ -51,9 +57,7 @@ class TestObservability:
     ) -> None:
         """Sign logs do not contain hex-encoded private key."""
         priv, _ = test_key_pair
-        priv_hex = priv.private_bytes(
-            Encoding.Raw, PrivateFormat.Raw, NoEncryption()
-        ).hex()
+        priv_hex = priv.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption()).hex()
 
         with caplog.at_level(logging.DEBUG, logger="signer"):
             await signer_service.sign_plan(sample_plan)
@@ -87,9 +91,7 @@ class TestObservability:
 
         caplog.clear()
         with caplog.at_level(logging.DEBUG, logger="signer"), pytest.raises(InvalidSignatureError):
-            await signer_service.verify_signature(
-                tampered, sig.model_dump()
-            )
+            await signer_service.verify_signature(tampered, sig.model_dump())
 
         full_log = _all_log_text(caplog.records)
         assert "hash_mismatch" in full_log
@@ -119,8 +121,6 @@ class TestObservability:
         sig = await signer_service.sign_plan(sample_plan)
         caplog.clear()
         with caplog.at_level(logging.INFO, logger="signer"):
-            await signer_service.verify_signature(
-                sample_plan, sig.model_dump()
-            )
+            await signer_service.verify_signature(sample_plan, sig.model_dump())
 
         assert "signature_verified" in caplog.text
