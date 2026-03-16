@@ -74,13 +74,14 @@ class SignerService:
 
         canonical_json = canonicalize_plan(plan_data)
         plan_hash = compute_plan_hash(plan_data)
-        canonical_bytes = canonical_json.encode("utf-8")
-
-        sig_bytes = self._private_key.sign(canonical_bytes)
-        sig_b64 = base64.b64encode(sig_bytes).decode("ascii")
 
         nonce = str(ulid.new())
         ts = datetime.now(UTC).isoformat()
+
+        # Sign canonical plan + nonce + timestamp so all three are tamper-proof
+        signed_message = f"{canonical_json}|{nonce}|{ts}".encode()
+        sig_bytes = self._private_key.sign(signed_message)
+        sig_b64 = base64.b64encode(sig_bytes).decode("ascii")
 
         signature = PlanSignature(
             algo="Ed25519",
@@ -155,10 +156,12 @@ class SignerService:
             raise InvalidSignatureError(reason="malformed_signature")
 
         canonical_json = canonicalize_plan(plan_data)
-        canonical_bytes = canonical_json.encode("utf-8")
+        nonce = signature_data.get("nonce", "")
+        ts = signature_data.get("ts", "")
+        signed_message = f"{canonical_json}|{nonce}|{ts}".encode()
 
         try:
-            self._public_key.verify(sig_bytes, canonical_bytes)
+            self._public_key.verify(sig_bytes, signed_message)
         except CryptoInvalidSignature:
             logger.warning(
                 "signature_verification_failed",

@@ -239,6 +239,32 @@ class TestVerifySignature:
             await signer_service.verify_signature(sample_plan, sig_dict)
         assert exc_info.value.reason == "hash_mismatch"
 
+    async def test_verify_tampered_nonce_raises(
+        self,
+        signer_service: SignerService,
+        sample_plan: dict,
+    ) -> None:
+        """Altering the nonce after signing breaks verification."""
+        sig = await signer_service.sign_plan(sample_plan)
+        sig_dict = sig.model_dump()
+        sig_dict["nonce"] = "01JXXXXXXXXXXXXXXXXXXXXXXXXX"
+        with pytest.raises(InvalidSignatureError) as exc_info:
+            await signer_service.verify_signature(sample_plan, sig_dict)
+        assert exc_info.value.reason == "signature_verification_failed"
+
+    async def test_verify_tampered_timestamp_raises(
+        self,
+        signer_service: SignerService,
+        sample_plan: dict,
+    ) -> None:
+        """Altering the timestamp after signing breaks verification."""
+        sig = await signer_service.sign_plan(sample_plan)
+        sig_dict = sig.model_dump()
+        sig_dict["ts"] = "2099-01-01T00:00:00+00:00"
+        with pytest.raises(InvalidSignatureError) as exc_info:
+            await signer_service.verify_signature(sample_plan, sig_dict)
+        assert exc_info.value.reason == "signature_verification_failed"
+
     async def test_verify_different_key_fails(
         self,
         sample_plan: dict,
