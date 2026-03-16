@@ -4,7 +4,7 @@
   "title": "Plan Signature",
   "description": "Cryptographic plan signature (GLOBAL_SPEC v2 §2.4)",
   "type": "object",
-  "required": ["algo", "signer", "ts", "nonce", "signature", "pubkey_id"],
+  "required": ["algo", "signer", "signature", "pubkey_id", "plan_hash"],
   "properties": {
     "algo": {
       "type": "string",
@@ -16,16 +16,6 @@
       "description": "Signer identity",
       "pattern": "^[a-zA-Z0-9_-]+@[a-zA-Z0-9_-]+$",
       "examples": ["planner@system", "user@client"]
-    },
-    "ts": {
-      "type": "string",
-      "format": "date-time",
-      "description": "ISO 8601 timestamp of signing"
-    },
-    "nonce": {
-      "type": "string",
-      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$",
-      "description": "ULID nonce for replay protection"
     },
     "signature": {
       "type": "string",
@@ -41,7 +31,7 @@
     },
     "plan_hash": {
       "type": "string",
-      "description": "SHA-256 hash of canonical plan (optional verification)",
+      "description": "SHA-256 hash of canonical plan",
       "pattern": "^[a-f0-9]{64}$"
     }
   },
