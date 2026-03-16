@@ -8,10 +8,8 @@ plans and verifies signatures for integrity and audit purposes.
 import base64
 import logging
 import os
-from datetime import UTC, datetime
 from typing import Any
 
-import ulid
 from cryptography.exceptions import InvalidSignature as CryptoInvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PrivateKey,
@@ -74,20 +72,14 @@ class SignerService:
 
         canonical_json = canonicalize_plan(plan_data)
         plan_hash = compute_plan_hash(plan_data)
+        canonical_bytes = canonical_json.encode()
 
-        nonce = str(ulid.new())
-        ts = datetime.now(UTC).isoformat()
-
-        # Sign canonical plan + nonce + timestamp so all three are tamper-proof
-        signed_message = f"{canonical_json}|{nonce}|{ts}".encode()
-        sig_bytes = self._private_key.sign(signed_message)
+        sig_bytes = self._private_key.sign(canonical_bytes)
         sig_b64 = base64.b64encode(sig_bytes).decode("ascii")
 
         signature = PlanSignature(
             algo="Ed25519",
             signer=signer_identity,
-            ts=ts,
-            nonce=nonce,
             signature=sig_b64,
             pubkey_id=self._pubkey_id,
             plan_hash=plan_hash,
@@ -99,7 +91,6 @@ class SignerService:
                 "plan_hash": plan_hash,
                 "pubkey_id": self._pubkey_id,
                 "signer": signer_identity,
-                "nonce": nonce,
             },
         )
 
@@ -156,12 +147,10 @@ class SignerService:
             raise InvalidSignatureError(reason="malformed_signature")
 
         canonical_json = canonicalize_plan(plan_data)
-        nonce = signature_data.get("nonce", "")
-        ts = signature_data.get("ts", "")
-        signed_message = f"{canonical_json}|{nonce}|{ts}".encode()
+        canonical_bytes = canonical_json.encode()
 
         try:
-            self._public_key.verify(sig_bytes, signed_message)
+            self._public_key.verify(sig_bytes, canonical_bytes)
         except CryptoInvalidSignature:
             logger.warning(
                 "signature_verification_failed",

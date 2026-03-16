@@ -53,16 +53,6 @@ class TestSignatureContract:
         allowed = signature_schema["properties"]["algo"]["enum"]
         assert sig.algo in allowed
 
-    async def test_signature_nonce_matches_ulid_pattern(
-        self,
-        signer_service: SignerService,
-        sample_plan: dict,
-    ) -> None:
-        """nonce matches ULID regex ^[0-9A-HJKMNP-TV-Z]{26}$."""
-        sig = await signer_service.sign_plan(sample_plan)
-        pattern = r"^[0-9A-HJKMNP-TV-Z]{26}$"
-        assert re.match(pattern, sig.nonce), f"nonce {sig.nonce!r} does not match ULID pattern"
-
     async def test_signature_plan_hash_matches_hex_pattern(
         self,
         signer_service: SignerService,

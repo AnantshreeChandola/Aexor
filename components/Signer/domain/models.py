@@ -23,14 +23,6 @@ class PlanSignature(BaseModel):
     signer: str = Field(
         description="Identity of the signer (e.g., 'planner@system')",
     )
-    ts: str = Field(
-        description="ISO 8601 timestamp of signing",
-    )
-    nonce: str = Field(
-        description="ULID nonce for replay protection",
-        min_length=26,
-        max_length=26,
-    )
     signature: str = Field(
         description="Base64-encoded Ed25519 signature",
         min_length=64,

@@ -118,16 +118,6 @@ class TestSignThenVerify:
             await signer_service.verify_signature(restored_plan, restored_sig)
         assert exc_info.value.reason == "hash_mismatch"
 
-    async def test_replay_protection_unique_nonces(
-        self,
-        signer_service: SignerService,
-        sample_plan: dict,
-    ) -> None:
-        """Signing same plan 10 times produces 10 unique nonces."""
-        sigs = [await signer_service.sign_plan(sample_plan) for _ in range(10)]
-        nonces = [s.nonce for s in sigs]
-        assert len(set(nonces)) == 10
-
     async def test_multiple_plans_independent_sigs(
         self,
         signer_service: SignerService,

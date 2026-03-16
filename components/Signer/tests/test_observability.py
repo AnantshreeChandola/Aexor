@@ -34,7 +34,6 @@ def _all_log_text(records: list[logging.LogRecord]) -> str:
             "plan_hash",
             "pubkey_id",
             "signer",
-            "nonce",
             "reason",
             "plan_hash_expected",
             "plan_hash_computed",

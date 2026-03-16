@@ -6,7 +6,6 @@ Ed25519 keys generated in fixtures.
 """
 
 import base64
-import re
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
@@ -56,29 +55,6 @@ class TestSignPlan:
         sig1 = await signer_service.sign_plan(sample_plan)
         sig2 = await signer_service.sign_plan(sample_plan)
         assert sig1.plan_hash == sig2.plan_hash
-
-    async def test_sign_nonce_is_unique(
-        self,
-        signer_service: SignerService,
-        sample_plan: dict,
-    ) -> None:
-        """Two signatures of same plan have different nonces."""
-        sig1 = await signer_service.sign_plan(sample_plan)
-        sig2 = await signer_service.sign_plan(sample_plan)
-        assert sig1.nonce != sig2.nonce
-
-    async def test_sign_ts_is_unique(
-        self,
-        signer_service: SignerService,
-        sample_plan: dict,
-    ) -> None:
-        """Two signatures have non-identical timestamps."""
-        sig1 = await signer_service.sign_plan(sample_plan)
-        sig2 = await signer_service.sign_plan(sample_plan)
-        # ts may be same if called fast, but nonce differs
-        # This test verifies ts is a valid ISO string
-        assert re.match(r"\d{4}-\d{2}-\d{2}T", sig1.ts)
-        assert re.match(r"\d{4}-\d{2}-\d{2}T", sig2.ts)
 
     async def test_sign_signature_is_base64(
         self,
@@ -144,15 +120,6 @@ class TestSignPlan:
         result = await signer_service.sign_plan(sample_plan)
         expected = compute_plan_hash(sample_plan)
         assert result.plan_hash == expected
-
-    async def test_sign_nonce_is_26_chars(
-        self,
-        signer_service: SignerService,
-        sample_plan: dict,
-    ) -> None:
-        """nonce is a 26-character ULID string."""
-        result = await signer_service.sign_plan(sample_plan)
-        assert len(result.nonce) == 26
 
 
 # ----------------------------------------------------------------
@@ -238,32 +205,6 @@ class TestVerifySignature:
         with pytest.raises(InvalidSignatureError) as exc_info:
             await signer_service.verify_signature(sample_plan, sig_dict)
         assert exc_info.value.reason == "hash_mismatch"
-
-    async def test_verify_tampered_nonce_raises(
-        self,
-        signer_service: SignerService,
-        sample_plan: dict,
-    ) -> None:
-        """Altering the nonce after signing breaks verification."""
-        sig = await signer_service.sign_plan(sample_plan)
-        sig_dict = sig.model_dump()
-        sig_dict["nonce"] = "01JXXXXXXXXXXXXXXXXXXXXXXXXX"
-        with pytest.raises(InvalidSignatureError) as exc_info:
-            await signer_service.verify_signature(sample_plan, sig_dict)
-        assert exc_info.value.reason == "signature_verification_failed"
-
-    async def test_verify_tampered_timestamp_raises(
-        self,
-        signer_service: SignerService,
-        sample_plan: dict,
-    ) -> None:
-        """Altering the timestamp after signing breaks verification."""
-        sig = await signer_service.sign_plan(sample_plan)
-        sig_dict = sig.model_dump()
-        sig_dict["ts"] = "2099-01-01T00:00:00+00:00"
-        with pytest.raises(InvalidSignatureError) as exc_info:
-            await signer_service.verify_signature(sample_plan, sig_dict)
-        assert exc_info.value.reason == "signature_verification_failed"
 
     async def test_verify_different_key_fails(
         self,
