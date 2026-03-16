@@ -64,6 +64,11 @@ async def lifespan(app: FastAPI):
     registry_db = RegistryDatabaseAdapter()
     app.state.registry_service = RegistryService(db_adapter=registry_db)
 
+    # Signer service (library — no DB, no routes)
+    from components.Signer.service.signer_service import create_signer_service
+
+    app.state.signer_service = create_signer_service()
+
     # History services
     from components.History.adapters.db import DatabaseAdapter as HistoryDBAdapter
     from components.History.service.evidence_service import EvidenceService

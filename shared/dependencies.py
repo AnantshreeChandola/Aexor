@@ -45,3 +45,8 @@ def get_pattern_service(request: Request) -> Any:
 def get_registry_service(request: Request) -> Any:
     """Get RegistryService singleton from app state."""
     return request.app.state.registry_service
+
+
+def get_signer_service(request: Request) -> Any:
+    """Get SignerService singleton from app state."""
+    return request.app.state.signer_service
