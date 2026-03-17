@@ -86,6 +86,27 @@ async def lifespan(app: FastAPI):
     app.state.pattern_service = pattern_service
     app.state.history_db_adapter = history_db
 
+    # VectorIndex service (library -- no routes, graceful degradation)
+    try:
+        from components.VectorIndex.domain.models import (
+            EmbeddingModelError,
+            VectorIndexUnavailableError,
+        )
+        from components.VectorIndex.service.vector_index_service import (
+            create_vector_index_service,
+        )
+
+        app.state.vector_index_service = create_vector_index_service(db)
+    except (VectorIndexUnavailableError, EmbeddingModelError) as exc:
+        logger.warning("VectorIndex unavailable, degrading gracefully: %s", exc)
+        app.state.vector_index_service = None
+    except Exception as exc:
+        logger.warning(
+            "VectorIndex init failed unexpectedly, degrading gracefully: %s",
+            exc,
+        )
+        app.state.vector_index_service = None
+
     logger.info("All services initialized")
 
     yield

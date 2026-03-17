@@ -1,7 +1,7 @@
 # Modular Architecture — Layered Component Tree
 
 **Status:** Active
-**Version:** 1.2
+**Version:** 1.3
 **Conforms to:** GLOBAL_SPEC.md v2.2, Project_HLD.md v4.6
 
 ---
@@ -75,6 +75,8 @@ Each component's database dependencies, component dependencies, and external ser
     │   - ProfileStore │  │ • Ext:           │  │   (Ed25519)      │
     │   - History      │  │   Anthropic API  │  └──────────────────┘
     │   - PlanLibrary  │  └──────────────────┘
+    │   - VectorIndex  │
+    │     (optional)   │
     │ • Ext: None      │
     │                  │  ┌──────────────────┐  ┌──────────────────┐
     └──────────────────┘  │ PluginRegistry   │  │ Audit            │
@@ -96,8 +98,7 @@ Each component's database dependencies, component dependencies, and external ser
     │   - PlanLibrary  │
     │   - History      │
     │   - VectorIndex  │
-    │ • Ext:           │
-    │   OpenAI (embed) │
+    │ • Ext: None      │
     └──────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────┐
@@ -110,12 +111,13 @@ Each component's database dependencies, component dependencies, and external ser
     │                  │  │                  │  │                  │
     │ • DB:            │  │ • DB:            │  │ • DB:            │
     │   - PostgreSQL:  │  │   - PostgreSQL:  │  │   - PostgreSQL:  │
-    │     profiles,    │  │     history      │  │     vectors      │
-    │     preferences, │  │ • Deps: None     │  │   - pgvector     │
-    │     consent      │  │ • Ext: None      │  │ • Deps: None     │
-    │ • Deps: None     │  └──────────────────┘  │ • Ext:           │
-    │ • Ext: None      │                        │   OpenAI (embed) │
-    └──────────────────┘                        └──────────────────┘
+    │     profiles,    │  │     history      │  │     plan_        │
+    │     preferences, │  │ • Deps: None     │  │     embeddings   │
+    │     consent      │  │ • Ext: None      │  │   - pgvector     │
+    │ • Deps: None     │  └──────────────────┘  │ • Deps: None     │
+    │ • Ext: None      │                        │ • Ext: ONNX      │
+    └──────────────────┘                        │   Runtime(local) │
+                                                └──────────────────┘
 
     ┌──────────────────┐
     │ PlanLibrary      │
@@ -140,13 +142,13 @@ The **Memory Layer** is a cohesive module containing all database-interaction co
 memory/
 ├── ProfileStore/      # User preferences, consent
 ├── History/           # Normalized outcome facts
-├── VectorIndex/       # Semantic similarity search (deferred — see HLD §12)
+├── VectorIndex/       # Hybrid search (BM25 + semantic) via pgvector + tsvector
 └── PlanLibrary/       # Plan storage + retrieval
 ```
 
 **Shared Characteristics:**
 - All interact directly with PostgreSQL
-- VectorIndex uses pgvector extension (when implemented)
+- VectorIndex uses pgvector extension + tsvector for hybrid search (BM25 + cosine RRF)
 - Provide CRUD operations for upper layers
 - No business logic (thin adapters)
 - Reusable across services
@@ -177,7 +179,7 @@ class MemoryLayer:
 | `plans` | `public` | PlanLibrary | Signed plan records |
 | `plan_signatures` | `public` | PlanLibrary | Ed25519 signatures |
 | `plan_outcomes` | `public` | PlanLibrary | Execution results |
-| `vectors` | `public` | VectorIndex | Embedding vectors (plans, facts, prefs) |
+| `plan_embeddings` | `public` | VectorIndex | Hybrid search: 384-dim embeddings + tsvector for plans |
 | `tools` | `public` | PluginRegistry | Registered external integrations |
 | `operations` | `public` | PluginRegistry | Tool operation metadata (n8n bindings, scopes) |
 | `registry_versions` | `public` | PluginRegistry | Monotonic version counter for registry changes |
@@ -197,10 +199,11 @@ class MemoryLayer:
 
 ### pgvector Indexes
 
-| Index Name | Table | Vector Dimension | Owner Component | Description |
-|------------|-------|------------------|-----------------|-------------|
-| `idx_vectors_embedding` | `vectors` | 1536 | VectorIndex | HNSW index for ANN search |
-| `idx_vectors_namespace_embedding` | `vectors` | 1536 | VectorIndex | Composite index (namespace + vector) |
+| Index Name | Table | Type | Owner Component | Description |
+|------------|-------|------|-----------------|-------------|
+| `idx_plan_embeddings_hnsw` | `plan_embeddings` | HNSW (vector_cosine_ops, 384-dim) | VectorIndex | ANN cosine similarity search |
+| `idx_plan_embeddings_tsv` | `plan_embeddings` | GIN (tsvector) | VectorIndex | BM25 keyword search via `@@` |
+| `idx_plan_embeddings_intent` | `plan_embeddings` | B-tree | VectorIndex | Fast intent_type filtering |
 
 ---
 
@@ -235,12 +238,14 @@ History
 ```
 VectorIndex
 ├── Database Dependencies
-│   ├── PostgreSQL: vectors (with pgvector extension)
-│   └── pgvector: idx_vectors_embedding
+│   ├── PostgreSQL: plan_embeddings (with pgvector extension)
+│   ├── pgvector: idx_plan_embeddings_hnsw (HNSW, 384-dim)
+│   ├── GIN: idx_plan_embeddings_tsv (tsvector)
+│   └── B-tree: idx_plan_embeddings_intent (intent_type)
 ├── Component Dependencies
 │   └── (none - foundation component)
 └── External Dependencies
-    └── OpenAI API (embeddings only)
+    └── ONNX Runtime (local CPU inference, all-MiniLM-L6-v2)
 ```
 
 #### PlanLibrary
@@ -272,13 +277,14 @@ Intake
 
 #### ContextRAG
 ```
-ContextRAG (context assembler — structured queries, not embedding-based RAG)
+ContextRAG (context assembler — structured queries + optional hybrid search)
 ├── Database Dependencies
 │   └── (none - queries via component dependencies)
 ├── Component Dependencies
 │   ├── → ProfileStore (Tier 2: stable prefs)
 │   ├── → History (Tier 3: recent history)
-│   └── → PlanLibrary (Tier 3: successful plans)
+│   ├── → PlanLibrary (Tier 3: successful plans)
+│   └── → VectorIndex (optional: hybrid search for similar plans, graceful degradation)
 └── External Dependencies
     └── (none)
 ```
@@ -325,9 +331,9 @@ PlanWriter
 ├── Component Dependencies
 │   ├── → PlanLibrary (persist outcomes)
 │   ├── → History (persist facts)
-│   └── → VectorIndex (trigger re-indexing — deferred, see HLD §12)
+│   └── → VectorIndex (store plan embeddings for hybrid search)
 └── External Dependencies
-    └── OpenAI API (embeddings for new facts — deferred with VectorIndex)
+    └── (none)
 ```
 
 #### Audit
@@ -545,7 +551,7 @@ Purpose: Background polling service (runs every 30s) that:
           ▼             ▼             ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │ DATABASE LAYER                                                  │
-│  PostgreSQL: plans, history, vectors                            │
+│  PostgreSQL: plans, history, plan_embeddings                    │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -558,10 +564,10 @@ Purpose: Background polling service (runs every 30s) that:
 - ProfileStore
 - History
 - PlanLibrary
-- VectorIndex (deferred — see HLD §12)
+- VectorIndex (hybrid BM25 + semantic search)
 
 **Timeline:** Sprint 1 (2 weeks)
-**Agents:** 3 parallel agents (VectorIndex deferred)
+**Agents:** 4 parallel agents
 
 ---
 
@@ -953,14 +959,19 @@ CREATE TABLE consent_flags (...);
 -- History
 CREATE TABLE history (fact_id UUID PRIMARY KEY, ...);
 
--- VectorIndex
-CREATE TABLE vectors (
-    id UUID PRIMARY KEY,
-    namespace VARCHAR,
-    embedding vector(1536),
-    metadata JSONB
+-- VectorIndex (hybrid search: BM25 + semantic + RRF)
+CREATE TABLE plan_embeddings (
+    plan_id VARCHAR(128) PRIMARY KEY REFERENCES plans(plan_id),
+    embedding vector(384) NOT NULL,       -- all-MiniLM-L6-v2 via ONNX Runtime
+    intent_type VARCHAR(64) NOT NULL,     -- denormalized from plans for filter perf
+    search_text TEXT NOT NULL,            -- "{intent} | {actions} | {constraints} | {entities}"
+    tsv tsvector NOT NULL,               -- auto-generated from search_text via trigger
+    stored_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX idx_vectors_embedding ON vectors USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX idx_plan_embeddings_hnsw ON plan_embeddings
+    USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64);
+CREATE INDEX idx_plan_embeddings_tsv ON plan_embeddings USING gin (tsv);
+CREATE INDEX idx_plan_embeddings_intent ON plan_embeddings (intent_type);
 ```
 
 ### Phase 1.5: PluginRegistry & User Integrations Tables
@@ -1007,9 +1018,10 @@ CREATE TABLE audit_events (...);
    - Sessions, tokens, idempotency keys, preview state caching
    - Short TTLs prevent state accumulation
 
-4. **PostgreSQL for Persistent State** (pgvector deferred with VectorIndex)
+4. **PostgreSQL for Persistent State** (with pgvector + tsvector)
    - Relational data (profiles, plans, history)
-   - Vector search deferred until structured queries prove insufficient (see HLD §12)
+   - Hybrid search: BM25 keyword (tsvector/tsquery) + semantic (pgvector HNSW) + RRF score fusion
+   - ONNX Runtime for local embeddings (all-MiniLM-L6-v2, 384-dim, ~10ms inference)
    - Single database reduces operational complexity
 
 5. **Component Ownership**
@@ -1025,7 +1037,7 @@ CREATE TABLE audit_events (...);
 
 ## Next Steps
 
-1. **Implement Memory Module** (ProfileStore, History, PlanLibrary — VectorIndex deferred)
+1. **Implement Memory Module** (ProfileStore, History, PlanLibrary, VectorIndex)
 2. **Set up database schemas** and migrations
 3. **Build Security & Config** (Signer, PluginRegistry, Audit)
 4. **Implement Planning Layer** (Intake → ContextRAG → Planner)
