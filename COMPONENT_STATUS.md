@@ -1,7 +1,7 @@
 # Component Implementation Status
 
-**Last Updated**: 2026-02-28
-**Total Components**: 16 (across 4 layers, VectorIndex deferred)
+**Last Updated**: 2026-03-16
+**Total Components**: 16 (across 4 layers)
 
 Legend:
 - `✓` - Completed and verified
@@ -34,13 +34,14 @@ Legend:
 - **PR**: [#5](https://github.com/AnantshreeChandola/Personal-agent/pull/5) - History Memory Layer implementation
 
 ### VectorIndex
-- SPEC.md: ✗
-- LLD.md: ✗
-- Code: ✗
-- Tests: ✗
-- Schemas: ✗
-- **Purpose**: Find similar past situations by semantic meaning (pgvector)
-- **Status**: 🔄 **DEFERRED** - Not needed for MVP; ContextRAG uses structured queries (see HLD §12)
+- SPEC.md: ✓
+- LLD.md: ✓
+- Code: ✓
+- Tests: ✓ (74 passing, 6 integration stubs)
+- Schemas: ✓
+- **Purpose**: Hybrid search (BM25 keyword + semantic cosine) with RRF score fusion
+- **Status**: ✅ **COMPLETED** - ONNX Runtime local embeddings (384-dim), pgvector HNSW + tsvector GIN, graceful degradation
+- **PR**: [#9](https://github.com/AnantshreeChandola/Personal-agent/pull/9) - VectorIndex hybrid search implementation
 
 ### PlanLibrary
 - SPEC.md: ✓
@@ -81,20 +82,24 @@ Legend:
 - **Purpose**: Create deterministic step-by-step plans
 
 ### Signer
-- SPEC.md: ✗
-- LLD.md: ✗
-- Code: ✗
-- Tests: ✗
-- Schemas: ✗
+- SPEC.md: ✓
+- LLD.md: ✓
+- Code: ✓
+- Tests: ✓ (51 passing)
+- Schemas: ✓
 - **Purpose**: Cryptographically sign plans (Ed25519)
+- **Status**: ✅ **COMPLETED** - Ed25519 sign/verify, library component (no routes), DI wiring
+- **PR**: [#8](https://github.com/AnantshreeChandola/Personal-agent/pull/8) - Signer implementation
 
 ### PluginRegistry
-- SPEC.md: ✗
-- LLD.md: ✗
-- Code: ✗
-- Tests: ✗
-- Schemas: ✗
+- SPEC.md: ✓
+- LLD.md: ✓
+- Code: ✓
+- Tests: ✓ (95 passing)
+- Schemas: ✓
 - **Purpose**: Source of truth for available tools and operations
+- **Status**: ✅ **COMPLETED** - Tool catalog with CRUD, scope verification, credential resolution, registry versioning
+- **PR**: [#7](https://github.com/AnantshreeChandola/Personal-agent/pull/7) - PluginRegistry implementation
 
 ### PlanWriter
 - SPEC.md: ✗
@@ -165,27 +170,25 @@ Legend:
 ## Summary Statistics
 
 ### By Status
-- ✓ Completed: 3/16 (19%)
-- 🔄 Deferred: 1/16 (6% - VectorIndex)
+- ✓ Completed: 6/16 (38%)
 - WIP In Progress: 0/16 (0%)
-- ✗ Not Started: 12/16 (75%)
+- ✗ Not Started: 10/16 (62%)
 
 ### By Layer
-- Memory Layer: 3/4 completed (ProfileStore ✅, PlanLibrary ✅, History ✅; VectorIndex deferred)
-- Domain Layer: 0/6 started
+- Memory Layer: 4/4 completed (ProfileStore ✅, PlanLibrary ✅, History ✅, VectorIndex ✅)
+- Domain Layer: 2/6 completed (Signer ✅, PluginRegistry ✅)
 - Orchestration Layer: 0/5 started
 - Platform Layer: 0/1 started
 
 ### Critical Path (Recommended Order)
-1. **Phase 1**: Foundation
-   - ~~ProfileStore~~ ✅, ~~PlanLibrary~~ ✅, ~~History~~ ✅, PluginRegistry, Signer
+1. ~~**Phase 1**: Foundation~~
+   - ~~ProfileStore~~ ✅, ~~PlanLibrary~~ ✅, ~~History~~ ✅, ~~PluginRegistry~~ ✅, ~~Signer~~ ✅, ~~VectorIndex~~ ✅
 2. **Phase 2**: Planning
-   - Intake, ContextRAG, Planner
+   - Intake, ContextRAG, Planner, PlanWriter
 3. **Phase 3**: Orchestration
    - WorkflowBuilder, PreviewOrchestrator, ApprovalGate, ExecuteOrchestrator
 4. **Phase 4**: Advanced
-   - ExecutionMonitor, PlanWriter, Audit
-   - ~~VectorIndex~~ 🔄 (Deferred - not needed for MVP, see HLD §12)
+   - ExecutionMonitor, Audit
 
 ---
 
@@ -197,6 +200,30 @@ Legend:
 - See `docs/architecture/Project_HLD.md` for detailed component descriptions
 
 ## Recent Achievements
+
+### VectorIndex (✅ Completed - Mar 2026)
+- **Hybrid search**: BM25 keyword (tsvector/tsquery) + semantic cosine (pgvector HNSW) + RRF score fusion
+- **ONNX Runtime**: Local CPU inference for all-MiniLM-L6-v2 (384-dim, ~10ms per embedding)
+- **Zero external API cost**: No OpenAI calls — fully local embedding generation
+- **Graceful degradation**: App starts normally even without pgvector or ONNX model
+- **Library component**: No HTTP routes, consumed via DI by PlanWriter/ContextRAG/Planner
+- **74 tests passing**: Unit, contract, observability tests (6 integration stubs for pgvector environments)
+- **PR**: [#9](https://github.com/AnantshreeChandola/Personal-agent/pull/9) - VectorIndex hybrid search implementation
+
+### Signer (✅ Completed - Mar 2026)
+- **Ed25519 cryptographic signing**: Sign and verify plans with deterministic canonical JSON
+- **Library component**: No HTTP routes, consumed via DI
+- **Key management**: Private/public keys loaded from environment variables
+- **51 tests passing**: Unit, contract, observability (no PII/key leakage in logs)
+- **PR**: [#8](https://github.com/AnantshreeChandola/Personal-agent/pull/8) - Signer implementation
+
+### PluginRegistry (✅ Completed - Mar 2026)
+- **Tool catalog service**: CRUD for external tool registrations with operations
+- **Scope verification**: Validate required OAuth scopes for preview vs execute
+- **Credential resolution**: Mustache-template credential IDs (never actual secrets)
+- **Registry versioning**: Monotonic version counter for cache invalidation
+- **95 tests passing**: Domain, service, adapter, API, contract tests
+- **PR**: [#7](https://github.com/AnantshreeChandola/Personal-agent/pull/7) - PluginRegistry implementation
 
 ### History (✅ Completed - Feb 2026)
 - **Tier 3 data source** with normalized, PII-light fact storage
