@@ -18,7 +18,12 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR
+
+try:
+    from pgvector.sqlalchemy import Vector
+except ImportError:  # pragma: no cover
+    Vector = None  # pgvector not installed; VectorIndex degrades gracefully
 
 from .adapter import Base
 
@@ -147,9 +152,9 @@ class PlanOutcomeTable(Base):
 
 class PlanEmbeddingTable(Base):
     """
-    Plan embeddings table - stores vector embeddings for similarity search.
+    Plan embeddings table - stores vector embeddings and tsvector for hybrid search.
 
-    Owned by PlanLibrary component. Requires pgvector extension.
+    Owned by VectorIndex component. Requires pgvector extension.
     """
 
     __tablename__ = "plan_embeddings"
@@ -163,14 +168,27 @@ class PlanEmbeddingTable(Base):
         nullable=False,
         unique=True,  # One embedding per plan
     )
-    # Note: vector column will be added via pgvector extension
-    # vector = Column(Vector(1536), nullable=False)
-    model_version = Column(String(32), nullable=False, default="text-embedding-ada-002")
+    intent_type = Column(String(64), nullable=False, default="unknown")
+    embedding = Column(
+        Vector(384) if Vector is not None else String,
+        nullable=False,
+    )
+    search_text = Column(String, nullable=False)
+    tsv = Column(TSVECTOR, nullable=True)
+    model_version = Column(String(32), nullable=False, default="all-MiniLM-L6-v2")
     created_at = Column(DateTime, nullable=False, server_default=text("NOW()"))
-    vector_norm = Column(String, nullable=False)  # Store as JSON for now
 
     __table_args__ = (
         Index("idx_plan_embeddings_plan_id", plan_id),
+        Index("idx_plan_embeddings_intent_type", intent_type),
+        Index("idx_plan_embeddings_tsv", tsv, postgresql_using="gin"),
+        Index(
+            "idx_plan_embeddings_hnsw",
+            embedding,
+            postgresql_using="hnsw",
+            postgresql_with={"m": 16, "ef_construction": 64},
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
         Index("idx_plan_embeddings_created_at", created_at),
     )
 

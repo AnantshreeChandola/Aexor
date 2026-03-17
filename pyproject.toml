@@ -58,6 +58,9 @@ dependencies = [
     "python-json-logger>=2.0.7",
     "pgvector>=0.2.4",
     "ulid-py>=1.1.0",
+    "onnxruntime>=1.24.3",
+    "tokenizers>=0.22.2",
+    "numpy>=2.4.0",
 ]
 
 [project.optional-dependencies]
