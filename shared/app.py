@@ -107,6 +107,17 @@ async def lifespan(app: FastAPI):
         )
         app.state.vector_index_service = None
 
+    # PlanWriter service (library -- no routes)
+    from components.PlanWriter.service.plan_writer_service import (
+        create_plan_writer_service,
+    )
+
+    app.state.plan_writer_service = create_plan_writer_service(
+        plan_service=app.state.plan_service,
+        fact_service=app.state.fact_service,
+        vector_index_service=app.state.vector_index_service,
+    )
+
     logger.info("All services initialized")
 
     yield
