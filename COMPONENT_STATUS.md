@@ -1,6 +1,6 @@
 # Component Implementation Status
 
-**Last Updated**: 2026-03-16
+**Last Updated**: 2026-03-20
 **Total Components**: 16 (across 4 layers)
 
 Legend:
@@ -15,7 +15,7 @@ Legend:
 
 ### ProfileStore
 - SPEC.md: ✓
-- LLD.md: ✓ 
+- LLD.md: ✓
 - Code: ✓
 - Tests: ✓
 - Schemas: ✓
@@ -102,12 +102,14 @@ Legend:
 - **PR**: [#7](https://github.com/AnantshreeChandola/Personal-agent/pull/7) - PluginRegistry implementation
 
 ### PlanWriter
-- SPEC.md: ✗
-- LLD.md: ✗
-- Code: ✗
-- Tests: ✗
-- Schemas: ✗
+- SPEC.md: ✓
+- LLD.md: ✓
+- Code: ✓
+- Tests: ✓ (61 passing)
+- Schemas: ✓
 - **Purpose**: Persist execution results back to memory
+- **Status**: ✅ **COMPLETED** - Outcome persistence with typed Pydantic models, fact derivation, ordered writes
+- **PR**: [#11](https://github.com/AnantshreeChandola/Personal-agent/pull/11) - PlanWriter implementation with shared Pydantic models
 
 ---
 
@@ -170,21 +172,21 @@ Legend:
 ## Summary Statistics
 
 ### By Status
-- ✓ Completed: 6/16 (38%)
+- ✓ Completed: 7/16 (44%)
 - WIP In Progress: 0/16 (0%)
-- ✗ Not Started: 10/16 (62%)
+- ✗ Not Started: 9/16 (56%)
 
 ### By Layer
 - Memory Layer: 4/4 completed (ProfileStore ✅, PlanLibrary ✅, History ✅, VectorIndex ✅)
-- Domain Layer: 2/6 completed (Signer ✅, PluginRegistry ✅)
+- Domain Layer: 3/6 completed (Signer ✅, PluginRegistry ✅, PlanWriter ✅)
 - Orchestration Layer: 0/5 started
 - Platform Layer: 0/1 started
 
 ### Critical Path (Recommended Order)
-1. ~~**Phase 1**: Foundation~~
-   - ~~ProfileStore~~ ✅, ~~PlanLibrary~~ ✅, ~~History~~ ✅, ~~PluginRegistry~~ ✅, ~~Signer~~ ✅, ~~VectorIndex~~ ✅
+1. **Phase 1**: Foundation ✅
+   - ~~ProfileStore~~ ✅, ~~PlanLibrary~~ ✅, ~~History~~ ✅, ~~PluginRegistry~~ ✅, ~~Signer~~ ✅, ~~VectorIndex~~ ✅, ~~PlanWriter~~ ✅
 2. **Phase 2**: Planning
-   - Intake, ContextRAG, Planner, PlanWriter
+   - Intake, ContextRAG, Planner
 3. **Phase 3**: Orchestration
    - WorkflowBuilder, PreviewOrchestrator, ApprovalGate, ExecuteOrchestrator
 4. **Phase 4**: Advanced
@@ -200,6 +202,14 @@ Legend:
 - See `docs/architecture/Project_HLD.md` for detailed component descriptions
 
 ## Recent Achievements
+
+### PlanWriter (✅ Completed - Mar 2026)
+- **Outcome persistence** to PlanLibrary, History, and VectorIndex with ordered writes
+- **Shared Pydantic models**: Intent, Plan, Signature, PlanOutcome, PlanMetrics in `shared/schemas/`
+- **Typed fact derivation**: Template-based, deterministic, PII-light facts from `plan.intent.intent`
+- **Graceful degradation**: VectorIndex optional, History non-fatal, PlanLibrary fatal
+- **61 tests passing**: Unit, service, contract, and observability tests
+- **PR**: [#11](https://github.com/AnantshreeChandola/Personal-agent/pull/11) - PlanWriter with shared Pydantic models
 
 ### VectorIndex (✅ Completed - Mar 2026)
 - **Hybrid search**: BM25 keyword (tsvector/tsquery) + semantic cosine (pgvector HNSW) + RRF score fusion

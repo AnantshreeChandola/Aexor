@@ -55,3 +55,8 @@ def get_signer_service(request: Request) -> Any:
 def get_vector_index_service(request: Request) -> Any:
     """Get VectorIndexService singleton from app state."""
     return request.app.state.vector_index_service
+
+
+def get_plan_writer_service(request: Request) -> Any:
+    """Get PlanWriterService singleton from app state."""
+    return request.app.state.plan_writer_service
