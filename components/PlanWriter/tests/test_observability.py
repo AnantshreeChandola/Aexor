@@ -48,7 +48,8 @@ class TestLogSafety:
         log_text = caplog_planwriter.text
         assert "search_flights" not in log_text
         assert "select_flight" not in log_text
-        assert json.dumps(sample_plan["graph"]) not in log_text
+        graph_json = json.dumps(sample_plan.model_dump()["graph"])
+        assert graph_json not in log_text
 
     @pytest.mark.asyncio
     async def test_persist_does_not_log_signature_bytes(
@@ -70,7 +71,7 @@ class TestLogSafety:
             metrics=sample_metrics,
         )
         log_text = caplog_planwriter.text
-        assert sample_signature["signature"] not in log_text
+        assert sample_signature.signature not in log_text
 
     @pytest.mark.asyncio
     async def test_persist_does_not_log_metrics_payload(
@@ -92,7 +93,7 @@ class TestLogSafety:
             metrics=sample_metrics,
         )
         log_text = caplog_planwriter.text
-        assert json.dumps(sample_metrics["step_timings"]) not in log_text
+        assert json.dumps(sample_metrics.step_timings) not in log_text
 
     @pytest.mark.asyncio
     async def test_persist_logs_plan_id(

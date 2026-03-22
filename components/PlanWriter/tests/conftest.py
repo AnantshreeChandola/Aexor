@@ -16,11 +16,16 @@ import pytest
 from components.History.domain.models import StoreFactResponse
 from components.PlanLibrary.domain.models import StorePlanResponse
 from components.PlanWriter.service.plan_writer_service import PlanWriterService
+from shared.schemas.metrics import PlanMetrics
+from shared.schemas.outcome import PlanOutcome
+from shared.schemas.plan import Plan
+from shared.schemas.signature import Signature
 
 # Valid 26-char ULID for tests
 SAMPLE_PLAN_ID = "01HXYZ1234567890ABCDEFGHJK"
 SAMPLE_FACT_ID = uuid4()
 SAMPLE_USER_ID = uuid4()
+SAMPLE_PLAN_HASH = "a" * 64
 
 
 @pytest.fixture()
@@ -55,83 +60,103 @@ def mock_vector_index_service() -> AsyncMock:
 
 
 @pytest.fixture()
-def sample_plan() -> dict:
-    """Plan dict matching GLOBAL_SPEC Section 2.3."""
-    return {
-        "plan_id": SAMPLE_PLAN_ID,
-        "intent": {
+def sample_plan() -> Plan:
+    """Plan model matching GLOBAL_SPEC Section 2.3."""
+    return Plan(
+        plan_id=SAMPLE_PLAN_ID,
+        intent={
             "intent": "book_flight",
             "entities": {
                 "destination": "NYC",
                 "airline": "Delta",
             },
+            "constraints": {},
+            "tz": "America/Chicago",
+            "user_id": "00000000-0000-0000-0000-000000000001",
         },
-        "graph": [
-            {"step": 1, "action": "search_flights", "args": {}},
-            {"step": 2, "action": "select_flight", "args": {}},
+        graph=[
+            {
+                "step": 1,
+                "mode": "interactive",
+                "role": "Fetcher",
+                "uses": "flights.api",
+                "call": "search_flights",
+                "args": {},
+            },
+            {
+                "step": 2,
+                "mode": "interactive",
+                "role": "Booker",
+                "uses": "flights.api",
+                "call": "select_flight",
+                "args": {},
+                "after": [1],
+            },
         ],
-        "meta": {
-            "intent_type": "book_flight",
-            "version": "2.2",
+        constraints={"scopes": [], "ttl_s": 900, "max_retries": 3},
+        plugins=["flights.api"],
+        meta={
             "created_at": "2026-03-19T10:00:00Z",
+            "author": "planner@system",
+            "version": "v2.0.0",
+            "canonical_hash": f"sha256:{SAMPLE_PLAN_HASH}",
         },
-        "constraints": {},
-    }
+    )
 
 
 @pytest.fixture()
-def sample_signature() -> dict:
-    """Signature dict matching GLOBAL_SPEC Section 2.4."""
-    return {
-        "algo": "Ed25519",
-        "signer": "planner@system",
-        "signature": "dGVzdHNpZ25hdHVyZQ==",
-        "pubkey_id": "k1",
-        "plan_hash": "abc123def456",
-    }
+def sample_signature() -> Signature:
+    """Signature model matching GLOBAL_SPEC Section 2.4."""
+    return Signature(
+        algo="Ed25519",
+        signer="planner@system",
+        signature="dGVzdHNpZ25hdHVyZQ==" + "A" * 44,
+        pubkey_id="k1",
+        plan_hash=SAMPLE_PLAN_HASH,
+    )
 
 
 @pytest.fixture()
-def sample_outcome_success() -> dict:
+def sample_outcome_success() -> PlanOutcome:
     """Successful execution outcome."""
-    return {
-        "success": True,
-        "error_type": None,
-        "error_details": None,
-        "execution_start": "2026-03-19T10:00:00Z",
-        "execution_end": "2026-03-19T10:00:01Z",
-        "total_steps": 5,
-        "failed_step": None,
-        "context_data": {},
-    }
+    return PlanOutcome(
+        success=True,
+        error_type=None,
+        error_details=None,
+        execution_start="2026-03-19T10:00:00Z",
+        execution_end="2026-03-19T10:00:01Z",
+        total_steps=5,
+        failed_step=None,
+        context_data={},
+    )
 
 
 @pytest.fixture()
-def sample_outcome_failure() -> dict:
+def sample_outcome_failure() -> PlanOutcome:
     """Failed execution outcome."""
-    return {
-        "success": False,
-        "error_type": "timeout",
-        "error_details": {"reason": "No progress for 5 minutes"},
-        "execution_start": "2026-03-19T10:00:00Z",
-        "execution_end": "2026-03-19T10:05:30Z",
-        "total_steps": 5,
-        "failed_step": 3,
-        "context_data": {},
-    }
+    return PlanOutcome(
+        success=False,
+        error_type="timeout",
+        error_details={"reason": "No progress for 5 minutes"},
+        execution_start="2026-03-19T10:00:00Z",
+        execution_end="2026-03-19T10:05:30Z",
+        total_steps=5,
+        failed_step=3,
+        context_data={},
+    )
 
 
 @pytest.fixture()
-def sample_metrics() -> dict:
-    """Performance metrics dict."""
-    return {
-        "preview_latency_ms": 450,
-        "execute_latency_ms": 1200,
-        "step_timings": [
+def sample_metrics() -> PlanMetrics:
+    """Performance metrics model."""
+    return PlanMetrics(
+        preview_latency_ms=450,
+        execute_latency_ms=1200,
+        step_timings=[
             {"step": 1, "latency_ms": 200},
             {"step": 2, "latency_ms": 300},
         ],
-    }
+    )
 
 
 @pytest.fixture()

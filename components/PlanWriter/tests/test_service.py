@@ -41,17 +41,17 @@ class TestPersistOutcomeHappyPath:
             metrics=sample_metrics,
         )
         assert result.status == "ok"
-        assert result.plan_id == sample_plan["plan_id"]
+        assert result.plan_id == sample_plan.plan_id
         assert result.fact_id is not None
         assert result.embedding_stored is True
         assert result.errors == []
 
         # Verify downstream services called with correct args
         mock_plan_service.store_plan.assert_awaited_once_with(
-            sample_plan,
-            sample_signature,
-            sample_outcome_success,
-            sample_metrics,
+            sample_plan.model_dump(),
+            sample_signature.model_dump(),
+            sample_outcome_success.model_dump(),
+            sample_metrics.model_dump(),
         )
         mock_fact_service.store_fact.assert_awaited_once()
         mock_vector_index_service.store_embedding.assert_awaited_once()
@@ -250,76 +250,33 @@ class TestPersistOutcomeFactDerivationFails:
     """Fact derivation fails -- partial result, VectorIndex still attempted."""
 
     @pytest.mark.asyncio
-    async def test_fact_derivation_fails(
+    async def test_fact_derivation_uses_intent(
         self,
         mock_plan_service,
         mock_fact_service,
         mock_vector_index_service,
+        sample_plan,
         sample_signature,
         sample_outcome_success,
         sample_metrics,
         sample_user_id,
     ):
-        """Plan missing intent -> FactDerivation uses fallback, still ok."""
-        plan = {"plan_id": SAMPLE_PLAN_ID}  # minimal valid plan
+        """Plan with intent -> fact derived from plan.intent.intent, still ok."""
         service = PlanWriterService(
             mock_plan_service,
             mock_fact_service,
             mock_vector_index_service,
         )
-        await service.persist_outcome(
+        result = await service.persist_outcome(
             user_id=sample_user_id,
-            plan=plan,
+            plan=sample_plan,
             signature=sample_signature,
             outcome=sample_outcome_success,
             metrics=sample_metrics,
         )
         # Should still attempt VectorIndex
         mock_vector_index_service.store_embedding.assert_awaited_once()
-
-
-class TestPersistOutcomeValidation:
-    """Input validation tests."""
-
-    @pytest.mark.asyncio
-    async def test_empty_plan_raises(self, plan_writer_service, sample_user_id):
-        """Empty plan dict raises ValueError."""
-        with pytest.raises(ValueError, match="non-empty"):
-            await plan_writer_service.persist_outcome(
-                user_id=sample_user_id,
-                plan={},
-                signature={},
-                outcome={},
-                metrics={},
-            )
-
-    @pytest.mark.asyncio
-    async def test_none_plan_raises(self, plan_writer_service, sample_user_id):
-        """None plan raises ValueError."""
-        with pytest.raises(ValueError):
-            await plan_writer_service.persist_outcome(
-                user_id=sample_user_id,
-                plan=None,
-                signature={},
-                outcome={},
-                metrics={},
-            )
-
-    @pytest.mark.asyncio
-    async def test_plan_missing_plan_id_raises(
-        self,
-        plan_writer_service,
-        sample_user_id,
-    ):
-        """Plan without plan_id raises ValueError."""
-        with pytest.raises(ValueError, match="plan_id"):
-            await plan_writer_service.persist_outcome(
-                user_id=sample_user_id,
-                plan={"meta": {}},
-                signature={},
-                outcome={},
-                metrics={},
-            )
+        assert result.status == "ok"
 
 
 # ── bulk_persist Tests ───────────────────────────────────────────
@@ -341,10 +298,10 @@ class TestBulkPersist:
         """All 3 outcomes succeed."""
         outcomes = [
             {
-                "plan": sample_plan,
-                "signature": sample_signature,
-                "outcome": sample_outcome_success,
-                "metrics": sample_metrics,
+                "plan": sample_plan.model_dump(),
+                "signature": sample_signature.model_dump(),
+                "outcome": sample_outcome_success.model_dump(),
+                "metrics": sample_metrics.model_dump(),
             }
         ] * 3
         result = await plan_writer_service.bulk_persist(
@@ -393,10 +350,10 @@ class TestBulkPersist:
         )
         outcomes = [
             {
-                "plan": sample_plan,
-                "signature": sample_signature,
-                "outcome": sample_outcome_success,
-                "metrics": sample_metrics,
+                "plan": sample_plan.model_dump(),
+                "signature": sample_signature.model_dump(),
+                "outcome": sample_outcome_success.model_dump(),
+                "metrics": sample_metrics.model_dump(),
             }
         ] * 3
         result = await service.bulk_persist(
@@ -429,10 +386,10 @@ class TestBulkPersist:
         """Single item works correctly."""
         outcomes = [
             {
-                "plan": sample_plan,
-                "signature": sample_signature,
-                "outcome": sample_outcome_success,
-                "metrics": sample_metrics,
+                "plan": sample_plan.model_dump(),
+                "signature": sample_signature.model_dump(),
+                "outcome": sample_outcome_success.model_dump(),
+                "metrics": sample_metrics.model_dump(),
             },
         ]
         result = await plan_writer_service.bulk_persist(

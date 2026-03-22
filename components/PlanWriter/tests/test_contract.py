@@ -16,7 +16,8 @@ import pytest
 from components.PlanLibrary.domain.models import DuplicatePlanError
 from components.PlanWriter.domain.models import PlanLibraryWriteError
 from components.PlanWriter.service.plan_writer_service import PlanWriterService
-from components.PlanWriter.tests.conftest import SAMPLE_PLAN_ID
+from components.PlanWriter.tests.conftest import SAMPLE_PLAN_HASH, SAMPLE_PLAN_ID
+from shared.schemas.plan import Plan
 
 # ── US1: Persist Successful Execution ────────────────────────────
 
@@ -74,7 +75,7 @@ class TestUS1_PersistSuccessfulExecution:
         assert result.errors == []
 
     @pytest.mark.asyncio
-    async def test_scenario3_planlibrary_receives_unmodified_args(
+    async def test_scenario3_planlibrary_receives_model_dump(
         self,
         plan_writer_service,
         sample_plan,
@@ -84,7 +85,7 @@ class TestUS1_PersistSuccessfulExecution:
         sample_user_id,
         mock_plan_service,
     ):
-        """PlanLibrary receives plan, signature, outcome, metrics unmodified."""
+        """PlanLibrary receives plan, signature, outcome, metrics as dicts."""
         await plan_writer_service.persist_outcome(
             user_id=sample_user_id,
             plan=sample_plan,
@@ -93,10 +94,10 @@ class TestUS1_PersistSuccessfulExecution:
             metrics=sample_metrics,
         )
         mock_plan_service.store_plan.assert_awaited_once_with(
-            sample_plan,
-            sample_signature,
-            sample_outcome_success,
-            sample_metrics,
+            sample_plan.model_dump(),
+            sample_signature.model_dump(),
+            sample_outcome_success.model_dump(),
+            sample_metrics.model_dump(),
         )
 
     @pytest.mark.asyncio
@@ -309,7 +310,7 @@ class TestUS4_DeriveFactsFromExecution:
         )
         fact_call_args = mock_fact_service.store_fact.call_args
         fact_request = fact_call_args[0][1]
-        plan_json = json.dumps(sample_plan)
+        plan_json = json.dumps(sample_plan.model_dump())
         assert plan_json not in fact_request.fact_text
         assert "search_flights" not in fact_request.fact_text
 
@@ -325,10 +326,32 @@ class TestUS4_DeriveFactsFromExecution:
         sample_user_id,
     ):
         """No entities -> entities={}, fact_text uses intent_type only."""
-        plan = {
-            "plan_id": SAMPLE_PLAN_ID,
-            "meta": {"intent_type": "check_status"},
-        }
+        plan = Plan(
+            plan_id=SAMPLE_PLAN_ID,
+            intent={
+                "intent": "check_status",
+                "entities": {},
+                "constraints": {},
+                "tz": "America/Chicago",
+                "user_id": "00000000-0000-0000-0000-000000000001",
+            },
+            graph=[
+                {
+                    "step": 1,
+                    "mode": "interactive",
+                    "role": "Fetcher",
+                    "uses": "status.api",
+                    "call": "check",
+                    "args": {},
+                },
+            ],
+            plugins=[],
+            meta={
+                "created_at": "2026-03-19T10:00:00Z",
+                "author": "planner@system",
+                "canonical_hash": f"sha256:{SAMPLE_PLAN_HASH}",
+            },
+        )
         service = PlanWriterService(
             mock_plan_service,
             mock_fact_service,
@@ -366,10 +389,10 @@ class TestUS5_BulkPersist:
         """10 outcomes -> all 10 persisted."""
         outcomes = [
             {
-                "plan": sample_plan,
-                "signature": sample_signature,
-                "outcome": sample_outcome_success,
-                "metrics": sample_metrics,
+                "plan": sample_plan.model_dump(),
+                "signature": sample_signature.model_dump(),
+                "outcome": sample_outcome_success.model_dump(),
+                "metrics": sample_metrics.model_dump(),
             }
         ] * 10
         result = await plan_writer_service.bulk_persist(

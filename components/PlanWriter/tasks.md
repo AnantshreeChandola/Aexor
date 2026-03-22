@@ -55,8 +55,8 @@ subsequent phases can import modules without path errors.
     `StoreFactResponse(status="ok", fact_id=..., stored_at=...)`
   - `mock_vector_index_service` -- AsyncMock with `store_embedding`
     returning `None`
-  - `sample_plan` -- dict matching GLOBAL_SPEC Section 2.3 with valid ULID
-    `plan_id`, `graph`, `meta` (with `intent_type`), `intent.entities`
+  - `sample_plan` -- Plan model matching GLOBAL_SPEC Section 2.3 with valid ULID
+    `plan_id`, `graph`, `meta` (created_at, author, canonical_hash), `intent.entities`
   - `sample_signature` -- dict matching GLOBAL_SPEC Section 2.4
   - `sample_outcome_success` -- dict with `success=True`, timestamps,
     `total_steps`, `failed_step=None`
@@ -133,10 +133,9 @@ classes with no business logic and no external dependencies.
 - **Description**: Implement the `derive_fact(plan, outcome)` function and its
   helper functions in `adapters/fact_deriver.py` exactly as specified in LLD
   Section 7.1. The function:
-  - Extracts `intent_type` from plan (checking `plan["meta"]["intent_type"]`,
-    `plan["intent"]["intent"]`, `plan["intent_type"]`, fallback "unknown")
-  - Extracts `entities` from plan (checking `plan["intent"]["entities"]`,
-    `plan["entities"]`, fallback `{}`)
+  - Extracts `intent_type` from plan via `plan.intent.intent` (typed access
+    via shared Pydantic model, GLOBAL_SPEC SS2.1 nested in SS2.3)
+  - Extracts `entities` from plan via `plan.intent.entities` (typed access)
   - Builds `action_summary` from intent_type (e.g. "book_flight" ->
     "Booked flight")
   - Builds `entity_summary` from entities (e.g. `{destination: "NYC"}` ->

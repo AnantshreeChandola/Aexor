@@ -15,6 +15,10 @@ from typing import Any
 from uuid import UUID
 
 from components.PlanLibrary.domain.models import DuplicatePlanError
+from shared.schemas.metrics import PlanMetrics
+from shared.schemas.outcome import PlanOutcome
+from shared.schemas.plan import Plan
+from shared.schemas.signature import Signature
 
 from ..adapters.fact_deriver import derive_fact
 from ..domain.models import (
@@ -51,10 +55,10 @@ class PlanWriterService:
     async def persist_outcome(
         self,
         user_id: UUID,
-        plan: dict[str, Any],
-        signature: dict[str, Any],
-        outcome: dict[str, Any],
-        metrics: dict[str, Any],
+        plan: Plan,
+        signature: Signature,
+        outcome: PlanOutcome,
+        metrics: PlanMetrics,
     ) -> PersistResult:
         """Persist a completed plan execution to all downstream stores.
 
@@ -65,26 +69,24 @@ class PlanWriterService:
 
         Args:
             user_id: User UUID for user-scoped facts.
-            plan: Plan dict with plan_id, graph, meta, intent, entities.
-            signature: Ed25519 signature data dict.
-            outcome: Execution outcome dict.
-            metrics: Performance metrics dict.
+            plan: Typed Plan model.
+            signature: Typed Signature model.
+            outcome: Typed PlanOutcome model.
+            metrics: Typed PlanMetrics model.
 
         Returns:
             PersistResult with plan_id, fact_id, embedding_stored, status.
 
         Raises:
             PlanLibraryWriteError: If PlanLibrary write fails.
-            ValueError: If plan is empty/None or missing plan_id.
         """
         total_start = time.monotonic()
 
-        # Validate inputs
-        if not plan:
-            raise ValueError("plan must be a non-empty dict")
-        plan_id = plan.get("plan_id")
-        if not plan_id:
-            raise ValueError("plan must contain plan_id")
+        plan_id = plan.plan_id
+        plan_dict = plan.model_dump()
+        signature_dict = signature.model_dump()
+        outcome_dict = outcome.model_dump()
+        metrics_dict = metrics.model_dump()
 
         errors: list[str] = []
         fact_id: UUID | None = None
@@ -92,10 +94,10 @@ class PlanWriterService:
 
         # Step 1: PlanLibrary write (PRIMARY -- fatal if fails)
         await self._do_plan_library_write(
-            plan,
-            signature,
-            outcome,
-            metrics,
+            plan_dict,
+            signature_dict,
+            outcome_dict,
+            metrics_dict,
             plan_id,
         )
 
@@ -111,7 +113,7 @@ class PlanWriterService:
         # Step 3: VectorIndex write (OPTIONAL)
         embedding_stored = await self._write_to_vector_index(
             plan_id,
-            plan,
+            plan_dict,
             errors,
         )
 
@@ -171,12 +173,17 @@ class PlanWriterService:
 
         for item in outcomes:
             try:
+                plan = Plan.model_validate(item.get("plan", {}))
+                sig = Signature.model_validate(item.get("signature", {}))
+                out = PlanOutcome.model_validate(item.get("outcome", {}))
+                met = PlanMetrics.model_validate(item.get("metrics", {}))
+
                 result = await self.persist_outcome(
                     user_id=user_id,
-                    plan=item.get("plan", {}),
-                    signature=item.get("signature", {}),
-                    outcome=item.get("outcome", {}),
-                    metrics=item.get("metrics", {}),
+                    plan=plan,
+                    signature=sig,
+                    outcome=out,
+                    metrics=met,
                 )
                 results.append(result)
                 if result.status == "ok":
@@ -265,8 +272,8 @@ class PlanWriterService:
     async def _write_to_history(
         self,
         user_id: UUID,
-        plan: dict,
-        outcome: dict,
+        plan: Plan,
+        outcome: PlanOutcome,
         plan_id: str,
         errors: list[str],
     ) -> UUID | None:

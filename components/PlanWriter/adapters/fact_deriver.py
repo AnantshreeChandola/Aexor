@@ -9,6 +9,8 @@ Reference: LLD.md SS7.1
 """
 
 from components.History.domain.models import StoreFactRequest
+from shared.schemas.outcome import PlanOutcome
+from shared.schemas.plan import Plan
 
 from ..domain.models import FactDerivationError
 
@@ -40,8 +42,8 @@ _ACTION_VERBS: dict[str, str] = {
 
 
 def derive_fact(
-    plan: dict,
-    outcome: dict,
+    plan: Plan,
+    outcome: PlanOutcome,
 ) -> StoreFactRequest:
     """Extract a PII-light fact from plan execution context.
 
@@ -50,10 +52,8 @@ def derive_fact(
     StoreFactRequest.
 
     Args:
-        plan: Plan dict with plan_id, intent (or meta.intent_type),
-              entities, graph.
-        outcome: Outcome dict with success, error_type, error_details,
-                 failed_step.
+        plan: Typed Plan model with plan_id, intent, graph, meta.
+        outcome: Typed PlanOutcome model with success, error_type, etc.
 
     Returns:
         StoreFactRequest ready for FactService.store_fact().
@@ -61,20 +61,19 @@ def derive_fact(
     Raises:
         FactDerivationError: If plan is missing required fields.
     """
-    plan_id = plan.get("plan_id")
+    plan_id = plan.plan_id
     if not plan_id:
         raise FactDerivationError(
             plan_id="unknown",
             reason="plan is missing plan_id",
         )
 
-    intent_type = _extract_intent_type(plan)
-    entities = _extract_entities(plan)
-    action = _build_action_summary(plan)
+    intent_type = plan.intent.intent
+    entities = plan.intent.entities
+    action = _build_action_summary(intent_type)
     entity_summary = _build_entity_summary(entities)
-    is_success = outcome.get("success", False)
 
-    if is_success:
+    if outcome.success:
         fact_text = _build_success_text(action, entity_summary, intent_type)
     else:
         error_summary = _build_error_summary(outcome)
@@ -84,57 +83,10 @@ def derive_fact(
         fact_text=fact_text,
         intent_type=intent_type,
         entities=entities,
-        outcome=is_success,
+        outcome=outcome.success,
         source_plan_id=plan_id,
         ttl_days=DEFAULT_FACT_TTL_DAYS,
     )
-
-
-def _extract_intent_type(plan: dict) -> str:
-    """Extract intent_type from plan structure.
-
-    Looks in: plan["meta"]["intent_type"],
-              plan["intent"]["intent"],
-              plan["intent_type"].
-    Falls back to "unknown".
-    """
-    meta = plan.get("meta")
-    if isinstance(meta, dict):
-        intent_type = meta.get("intent_type")
-        if intent_type:
-            return str(intent_type)
-
-    intent = plan.get("intent")
-    if isinstance(intent, dict):
-        intent_val = intent.get("intent")
-        if intent_val:
-            return str(intent_val)
-
-    top_level = plan.get("intent_type")
-    if top_level:
-        return str(top_level)
-
-    return "unknown"
-
-
-def _extract_entities(plan: dict) -> dict:
-    """Extract entity dict from plan for fact storage.
-
-    Looks in: plan["intent"]["entities"],
-              plan["entities"].
-    Returns empty dict if not found.
-    """
-    intent = plan.get("intent")
-    if isinstance(intent, dict):
-        entities = intent.get("entities")
-        if isinstance(entities, dict):
-            return entities
-
-    entities = plan.get("entities")
-    if isinstance(entities, dict):
-        return entities
-
-    return {}
 
 
 def _build_entity_summary(entities: dict) -> str:
@@ -167,14 +119,13 @@ def _build_entity_summary(entities: dict) -> str:
     return " ".join(parts)
 
 
-def _build_action_summary(plan: dict) -> str:
+def _build_action_summary(intent_type: str) -> str:
     """Build a human-readable action summary from intent_type.
 
     Example: "schedule_meeting" -> "Scheduled meeting"
     Example: "book_flight" -> "Booked flight"
     Example: "search_products" -> "Searched products"
     """
-    intent_type = _extract_intent_type(plan)
     if intent_type == "unknown":
         return "execute action"
 
@@ -192,14 +143,14 @@ def _build_action_summary(plan: dict) -> str:
     return past_verb
 
 
-def _build_error_summary(outcome: dict) -> str:
+def _build_error_summary(outcome: PlanOutcome) -> str:
     """Build a human-readable error summary from outcome.
 
-    Example: {"error_type": "timeout", "failed_step": 3} -> "timeout at step 3"
-    Example: {"error_type": "api_error"} -> "api_error"
+    Example: PlanOutcome(error_type="timeout", failed_step=3) -> "timeout at step 3"
+    Example: PlanOutcome(error_type="api_error") -> "api_error"
     """
-    error_type = outcome.get("error_type", "unknown error")
-    failed_step = outcome.get("failed_step")
+    error_type = outcome.error_type or "unknown error"
+    failed_step = outcome.failed_step
 
     if failed_step is not None:
         return f"{error_type} at step {failed_step}"

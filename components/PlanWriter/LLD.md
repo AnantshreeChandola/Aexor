@@ -117,13 +117,17 @@ class PlanWriterService:
     async def persist_outcome(
         self,
         user_id: UUID,
-        plan: dict[str, Any],
-        signature: dict[str, Any],
-        outcome: dict[str, Any],
-        metrics: dict[str, Any],
+        plan: Plan,
+        signature: Signature,
+        outcome: PlanOutcome,
+        metrics: PlanMetrics,
     ) -> PersistResult:
         """
         Persist a completed plan execution to all downstream stores.
+
+        Uses shared Pydantic models from shared/schemas/ for type-safe
+        contract enforcement. Internally converts to dicts via model_dump()
+        before passing to downstream services.
 
         Execution order:
             1. PlanLibrary.store_plan() -- PRIMARY, must succeed
@@ -132,17 +136,16 @@ class PlanWriterService:
 
         Args:
             user_id: User UUID (passed to History for user-scoped facts).
-            plan: Plan dict with plan_id, graph, meta, intent, entities.
-            signature: Ed25519 signature data dict.
-            outcome: Execution outcome dict (success, error_type, etc.).
-            metrics: Performance metrics dict (latencies, step timings).
+            plan: Typed Plan model (shared.schemas.plan).
+            signature: Typed Signature model (shared.schemas.signature).
+            outcome: Typed PlanOutcome model (shared.schemas.outcome).
+            metrics: Typed PlanMetrics model (shared.schemas.metrics).
 
         Returns:
             PersistResult with plan_id, fact_id, embedding_stored, status.
 
         Raises:
             PlanWriterError: If PlanLibrary write fails (wraps downstream error).
-            ValueError: If plan is empty/None or missing plan_id.
         """
 
     async def bulk_persist(
@@ -389,6 +392,8 @@ PlanWriter does **not** store `user_id` locally. It receives `user_id` as a para
 # adapters/fact_deriver.py
 
 from components.History.domain.models import StoreFactRequest
+from shared.schemas.outcome import PlanOutcome
+from shared.schemas.plan import Plan
 
 # Fact text templates keyed by outcome
 _SUCCESS_TEMPLATE = "{action} {entity_summary}"
@@ -400,8 +405,8 @@ DEFAULT_FACT_TTL_DAYS = 30
 
 
 def derive_fact(
-    plan: dict,
-    outcome: dict,
+    plan: Plan,
+    outcome: PlanOutcome,
 ) -> StoreFactRequest:
     """
     Extract a PII-light fact from plan execution context.
@@ -410,11 +415,12 @@ def derive_fact(
     and deterministic: same (plan, outcome) always produces the same
     StoreFactRequest.
 
+    Intent type is read directly from plan.intent.intent (GLOBAL_SPEC
+    SS2.1 nested in SS2.3). Entities from plan.intent.entities.
+
     Args:
-        plan: Plan dict with plan_id, intent (or meta.intent_type),
-              entities, graph.
-        outcome: Outcome dict with success, error_type, error_details,
-                 failed_step.
+        plan: Typed Plan model with plan_id, intent, graph, meta.
+        outcome: Typed PlanOutcome model with success, error_type, etc.
 
     Returns:
         StoreFactRequest ready for FactService.store_fact().
@@ -422,27 +428,6 @@ def derive_fact(
     Raises:
         FactDerivationError: If plan is missing required fields for
             fact derivation.
-    """
-
-
-def _extract_intent_type(plan: dict) -> str:
-    """
-    Extract intent_type from plan structure.
-
-    Looks in: plan["meta"]["intent_type"],
-              plan["intent"]["intent"],
-              plan["intent_type"].
-    Falls back to "unknown".
-    """
-
-
-def _extract_entities(plan: dict) -> dict:
-    """
-    Extract entity dict from plan for fact storage.
-
-    Looks in: plan["intent"]["entities"],
-              plan["entities"].
-    Returns empty dict if not found.
     """
 
 
@@ -456,7 +441,7 @@ def _build_entity_summary(entities: dict) -> str:
     """
 
 
-def _build_action_summary(plan: dict) -> str:
+def _build_action_summary(intent_type: str) -> str:
     """
     Build a human-readable action summary from intent_type.
 
@@ -466,12 +451,12 @@ def _build_action_summary(plan: dict) -> str:
     """
 
 
-def _build_error_summary(outcome: dict) -> str:
+def _build_error_summary(outcome: PlanOutcome) -> str:
     """
     Build a human-readable error summary from outcome.
 
-    Example: {"error_type": "timeout", "failed_step": 3} -> "timeout at step 3"
-    Example: {"error_type": "api_error"} -> "api_error"
+    Example: PlanOutcome(error_type="timeout", failed_step=3) -> "timeout at step 3"
+    Example: PlanOutcome(error_type="api_error") -> "api_error"
     """
 ```
 

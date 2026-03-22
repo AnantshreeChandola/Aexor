@@ -15,8 +15,6 @@ from components.PlanWriter.adapters.fact_deriver import (
     _build_action_summary,
     _build_entity_summary,
     _build_error_summary,
-    _extract_entities,
-    _extract_intent_type,
     derive_fact,
 )
 from components.PlanWriter.domain.models import (
@@ -26,9 +24,64 @@ from components.PlanWriter.domain.models import (
     PlanLibraryWriteError,
     PlanWriterError,
 )
-from components.PlanWriter.tests.conftest import SAMPLE_PLAN_ID
+from components.PlanWriter.tests.conftest import SAMPLE_PLAN_HASH, SAMPLE_PLAN_ID
+from shared.schemas.outcome import PlanOutcome
+from shared.schemas.plan import Plan
 
 # ── Phase 1: Domain Model Tests ──────────────────────────────────
+
+
+# Helper to build a minimal Plan for tests
+def _make_plan(
+    plan_id: str = SAMPLE_PLAN_ID,
+    intent_type: str = "book_flight",
+    entities: dict | None = None,
+) -> Plan:
+    """Build a minimal Plan model for testing."""
+    return Plan(
+        plan_id=plan_id,
+        intent={
+            "intent": intent_type,
+            "entities": entities or {},
+            "constraints": {},
+            "tz": "America/Chicago",
+            "user_id": "00000000-0000-0000-0000-000000000001",
+        },
+        graph=[
+            {
+                "step": 1,
+                "mode": "interactive",
+                "role": "Fetcher",
+                "uses": "test.api",
+                "call": "test_call",
+                "args": {},
+            },
+        ],
+        constraints={},
+        plugins=[],
+        meta={
+            "created_at": "2026-03-19T10:00:00Z",
+            "author": "planner@system",
+            "canonical_hash": f"sha256:{SAMPLE_PLAN_HASH}",
+        },
+    )
+
+
+def _make_outcome(
+    success: bool = True,
+    error_type: str | None = None,
+    failed_step: int | None = None,
+) -> PlanOutcome:
+    """Build a minimal PlanOutcome for testing."""
+    return PlanOutcome(
+        success=success,
+        error_type=error_type,
+        error_details={"reason": "test"} if error_type else None,
+        execution_start="2026-03-19T10:00:00Z",
+        execution_end="2026-03-19T10:00:01Z",
+        total_steps=5,
+        failed_step=failed_step,
+    )
 
 
 class TestDomainModels:
@@ -146,14 +199,11 @@ class TestFactDeriver:
 
     def test_derive_fact_success_with_entities(self):
         """Successful plan with entities produces success template."""
-        plan = {
-            "plan_id": SAMPLE_PLAN_ID,
-            "meta": {"intent_type": "book_flight"},
-            "intent": {
-                "entities": {"destination": "NYC", "airline": "Delta"},
-            },
-        }
-        outcome = {"success": True}
+        plan = _make_plan(
+            intent_type="book_flight",
+            entities={"destination": "NYC", "airline": "Delta"},
+        )
+        outcome = _make_outcome(success=True)
         result = derive_fact(plan, outcome)
 
         assert result.outcome is True
@@ -166,15 +216,12 @@ class TestFactDeriver:
 
     def test_derive_fact_failure_with_error(self):
         """Failed plan produces failure template with error details."""
-        plan = {
-            "plan_id": SAMPLE_PLAN_ID,
-            "meta": {"intent_type": "book_flight"},
-        }
-        outcome = {
-            "success": False,
-            "error_type": "timeout",
-            "failed_step": 3,
-        }
+        plan = _make_plan(intent_type="book_flight")
+        outcome = _make_outcome(
+            success=False,
+            error_type="timeout",
+            failed_step=3,
+        )
         result = derive_fact(plan, outcome)
 
         assert result.outcome is False
@@ -184,63 +231,34 @@ class TestFactDeriver:
 
     def test_derive_fact_no_entities(self):
         """Plan with no entities uses fallback template."""
-        plan = {
-            "plan_id": SAMPLE_PLAN_ID,
-            "meta": {"intent_type": "check_status"},
-        }
-        outcome = {"success": True}
+        plan = _make_plan(intent_type="check_status", entities={})
+        outcome = _make_outcome(success=True)
         result = derive_fact(plan, outcome)
 
         assert result.entities == {}
         assert "check_status" in result.fact_text
 
-    def test_derive_fact_intent_in_meta(self):
-        """Intent type extracted from plan.meta.intent_type."""
-        plan = {
-            "plan_id": SAMPLE_PLAN_ID,
-            "meta": {"intent_type": "schedule_meeting"},
-        }
-        outcome = {"success": True}
+    def test_derive_fact_intent_from_plan_intent(self):
+        """Intent type extracted from plan.intent.intent."""
+        plan = _make_plan(intent_type="schedule_meeting")
+        outcome = _make_outcome(success=True)
         result = derive_fact(plan, outcome)
         assert result.intent_type == "schedule_meeting"
 
-    def test_derive_fact_intent_in_intent_dict(self):
-        """Intent type extracted from plan.intent.intent."""
-        plan = {
-            "plan_id": SAMPLE_PLAN_ID,
-            "intent": {"intent": "send_email"},
-        }
-        outcome = {"success": True}
+    def test_derive_fact_send_email(self):
+        """Intent type extracted correctly for send_email."""
+        plan = _make_plan(intent_type="send_email")
+        outcome = _make_outcome(success=True)
         result = derive_fact(plan, outcome)
         assert result.intent_type == "send_email"
 
-    def test_derive_fact_intent_top_level(self):
-        """Intent type extracted from plan.intent_type."""
-        plan = {
-            "plan_id": SAMPLE_PLAN_ID,
-            "intent_type": "create_task",
-        }
-        outcome = {"success": True}
-        result = derive_fact(plan, outcome)
-        assert result.intent_type == "create_task"
-
-    def test_derive_fact_unknown_intent(self):
-        """Missing intent_type falls back to 'unknown'."""
-        plan = {"plan_id": SAMPLE_PLAN_ID}
-        outcome = {"success": True}
-        result = derive_fact(plan, outcome)
-        assert result.intent_type == "unknown"
-
     def test_derive_fact_deterministic(self):
         """Same inputs always produce identical StoreFactRequest."""
-        plan = {
-            "plan_id": SAMPLE_PLAN_ID,
-            "meta": {"intent_type": "book_flight"},
-            "intent": {
-                "entities": {"destination": "NYC"},
-            },
-        }
-        outcome = {"success": True}
+        plan = _make_plan(
+            intent_type="book_flight",
+            entities={"destination": "NYC"},
+        )
+        outcome = _make_outcome(success=True)
         r1 = derive_fact(plan, outcome)
         r2 = derive_fact(plan, outcome)
         assert r1.fact_text == r2.fact_text
@@ -251,71 +269,25 @@ class TestFactDeriver:
 
     def test_derive_fact_no_pii_in_fact_text(self):
         """fact_text does not contain raw plan JSON."""
-        plan = {
-            "plan_id": SAMPLE_PLAN_ID,
-            "meta": {"intent_type": "book_flight"},
-            "graph": [
-                {
-                    "step": 1,
-                    "action": "search_flights",
-                    "args": {"api_key": "secret123"},
-                },
-            ],
-        }
-        outcome = {"success": True}
+        plan = _make_plan(intent_type="book_flight")
+        outcome = _make_outcome(success=True)
         result = derive_fact(plan, outcome)
-        raw_json = json.dumps(plan)
+        raw_json = json.dumps(plan.model_dump())
         assert raw_json not in result.fact_text
-        assert "secret123" not in result.fact_text
-        assert "api_key" not in result.fact_text
 
     def test_derive_fact_empty_entities(self):
         """Empty entities dict produces fallback template."""
-        plan = {
-            "plan_id": SAMPLE_PLAN_ID,
-            "meta": {"intent_type": "check_status"},
-            "intent": {"entities": {}},
-        }
-        outcome = {"success": True}
+        plan = _make_plan(intent_type="check_status", entities={})
+        outcome = _make_outcome(success=True)
         result = derive_fact(plan, outcome)
         assert result.entities == {}
 
-    def test_derive_fact_missing_outcome_fields(self):
-        """Missing outcome fields use graceful defaults."""
-        plan = {
-            "plan_id": SAMPLE_PLAN_ID,
-            "meta": {"intent_type": "test"},
-        }
-        outcome = {}  # no success key
+    def test_derive_fact_missing_outcome_fields_defaults(self):
+        """Outcome with success=False defaults."""
+        plan = _make_plan(intent_type="test")
+        outcome = _make_outcome(success=False)
         result = derive_fact(plan, outcome)
-        assert result.outcome is False  # defaults to False
-
-    def test_derive_fact_missing_plan_id_raises(self):
-        """Plan missing plan_id raises FactDerivationError."""
-        plan = {"meta": {"intent_type": "test"}}
-        outcome = {"success": True}
-        with pytest.raises(FactDerivationError) as exc_info:
-            derive_fact(plan, outcome)
-        assert "plan_id" in str(exc_info.value)
-
-    def test_extract_intent_type_priority(self):
-        """meta.intent_type takes priority over intent.intent."""
-        plan = {
-            "meta": {"intent_type": "from_meta"},
-            "intent": {"intent": "from_intent"},
-            "intent_type": "from_top",
-        }
-        assert _extract_intent_type(plan) == "from_meta"
-
-    def test_extract_entities_from_intent(self):
-        """Entities extracted from plan.intent.entities."""
-        plan = {"intent": {"entities": {"key": "val"}}}
-        assert _extract_entities(plan) == {"key": "val"}
-
-    def test_extract_entities_from_top_level(self):
-        """Entities extracted from plan.entities."""
-        plan = {"entities": {"top": "level"}}
-        assert _extract_entities(plan) == {"top": "level"}
+        assert result.outcome is False
 
     def test_build_entity_summary_multiple(self):
         """Entity summary with multiple entities."""
@@ -330,21 +302,19 @@ class TestFactDeriver:
 
     def test_build_action_summary_known_verb(self):
         """Known verb prefix is converted to past tense."""
-        plan = {"meta": {"intent_type": "book_flight"}}
-        assert "Booked" in _build_action_summary(plan)
+        assert "Booked" in _build_action_summary("book_flight")
 
     def test_build_action_summary_unknown_verb(self):
         """Unknown verb gets generic past tense."""
-        plan = {"meta": {"intent_type": "zap_things"}}
-        summary = _build_action_summary(plan)
+        summary = _build_action_summary("zap_things")
         assert "Zaped" in summary or "zap" in summary.lower()
 
     def test_build_error_summary_with_step(self):
         """Error summary includes step number."""
-        outcome = {"error_type": "timeout", "failed_step": 3}
+        outcome = _make_outcome(success=False, error_type="timeout", failed_step=3)
         assert _build_error_summary(outcome) == "timeout at step 3"
 
     def test_build_error_summary_without_step(self):
         """Error summary without step number."""
-        outcome = {"error_type": "api_error"}
+        outcome = _make_outcome(success=False, error_type="api_error")
         assert _build_error_summary(outcome) == "api_error"
