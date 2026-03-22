@@ -1,7 +1,7 @@
 # Component Implementation Status
 
-**Last Updated**: 2026-02-28
-**Total Components**: 16 (across 4 layers, VectorIndex deferred)
+**Last Updated**: 2026-03-20
+**Total Components**: 16 (across 4 layers)
 
 Legend:
 - `✓` - Completed and verified
@@ -34,13 +34,14 @@ Legend:
 - **PR**: [#5](https://github.com/AnantshreeChandola/Personal-agent/pull/5) - History Memory Layer implementation
 
 ### VectorIndex
-- SPEC.md: ✗
-- LLD.md: ✗
-- Code: ✗
-- Tests: ✗
-- Schemas: ✗
+- SPEC.md: ✓
+- LLD.md: ✓
+- Code: ✓
+- Tests: ✓
+- Schemas: ✓
 - **Purpose**: Find similar past situations by semantic meaning (pgvector)
-- **Status**: 🔄 **DEFERRED** - Not needed for MVP; ContextRAG uses structured queries (see HLD §12)
+- **Status**: ✅ **COMPLETED** - Hybrid BM25 + semantic RRF search, ONNX Runtime embeddings, pgvector
+- **PR**: [#9](https://github.com/AnantshreeChandola/Personal-agent/pull/9) - VectorIndex implementation
 
 ### PlanLibrary
 - SPEC.md: ✓
@@ -81,28 +82,34 @@ Legend:
 - **Purpose**: Create deterministic step-by-step plans
 
 ### Signer
-- SPEC.md: ✗
-- LLD.md: ✗
-- Code: ✗
-- Tests: ✗
-- Schemas: ✗
+- SPEC.md: ✓
+- LLD.md: ✓
+- Code: ✓
+- Tests: ✓
+- Schemas: ✓
 - **Purpose**: Cryptographically sign plans (Ed25519)
+- **Status**: ✅ **COMPLETED** - Ed25519 signing with JCS canonicalization
+- **PR**: [#8](https://github.com/AnantshreeChandola/Personal-agent/pull/8) - Signer implementation
 
 ### PluginRegistry
-- SPEC.md: ✗
-- LLD.md: ✗
-- Code: ✗
-- Tests: ✗
-- Schemas: ✗
+- SPEC.md: ✓
+- LLD.md: ✓
+- Code: ✓
+- Tests: ✓
+- Schemas: ✓
 - **Purpose**: Source of truth for available tools and operations
+- **Status**: ✅ **COMPLETED** - Plugin manifest storage with scope validation
+- **PR**: [#7](https://github.com/AnantshreeChandola/Personal-agent/pull/7) - PluginRegistry implementation
 
 ### PlanWriter
-- SPEC.md: ✗
-- LLD.md: ✗
-- Code: ✗
-- Tests: ✗
-- Schemas: ✗
+- SPEC.md: ✓
+- LLD.md: ✓
+- Code: ✓
+- Tests: ✓ (61 passing)
+- Schemas: ✓
 - **Purpose**: Persist execution results back to memory
+- **Status**: ✅ **COMPLETED** - Outcome persistence with typed Pydantic models, fact derivation, ordered writes
+- **PR**: [#11](https://github.com/AnantshreeChandola/Personal-agent/pull/11) - PlanWriter implementation with shared Pydantic models
 
 ---
 
@@ -165,27 +172,25 @@ Legend:
 ## Summary Statistics
 
 ### By Status
-- ✓ Completed: 3/16 (19%)
-- 🔄 Deferred: 1/16 (6% - VectorIndex)
+- ✓ Completed: 7/16 (44%)
 - WIP In Progress: 0/16 (0%)
-- ✗ Not Started: 12/16 (75%)
+- ✗ Not Started: 9/16 (56%)
 
 ### By Layer
-- Memory Layer: 3/4 completed (ProfileStore ✅, PlanLibrary ✅, History ✅; VectorIndex deferred)
-- Domain Layer: 0/6 started
+- Memory Layer: 4/4 completed (ProfileStore ✅, PlanLibrary ✅, History ✅, VectorIndex ✅)
+- Domain Layer: 3/6 completed (Signer ✅, PluginRegistry ✅, PlanWriter ✅)
 - Orchestration Layer: 0/5 started
 - Platform Layer: 0/1 started
 
 ### Critical Path (Recommended Order)
-1. **Phase 1**: Foundation
-   - ~~ProfileStore~~ ✅, ~~PlanLibrary~~ ✅, ~~History~~ ✅, PluginRegistry, Signer
+1. **Phase 1**: Foundation ✅
+   - ~~ProfileStore~~ ✅, ~~PlanLibrary~~ ✅, ~~History~~ ✅, ~~PluginRegistry~~ ✅, ~~Signer~~ ✅, ~~VectorIndex~~ ✅, ~~PlanWriter~~ ✅
 2. **Phase 2**: Planning
    - Intake, ContextRAG, Planner
 3. **Phase 3**: Orchestration
    - WorkflowBuilder, PreviewOrchestrator, ApprovalGate, ExecuteOrchestrator
 4. **Phase 4**: Advanced
-   - ExecutionMonitor, PlanWriter, Audit
-   - ~~VectorIndex~~ 🔄 (Deferred - not needed for MVP, see HLD §12)
+   - ExecutionMonitor, Audit
 
 ---
 
@@ -197,6 +202,28 @@ Legend:
 - See `docs/architecture/Project_HLD.md` for detailed component descriptions
 
 ## Recent Achievements
+
+### PlanWriter (✅ Completed - Mar 2026)
+- **Outcome persistence** to PlanLibrary, History, and VectorIndex with ordered writes
+- **Shared Pydantic models**: Intent, Plan, Signature, PlanOutcome, PlanMetrics in `shared/schemas/`
+- **Typed fact derivation**: Template-based, deterministic, PII-light facts from `plan.intent.intent`
+- **Graceful degradation**: VectorIndex optional, History non-fatal, PlanLibrary fatal
+- **61 tests passing**: Unit, service, contract, and observability tests
+- **PR**: [#11](https://github.com/AnantshreeChandola/Personal-agent/pull/11) - PlanWriter with shared Pydantic models
+
+### VectorIndex (✅ Completed - Mar 2026)
+- **Hybrid search**: BM25 + semantic RRF (Reciprocal Rank Fusion)
+- **ONNX Runtime** embeddings (not OpenAI) for local, fast inference
+- **pgvector** for vector similarity search on `plan_embeddings` table
+- **PR**: [#9](https://github.com/AnantshreeChandola/Personal-agent/pull/9) - VectorIndex implementation
+
+### Signer (✅ Completed - Mar 2026)
+- **Ed25519 signing** with JCS (RFC 8785) canonicalization
+- **PR**: [#8](https://github.com/AnantshreeChandola/Personal-agent/pull/8) - Signer implementation
+
+### PluginRegistry (✅ Completed - Mar 2026)
+- **Plugin manifest storage** with scope validation and capability queries
+- **PR**: [#7](https://github.com/AnantshreeChandola/Personal-agent/pull/7) - PluginRegistry implementation
 
 ### History (✅ Completed - Feb 2026)
 - **Tier 3 data source** with normalized, PII-light fact storage
