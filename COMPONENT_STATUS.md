@@ -15,7 +15,7 @@ Legend:
 
 ### ProfileStore
 - SPEC.md: ✓
-- LLD.md: ✓ 
+- LLD.md: ✓
 - Code: ✓
 - Tests: ✓
 - Schemas: ✓
@@ -37,11 +37,11 @@ Legend:
 - SPEC.md: ✓
 - LLD.md: ✓
 - Code: ✓
-- Tests: ✓
+- Tests: ✓ (74 passing, 6 integration stubs)
 - Schemas: ✓
-- **Purpose**: Find similar past situations by semantic meaning (pgvector)
-- **Status**: ✅ **COMPLETED** - Hybrid BM25 + semantic RRF search, ONNX Runtime embeddings, pgvector
-- **PR**: [#9](https://github.com/AnantshreeChandola/Personal-agent/pull/9) - VectorIndex implementation
+- **Purpose**: Hybrid search (BM25 keyword + semantic cosine) with RRF score fusion
+- **Status**: ✅ **COMPLETED** - ONNX Runtime local embeddings (384-dim), pgvector HNSW + tsvector GIN, graceful degradation
+- **PR**: [#9](https://github.com/AnantshreeChandola/Personal-agent/pull/9) - VectorIndex hybrid search implementation
 
 ### PlanLibrary
 - SPEC.md: ✓
@@ -85,20 +85,20 @@ Legend:
 - SPEC.md: ✓
 - LLD.md: ✓
 - Code: ✓
-- Tests: ✓
+- Tests: ✓ (51 passing)
 - Schemas: ✓
 - **Purpose**: Cryptographically sign plans (Ed25519)
-- **Status**: ✅ **COMPLETED** - Ed25519 signing with JCS canonicalization
+- **Status**: ✅ **COMPLETED** - Ed25519 sign/verify, library component (no routes), DI wiring
 - **PR**: [#8](https://github.com/AnantshreeChandola/Personal-agent/pull/8) - Signer implementation
 
 ### PluginRegistry
 - SPEC.md: ✓
 - LLD.md: ✓
 - Code: ✓
-- Tests: ✓
+- Tests: ✓ (95 passing)
 - Schemas: ✓
 - **Purpose**: Source of truth for available tools and operations
-- **Status**: ✅ **COMPLETED** - Plugin manifest storage with scope validation
+- **Status**: ✅ **COMPLETED** - Tool catalog with CRUD, scope verification, credential resolution, registry versioning
 - **PR**: [#7](https://github.com/AnantshreeChandola/Personal-agent/pull/7) - PluginRegistry implementation
 
 ### PlanWriter
@@ -212,17 +212,27 @@ Legend:
 - **PR**: [#11](https://github.com/AnantshreeChandola/Personal-agent/pull/11) - PlanWriter with shared Pydantic models
 
 ### VectorIndex (✅ Completed - Mar 2026)
-- **Hybrid search**: BM25 + semantic RRF (Reciprocal Rank Fusion)
-- **ONNX Runtime** embeddings (not OpenAI) for local, fast inference
-- **pgvector** for vector similarity search on `plan_embeddings` table
-- **PR**: [#9](https://github.com/AnantshreeChandola/Personal-agent/pull/9) - VectorIndex implementation
+- **Hybrid search**: BM25 keyword (tsvector/tsquery) + semantic cosine (pgvector HNSW) + RRF score fusion
+- **ONNX Runtime**: Local CPU inference for all-MiniLM-L6-v2 (384-dim, ~10ms per embedding)
+- **Zero external API cost**: No OpenAI calls — fully local embedding generation
+- **Graceful degradation**: App starts normally even without pgvector or ONNX model
+- **Library component**: No HTTP routes, consumed via DI by PlanWriter/ContextRAG/Planner
+- **74 tests passing**: Unit, contract, observability tests (6 integration stubs for pgvector environments)
+- **PR**: [#9](https://github.com/AnantshreeChandola/Personal-agent/pull/9) - VectorIndex hybrid search implementation
 
 ### Signer (✅ Completed - Mar 2026)
-- **Ed25519 signing** with JCS (RFC 8785) canonicalization
+- **Ed25519 cryptographic signing**: Sign and verify plans with deterministic canonical JSON
+- **Library component**: No HTTP routes, consumed via DI
+- **Key management**: Private/public keys loaded from environment variables
+- **51 tests passing**: Unit, contract, observability (no PII/key leakage in logs)
 - **PR**: [#8](https://github.com/AnantshreeChandola/Personal-agent/pull/8) - Signer implementation
 
 ### PluginRegistry (✅ Completed - Mar 2026)
-- **Plugin manifest storage** with scope validation and capability queries
+- **Tool catalog service**: CRUD for external tool registrations with operations
+- **Scope verification**: Validate required OAuth scopes for preview vs execute
+- **Credential resolution**: Mustache-template credential IDs (never actual secrets)
+- **Registry versioning**: Monotonic version counter for cache invalidation
+- **95 tests passing**: Domain, service, adapter, API, contract tests
 - **PR**: [#7](https://github.com/AnantshreeChandola/Personal-agent/pull/7) - PluginRegistry implementation
 
 ### History (✅ Completed - Feb 2026)
