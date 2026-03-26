@@ -226,7 +226,7 @@ Same tuple ⇒ same canonical plan bytes ⇒ same hash/signature.
   - Storage: n8n Secrets Vault (self-hosted, encrypted at rest)
   - LLM boundary: Planner/LLM has **ZERO access** to credential values
   - Plan format: Plans reference credential IDs, resolved by n8n at execution time
-  - Deployment: Local LLM + local n8n (self-hosted, no cloud dependencies for secrets)
+  - Deployment: Anthropic Claude API (via LLMAdapter protocol) + local n8n (self-hosted, no cloud dependencies for secrets). LLM never sees credential values regardless of provider.
 
 ---
 
