@@ -65,3 +65,8 @@ def get_plan_writer_service(request: Request) -> Any:
 def get_context_rag_service(request: Request) -> Any:
     """Get ContextRAGService singleton from app state."""
     return request.app.state.context_rag_service
+
+
+def get_planner_service(request: Request) -> Any:
+    """Get PlannerService singleton from app state."""
+    return request.app.state.planner_service

@@ -131,6 +131,20 @@ async def lifespan(app: FastAPI):
         vector_index_service=app.state.vector_index_service,
     )
 
+    # Planner service (library -- no routes)
+    from components.Planner.service.planner_service import create_planner_service
+
+    try:
+        app.state.planner_service = create_planner_service(
+            context_rag_service=app.state.context_rag_service,
+            registry_service=app.state.registry_service,
+            signer_service=app.state.signer_service,
+            plan_service=app.state.plan_service,
+        )
+    except Exception as exc:
+        logger.warning("Planner init failed (ANTHROPIC_API_KEY may not be set): %s", exc)
+        app.state.planner_service = None
+
     logger.info("All services initialized")
 
     yield
