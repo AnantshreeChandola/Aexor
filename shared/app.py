@@ -118,6 +118,19 @@ async def lifespan(app: FastAPI):
         vector_index_service=app.state.vector_index_service,
     )
 
+    # ContextRAG service (library -- no routes)
+    from components.ContextRAG.service.context_rag_service import (
+        create_context_rag_service,
+    )
+
+    app.state.context_rag_service = create_context_rag_service(
+        preference_service=app.state.preference_service,
+        fact_service=app.state.fact_service,
+        pattern_service=app.state.pattern_service,
+        plan_service=app.state.plan_service,
+        vector_index_service=app.state.vector_index_service,
+    )
+
     logger.info("All services initialized")
 
     yield
