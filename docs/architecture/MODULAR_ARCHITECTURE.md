@@ -68,16 +68,15 @@ Each component's database dependencies, component dependencies, and external ser
     ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
     │ ContextRAG       │  │ Planner          │  │ Signer           │
     │ (context         │  │                  │  │                  │
-    │  assembler)      │  │ • DB: None       │  │ • DB: None       │
     │ • DB: None       │  │ • Deps:          │  │ • Deps: None     │
     │   (queries only) │  │   - ContextRAG   │  │ • Ext:           │
     │ • Deps:          │  │   - PluginReg    │  │   cryptography   │
-    │   - ProfileStore │  │ • Ext:           │  │   (Ed25519)      │
-    │   - History      │  │   Anthropic API  │  └──────────────────┘
-    │   - PlanLibrary  │  └──────────────────┘
-    │   - VectorIndex  │
-    │     (optional)   │
-    │ • Ext: None      │
+    │   - ProfileStore │  │   - Signer       │  │   (Ed25519)      │
+    │   - History      │  │   - PlanLibrary  │  └──────────────────┘
+    │   - PlanLibrary  │  │     (fallback)   │
+    │   - VectorIndex  │  │ • Ext:           │
+    │     (optional)   │  │   Anthropic API  │
+    │ • Ext: None      │  └──────────────────┘
     │                  │  ┌──────────────────┐  ┌──────────────────┐
     └──────────────────┘  │ PluginRegistry   │  │ Audit            │
                           │                  │  │                  │
@@ -296,7 +295,9 @@ Planner
 │   └── (none - stateless)
 ├── Component Dependencies
 │   ├── → ContextRAG (Evidence input)
-│   └── → PluginRegistry (tool catalog)
+│   ├── → PluginRegistry (tool catalog)
+│   ├── → Signer (plan signing after generation)
+│   └── → PlanLibrary (fallback template retrieval)
 └── External Dependencies
     └── Anthropic Claude API (plan generation, temperature=0)
 ```

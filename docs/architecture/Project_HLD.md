@@ -261,14 +261,14 @@ Intake: [ready! triggers planning]
 #### Planner
 **What it does**: Creates a deterministic step-by-step plan
 **Input**: Intent + Evidence + Available tools (from PluginRegistry)
-**Process**: Calls local LLM (temperature=0) to generate plan
+**Process**: Calls Anthropic Claude API (temperature=0) via LLMAdapter protocol to generate plan
 **Output**: Plan graph with steps, dependencies, roles, and **credential ID references**
 
 **Key features**:
 - **Deterministic**: Same inputs always produce same plan
 - **No access to credentials**: Plans reference credential IDs (e.g., `"gcal_user_123"`), not actual API tokens or secrets
 - **Credential resolution deferred**: n8n resolves credential IDs to actual values at execution time
-- **Local LLM**: Self-hosted LLM (not cloud API) for plan generation
+- **LLMAdapter protocol**: Anthropic Claude API for MVP; protocol abstraction allows future provider swaps (Ollama, vLLM)
 
 #### Signer
 **What it does**: Cryptographically signs plans to prevent tampering
@@ -674,7 +674,7 @@ n8n Workflow:
 - Policy (GLOBAL_SPEC version)
 
 **Process**:
-1. Planner calls local LLM with temperature=0 (self-hosted, not cloud API)
+1. Planner calls Anthropic Claude API with temperature=0 (via LLMAdapter protocol)
 2. Canonicalize plan JSON (sort keys, deterministic serialization)
 3. Sign with Ed25519 (cryptographic signature)
 4. Hash: SHA-256 of canonical plan bytes
@@ -1092,7 +1092,7 @@ See [README.md Tech Stack section](../../README.md#tech-stack) for the complete 
 - **Backend**: Python 3.11+ (FastAPI, Pydantic, SQLAlchemy async)
 - **Orchestration**: n8n (self-hosted, all workflows with built-in persistence and Secrets Vault)
 - **Data**: PostgreSQL 16 + pgvector, Redis 7
-- **AI**: Local LLM (self-hosted for planning, e.g., Ollama/vLLM); embeddings deferred (VectorIndex not in MVP)
+- **AI**: Anthropic Claude API (plan generation, temperature=0); ONNX Runtime (local embeddings, 384-dim all-MiniLM-L6-v2)
 - **Testing**: pytest, ruff, mypy
 - **Infra**: Docker, GitHub Actions
 
@@ -1485,7 +1485,7 @@ usecases/<UseCase>/
 
 **Architecture**:
 - **Storage**: n8n Secrets Vault (self-hosted n8n instance, encrypted at rest)
-- **LLM**: Local LLM (self-hosted) references credential IDs only, never actual values
+- **LLM**: Anthropic Claude API references credential IDs only, never actual values
 - **Plan Format**: Plans contain credential references (e.g., `"credential_id": "gcal_user_123"`)
 - **Execution**: n8n WorkflowBuilder binds credential IDs to actual secrets at runtime
 - **Security Boundary**: Planner generates plans with credential IDs → n8n resolves credentials during execution
@@ -1527,9 +1527,9 @@ When WorkflowBuilder generates the n8n workflow JSON, it maps `credential_ref` t
 ```
 
 **Deployment Model**:
-- **Local LLM**: Self-hosted (e.g., Ollama, vLLM) for plan generation
+- **Anthropic Claude API**: Plan generation via LLMAdapter protocol (temperature=0); swappable to local providers (Ollama, vLLM) via protocol
 - **Local n8n**: Self-hosted n8n instance with Secrets Vault
-- **No cloud dependencies for secrets**: Credentials never leave the local environment
+- **No cloud dependencies for secrets**: Credentials never leave the local environment; LLM receives only credential IDs, not values
 
 ---
 
