@@ -15,6 +15,33 @@ from shared.schemas.plan import Plan
 from shared.schemas.signature import Signature
 
 
+class EntityRequirement(BaseModel):
+    """A single entity required for an intent type."""
+
+    name: str = Field(..., description="Entity name, e.g. 'attendee'")
+    description: str = Field(..., description="Human-readable description, e.g. 'Who should attend?'")
+    required: bool = Field(default=True, description="Essential vs optional entity")
+    default_preference_key: str | None = Field(
+        default=None,
+        description="ProfileStore preference key for this entity, e.g. 'default_meeting_duration'",
+    )
+
+
+class RequiredEntitiesResult(BaseModel):
+    """Result from Planner's get_required_entities() lightweight query."""
+
+    intent_type: str
+    resolved_tools: list[str] = Field(
+        default_factory=list,
+        description="Tool IDs from the registry that can fulfill this intent",
+    )
+    required_entities: list[EntityRequirement] = Field(default_factory=list)
+    missing_entities: list[EntityRequirement] = Field(
+        default_factory=list,
+        description="Subset of required_entities not yet provided",
+    )
+
+
 class PlannerResult(BaseModel):
     """Result of plan generation."""
 
@@ -87,3 +114,16 @@ class LLMCallError(PlannerError):
         self.model = model
         self.reason = reason
         super().__init__(f"LLM call failed ({model}): {reason}")
+
+
+class ToolNotAvailableError(PlannerError):
+    """Intent requires tools that are not registered in the PluginRegistry."""
+
+    def __init__(self, intent_type: str, required_tools: list[str]) -> None:
+        self.intent_type = intent_type
+        self.required_tools = required_tools
+        tools_str = ", ".join(required_tools) if required_tools else "unknown"
+        super().__init__(
+            f"No registered tools can fulfill intent '{intent_type}'. "
+            f"Required tools: {tools_str}"
+        )

@@ -70,3 +70,8 @@ def get_context_rag_service(request: Request) -> Any:
 def get_planner_service(request: Request) -> Any:
     """Get PlannerService singleton from app state."""
     return request.app.state.planner_service
+
+
+def get_intake_service(request: Request) -> Any:
+    """Get IntakeService singleton from app state."""
+    return request.app.state.intake_service
