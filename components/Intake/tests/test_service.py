@@ -97,25 +97,21 @@ class TestSingleTurn:
         assert resp.turn_count == 1
         assert resp.intent is None
 
-    async def test_single_turn_ready_all_entities(
-        self, service, mock_parser, mock_planner_service
-    ):
+    async def test_single_turn_ready_all_entities(self, service, mock_parser, mock_planner_service):
         """All entities provided -> ready with Intent."""
         mock_parser.parse.return_value = ParseResult(
             intent="schedule_meeting",
             entities={"attendee": "Alice", "time": "10 AM", "duration_min": 30},
         )
-        mock_planner_service.get_required_entities.return_value = (
-            RequiredEntitiesResult(
-                intent_type="schedule_meeting",
-                resolved_tools=["google.calendar"],
-                required_entities=[
-                    EntityRequirement(name="attendee", description="Who?"),
-                    EntityRequirement(name="time", description="When?"),
-                    EntityRequirement(name="duration_min", description="How long?"),
-                ],
-                missing_entities=[],
-            )
+        mock_planner_service.get_required_entities.return_value = RequiredEntitiesResult(
+            intent_type="schedule_meeting",
+            resolved_tools=["google.calendar"],
+            required_entities=[
+                EntityRequirement(name="attendee", description="Who?"),
+                EntityRequirement(name="time", description="When?"),
+                EntityRequirement(name="duration_min", description="How long?"),
+            ],
+            missing_entities=[],
         )
         resp = await service.process_message(
             user_id=USER_ID,
@@ -164,13 +160,11 @@ class TestMultiTurn:
             intent="schedule_meeting",
             entities={"time": "10 AM", "duration_min": 30},
         )
-        mock_planner_service.get_required_entities.return_value = (
-            RequiredEntitiesResult(
-                intent_type="schedule_meeting",
-                resolved_tools=["google.calendar"],
-                required_entities=[],
-                missing_entities=[],
-            )
+        mock_planner_service.get_required_entities.return_value = RequiredEntitiesResult(
+            intent_type="schedule_meeting",
+            resolved_tools=["google.calendar"],
+            required_entities=[],
+            missing_entities=[],
         )
         resp = await service.process_message(
             user_id=USER_ID,
@@ -188,9 +182,7 @@ class TestMultiTurn:
 
 
 class TestConsentTierDefaults:
-    async def test_tier2_offers_profile_defaults(
-        self, service, mock_preference_service
-    ):
+    async def test_tier2_offers_profile_defaults(self, service, mock_preference_service):
         """Tier 2 user gets ProfileStore defaults in follow_up."""
         resp = await service.process_message(
             user_id=USER_ID,
@@ -201,9 +193,7 @@ class TestConsentTierDefaults:
         assert "usually use" in resp.follow_up
         assert "30" in resp.follow_up
 
-    async def test_tier1_skips_profile_defaults(
-        self, service, mock_preference_service
-    ):
+    async def test_tier1_skips_profile_defaults(self, service, mock_preference_service):
         """Tier 1 user does NOT get ProfileStore defaults."""
         resp = await service.process_message(
             user_id=USER_ID,
@@ -214,13 +204,9 @@ class TestConsentTierDefaults:
         assert "usually use" not in resp.follow_up
         mock_preference_service.get_preference.assert_not_called()
 
-    async def test_profile_store_down_skips_defaults(
-        self, service, mock_preference_service
-    ):
+    async def test_profile_store_down_skips_defaults(self, service, mock_preference_service):
         """ProfileStore failure -> no defaults, still works."""
-        mock_preference_service.get_preference.side_effect = RuntimeError(
-            "DB down"
-        )
+        mock_preference_service.get_preference.side_effect = RuntimeError("DB down")
         resp = await service.process_message(
             user_id=USER_ID,
             message="Meet with Alice",
@@ -236,15 +222,11 @@ class TestConsentTierDefaults:
 
 
 class TestToolNotAvailable:
-    async def test_tool_not_available_raises(
-        self, service, mock_planner_service
-    ):
+    async def test_tool_not_available_raises(self, service, mock_planner_service):
         """Planner ToolNotAvailableError -> Intake ToolNotAvailableError."""
-        mock_planner_service.get_required_entities.side_effect = (
-            PlannerToolNotAvailableError(
-                intent_type="book_flight",
-                required_tools=["airline.booking"],
-            )
+        mock_planner_service.get_required_entities.side_effect = PlannerToolNotAvailableError(
+            intent_type="book_flight",
+            required_tools=["airline.booking"],
         )
         with pytest.raises(ToolNotAvailableError) as exc_info:
             await service.process_message(
@@ -262,13 +244,9 @@ class TestToolNotAvailable:
 
 
 class TestGracefulDegradation:
-    async def test_planner_down_heuristic_ready(
-        self, service, mock_planner_service
-    ):
+    async def test_planner_down_heuristic_ready(self, service, mock_planner_service):
         """Planner unavailable + intent + entities -> ready (heuristic)."""
-        mock_planner_service.get_required_entities.side_effect = RuntimeError(
-            "Planner down"
-        )
+        mock_planner_service.get_required_entities.side_effect = RuntimeError("Planner down")
         resp = await service.process_message(
             user_id=USER_ID,
             message="Meet with Alice",
@@ -280,12 +258,8 @@ class TestGracefulDegradation:
         self, service, mock_parser, mock_planner_service
     ):
         """Planner unavailable + no entities -> collecting."""
-        mock_parser.parse.return_value = ParseResult(
-            intent="unknown_intent", entities={}
-        )
-        mock_planner_service.get_required_entities.side_effect = RuntimeError(
-            "Planner down"
-        )
+        mock_parser.parse.return_value = ParseResult(intent="unknown_intent", entities={})
+        mock_planner_service.get_required_entities.side_effect = RuntimeError("Planner down")
         resp = await service.process_message(
             user_id=USER_ID,
             message="Help me with something",
@@ -293,9 +267,7 @@ class TestGracefulDegradation:
         )
         assert resp.status == "collecting"
 
-    async def test_llm_parser_down_collecting(
-        self, service, mock_parser
-    ):
+    async def test_llm_parser_down_collecting(self, service, mock_parser):
         """Parser fails -> empty ParseResult -> collecting."""
         from components.Intake.domain.models import IntentParserError
 
@@ -315,9 +287,7 @@ class TestGracefulDegradation:
 
 
 class TestSessionLifecycle:
-    async def test_max_turns_exceeded(
-        self, service, mock_session_store
-    ):
+    async def test_max_turns_exceeded(self, service, mock_session_store):
         """20+ turns raises MaxTurnsExceededError."""
         from datetime import datetime
 
@@ -342,17 +312,13 @@ class TestSessionLifecycle:
                 session_id="ses_full",
             )
 
-    async def test_reset_session_success(
-        self, service, mock_session_store
-    ):
+    async def test_reset_session_success(self, service, mock_session_store):
         """Deleting existing session succeeds."""
         mock_session_store.delete.return_value = True
         await service.reset_session(USER_ID, "ses_abc")
         mock_session_store.delete.assert_called_once_with(USER_ID, "ses_abc")
 
-    async def test_reset_session_not_found(
-        self, service, mock_session_store
-    ):
+    async def test_reset_session_not_found(self, service, mock_session_store):
         """Deleting missing session raises SessionNotFoundError."""
         mock_session_store.delete.return_value = False
         with pytest.raises(SessionNotFoundError):
@@ -374,9 +340,7 @@ class TestSessionCreation:
         )
         assert resp.session_id.startswith("ses_")
 
-    async def test_new_session_when_session_not_found(
-        self, service, mock_session_store
-    ):
+    async def test_new_session_when_session_not_found(self, service, mock_session_store):
         """Provided session_id not in store -> new session."""
         mock_session_store.get.return_value = None
         resp = await service.process_message(

@@ -49,9 +49,7 @@ def _make_service(
             )
         )
     else:
-        preference.get_preference = AsyncMock(
-            side_effect=RuntimeError("ProfileStore down")
-        )
+        preference.get_preference = AsyncMock(side_effect=RuntimeError("ProfileStore down"))
 
     # Use a real-ish in-memory store
     store = _InMemorySessionStore()
@@ -276,9 +274,7 @@ class TestMultiTurnIntegration:
             )
         )
         planner = AsyncMock()
-        planner.get_required_entities = AsyncMock(
-            side_effect=RuntimeError("Planner down")
-        )
+        planner.get_required_entities = AsyncMock(side_effect=RuntimeError("Planner down"))
         preference = AsyncMock()
 
         svc = IntakeService(

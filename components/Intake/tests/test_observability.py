@@ -31,17 +31,15 @@ def svc_with_mocks(
     mock_preference_service,
 ) -> IntakeService:
     """IntakeService with all mocked adapters."""
-    mock_planner_service.get_required_entities.return_value = (
-        RequiredEntitiesResult(
-            intent_type="schedule_meeting",
-            resolved_tools=["google.calendar"],
-            required_entities=[
-                EntityRequirement(name="attendee", description="Who?"),
-            ],
-            missing_entities=[
-                EntityRequirement(name="time", description="When?"),
-            ],
-        )
+    mock_planner_service.get_required_entities.return_value = RequiredEntitiesResult(
+        intent_type="schedule_meeting",
+        resolved_tools=["google.calendar"],
+        required_entities=[
+            EntityRequirement(name="attendee", description="Who?"),
+        ],
+        missing_entities=[
+            EntityRequirement(name="time", description="When?"),
+        ],
     )
     parser = AsyncMock()
     parser.parse = AsyncMock(
@@ -62,9 +60,7 @@ def svc_with_mocks(
 
 
 class TestNoPIIInLogs:
-    async def test_message_content_absent_from_logs(
-        self, svc_with_mocks, caplog
-    ):
+    async def test_message_content_absent_from_logs(self, svc_with_mocks, caplog):
         """FR-010: user message content must NOT appear in any log record."""
         with caplog.at_level(logging.DEBUG):
             await svc_with_mocks.process_message(
@@ -80,9 +76,7 @@ class TestNoPIIInLogs:
         assert "Book a meeting with Alice" not in full_log
         assert "30 minutes" not in full_log
 
-    async def test_structured_fields_present(
-        self, svc_with_mocks, caplog
-    ):
+    async def test_structured_fields_present(self, svc_with_mocks, caplog):
         """Logs contain session_id and user_id in extra fields."""
         with caplog.at_level(logging.DEBUG):
             resp = await svc_with_mocks.process_message(
@@ -93,28 +87,20 @@ class TestNoPIIInLogs:
 
         # Check extra fields on log records (structured logging)
         session_ids_logged = [
-            r.__dict__.get("session_id")
-            for r in caplog.records
-            if hasattr(r, "session_id")
+            r.__dict__.get("session_id") for r in caplog.records if hasattr(r, "session_id")
         ]
         assert resp.session_id in session_ids_logged
 
         user_ids_logged = [
-            r.__dict__.get("user_id")
-            for r in caplog.records
-            if hasattr(r, "user_id")
+            r.__dict__.get("user_id") for r in caplog.records if hasattr(r, "user_id")
         ]
         assert USER_ID in user_ids_logged
 
-    async def test_parser_error_logs_no_message(
-        self, svc_with_mocks, caplog
-    ):
+    async def test_parser_error_logs_no_message(self, svc_with_mocks, caplog):
         """Parser failure log must not contain message content."""
         from components.Intake.domain.models import IntentParserError
 
-        svc_with_mocks._intent_parser.parse.side_effect = IntentParserError(
-            "LLM timeout"
-        )
+        svc_with_mocks._intent_parser.parse.side_effect = IntentParserError("LLM timeout")
         with caplog.at_level(logging.DEBUG):
             await svc_with_mocks.process_message(
                 user_id=USER_ID,
@@ -124,9 +110,7 @@ class TestNoPIIInLogs:
 
         assert SECRET_MESSAGE not in caplog.text
 
-    async def test_reset_session_logs_no_pii(
-        self, svc_with_mocks, caplog
-    ):
+    async def test_reset_session_logs_no_pii(self, svc_with_mocks, caplog):
         """Session reset logs session_id in extra but no PII in message."""
         svc_with_mocks._session_store.delete.return_value = True
         with caplog.at_level(logging.DEBUG):
@@ -134,9 +118,7 @@ class TestNoPIIInLogs:
 
         # session_id should be in extra fields
         session_ids = [
-            r.__dict__.get("session_id")
-            for r in caplog.records
-            if hasattr(r, "session_id")
+            r.__dict__.get("session_id") for r in caplog.records if hasattr(r, "session_id")
         ]
         assert "ses_test123" in session_ids
 

@@ -103,9 +103,7 @@ class IntakeService:
         session.updated_at = datetime.now(UTC)
 
         # 6. Determine readiness
-        status, missing_fields, planner_result = await self._check_readiness(
-            session
-        )
+        status, missing_fields, planner_result = await self._check_readiness(session)
 
         # 7. Build follow-up or intent
         follow_up: str | None = None
@@ -265,9 +263,7 @@ class IntakeService:
                         user_id, entity.default_preference_key, context_tier
                     )
                     if default_val is not None:
-                        session.profile_defaults_offered[entity.name] = (
-                            default_val
-                        )
+                        session.profile_defaults_offered[entity.name] = default_val
                         lines.append(
                             f"- {entity.description}: I see you usually use "
                             f"{default_val}. Use that, or specify a different "

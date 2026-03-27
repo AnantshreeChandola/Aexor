@@ -108,9 +108,7 @@ class SessionOwnershipError(IntakeError):
     def __init__(self, session_id: str, user_id: str) -> None:
         self.session_id = session_id
         self.user_id = user_id
-        super().__init__(
-            f"User {user_id} does not own session {session_id}"
-        )
+        super().__init__(f"User {user_id} does not own session {session_id}")
 
 
 class MaxTurnsExceededError(IntakeError):
@@ -119,9 +117,7 @@ class MaxTurnsExceededError(IntakeError):
     def __init__(self, session_id: str, max_turns: int = 20) -> None:
         self.session_id = session_id
         self.max_turns = max_turns
-        super().__init__(
-            f"Session {session_id} exceeded max turns ({max_turns})"
-        )
+        super().__init__(f"Session {session_id} exceeded max turns ({max_turns})")
 
 
 class SessionStoreUnavailableError(IntakeError):
@@ -152,6 +148,5 @@ class ToolNotAvailableError(IntakeError):
         self.required_tools = required_tools
         tools_str = ", ".join(required_tools) if required_tools else "unknown"
         super().__init__(
-            f"No registered tools can fulfill intent '{intent_type}'. "
-            f"Required tools: {tools_str}"
+            f"No registered tools can fulfill intent '{intent_type}'. Required tools: {tools_str}"
         )

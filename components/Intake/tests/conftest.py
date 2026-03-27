@@ -85,7 +85,9 @@ def mock_redis_client() -> AsyncMock:
 def mock_llm_adapter() -> AsyncMock:
     """AsyncMock implementing LLMAdapter protocol."""
     adapter = AsyncMock()
-    adapter.generate = AsyncMock(return_value='{"intent": "schedule_meeting", "entities": {"attendee": "Alice"}, "constraints": {}}')
+    adapter.generate = AsyncMock(
+        return_value='{"intent": "schedule_meeting", "entities": {"attendee": "Alice"}, "constraints": {}}'
+    )
     return adapter
 
 

@@ -155,9 +155,7 @@ async def reset_session(
 
     try:
         await service.reset_session(user_id, session_id)
-        return SessionResetResponse(session_id=session_id).model_dump(
-            mode="json"
-        )
+        return SessionResetResponse(session_id=session_id).model_dump(mode="json")
     except (
         SessionNotFoundError,
         SessionOwnershipError,

@@ -96,9 +96,7 @@ class LLMBasedParser:
             if context.detected_intent:
                 parts.append(f"  detected_intent: {context.detected_intent}")
             if context.extracted_entities:
-                parts.append(
-                    f"  extracted_entities: {json.dumps(context.extracted_entities)}"
-                )
+                parts.append(f"  extracted_entities: {json.dumps(context.extracted_entities)}")
         return "\n".join(parts)
 
     @staticmethod

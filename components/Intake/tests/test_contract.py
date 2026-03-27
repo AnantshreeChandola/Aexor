@@ -31,16 +31,14 @@ def ready_service(
     mock_redis_client,
 ) -> IntakeService:
     """IntakeService configured for ready (all entities satisfied)."""
-    mock_planner_service.get_required_entities.return_value = (
-        RequiredEntitiesResult(
-            intent_type="schedule_meeting",
-            resolved_tools=["google.calendar"],
-            required_entities=[
-                EntityRequirement(name="attendee", description="Who?"),
-                EntityRequirement(name="time", description="When?"),
-            ],
-            missing_entities=[],
-        )
+    mock_planner_service.get_required_entities.return_value = RequiredEntitiesResult(
+        intent_type="schedule_meeting",
+        resolved_tools=["google.calendar"],
+        required_entities=[
+            EntityRequirement(name="attendee", description="Who?"),
+            EntityRequirement(name="time", description="When?"),
+        ],
+        missing_entities=[],
     )
     parser = AsyncMock()
     parser.parse = AsyncMock(
@@ -117,18 +115,16 @@ class TestIntentContract:
         mock_preference_service,
     ):
         """Collecting response must NOT have an intent dict."""
-        mock_planner_service.get_required_entities.return_value = (
-            RequiredEntitiesResult(
-                intent_type="schedule_meeting",
-                resolved_tools=["google.calendar"],
-                required_entities=[
-                    EntityRequirement(name="attendee", description="Who?"),
-                    EntityRequirement(name="time", description="When?"),
-                ],
-                missing_entities=[
-                    EntityRequirement(name="time", description="When?"),
-                ],
-            )
+        mock_planner_service.get_required_entities.return_value = RequiredEntitiesResult(
+            intent_type="schedule_meeting",
+            resolved_tools=["google.calendar"],
+            required_entities=[
+                EntityRequirement(name="attendee", description="Who?"),
+                EntityRequirement(name="time", description="When?"),
+            ],
+            missing_entities=[
+                EntityRequirement(name="time", description="When?"),
+            ],
         )
         parser = AsyncMock()
         parser.parse = AsyncMock(

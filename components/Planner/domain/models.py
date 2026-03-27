@@ -19,7 +19,9 @@ class EntityRequirement(BaseModel):
     """A single entity required for an intent type."""
 
     name: str = Field(..., description="Entity name, e.g. 'attendee'")
-    description: str = Field(..., description="Human-readable description, e.g. 'Who should attend?'")
+    description: str = Field(
+        ..., description="Human-readable description, e.g. 'Who should attend?'"
+    )
     required: bool = Field(default=True, description="Essential vs optional entity")
     default_preference_key: str | None = Field(
         default=None,
@@ -124,6 +126,5 @@ class ToolNotAvailableError(PlannerError):
         self.required_tools = required_tools
         tools_str = ", ".join(required_tools) if required_tools else "unknown"
         super().__init__(
-            f"No registered tools can fulfill intent '{intent_type}'. "
-            f"Required tools: {tools_str}"
+            f"No registered tools can fulfill intent '{intent_type}'. Required tools: {tools_str}"
         )
