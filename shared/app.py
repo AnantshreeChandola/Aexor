@@ -10,6 +10,7 @@ Usage:
 """
 
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -145,11 +146,41 @@ async def lifespan(app: FastAPI):
         logger.warning("Planner init failed (ANTHROPIC_API_KEY may not be set): %s", exc)
         app.state.planner_service = None
 
+    # Intake service (API layer -- Redis sessions, LLM parsing)
+    intake_redis = None
+    try:
+        import redis.asyncio as aioredis
+
+        from components.Intake.service.intake_service import create_intake_service
+        from components.Planner.adapters.llm_adapter import AnthropicAdapter
+
+        redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
+        intake_redis = aioredis.from_url(redis_url, decode_responses=True)
+
+        # Reuse the shared LLM adapter from Planner if available, else create one
+        llm_adapter: AnthropicAdapter | None = None
+        if app.state.planner_service is not None:
+            llm_adapter = app.state.planner_service._llm
+        if llm_adapter is None:
+            llm_adapter = AnthropicAdapter()
+
+        app.state.intake_service = create_intake_service(
+            redis_client=intake_redis,
+            llm_adapter=llm_adapter,
+            planner_service=app.state.planner_service,
+            preference_service=app.state.preference_service,
+        )
+    except Exception as exc:
+        logger.warning("Intake init failed: %s", exc)
+        app.state.intake_service = None
+
     logger.info("All services initialized")
 
     yield
 
     # --- Shutdown ---
+    if intake_redis is not None:
+        await intake_redis.close()
     await db.close()
     logger.info("Shutdown complete")
 
@@ -171,6 +202,7 @@ def create_app() -> FastAPI:
 
     # Routers
     from components.History.api.routes import router as history_router
+    from components.Intake.api.routes import router as intake_router
     from components.PlanLibrary.api.routes import router as plan_router
     from components.PluginRegistry.api.routes import router as registry_router
     from components.ProfileStore.api.routes import router as profile_router
@@ -181,6 +213,7 @@ def create_app() -> FastAPI:
     app.include_router(profile_router)
     app.include_router(history_router)
     app.include_router(registry_router)
+    app.include_router(intake_router)
 
     # Root health check
     @app.get("/health")

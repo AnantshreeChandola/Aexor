@@ -24,9 +24,12 @@ from components.Planner.adapters.plan_validator import PlanValidator
 from components.Planner.adapters.prompt_builder import PromptBuilder
 from components.Planner.domain.models import (
     CircuitOpenError,
+    EntityRequirement,
     LLMCallError,
     PlannerResult,
     PlanValidationError,
+    RequiredEntitiesResult,
+    ToolNotAvailableError,
 )
 from shared.schemas.intent import Intent
 from shared.schemas.plan import Plan, PlanConstraints, PlanMeta, PlanStep
@@ -64,6 +67,179 @@ class PlannerService:
         self._primary_model = primary_model
         self._fallback_model = fallback_model
         self._max_output_tokens = max_output_tokens
+
+    async def get_required_entities(
+        self,
+        intent_type: str,
+        collected_entities: dict[str, Any] | None = None,
+    ) -> RequiredEntitiesResult:
+        """Lightweight query: determine required entities for an intent type.
+
+        Step 1: Ask LLM what tools and entities are needed (no catalog context).
+        Step 2: Validate the LLM's tool suggestions against the PluginRegistry.
+
+        Raises:
+            ToolNotAvailableError: If none of the LLM-suggested tools exist in
+                the registry.
+
+        This is NOT a full plan generation — no ContextRAG, no signing.
+        """
+        collected = collected_entities or {}
+
+        logger.info(
+            "get_required_entities_start",
+            extra={
+                "component": "planner",
+                "op": "get_required_entities",
+                "intent_type": intent_type,
+                "collected_count": len(collected),
+            },
+        )
+
+        # ── Step 1: Ask LLM (no catalog knowledge) ──────────────────────
+        system_prompt = (
+            "You are an intent analysis engine. Given an intent type, determine:\n"
+            "1. What kind of tool(s) would be needed (use provider.service format, "
+            "e.g. 'google.calendar', 'slack.messaging')\n"
+            "2. What entities (parameters) are required to fulfill this intent\n\n"
+            "Return ONLY valid JSON with this structure:\n"
+            "{\n"
+            '  "tools_needed": ["provider.service", ...],\n'
+            '  "entities": [\n'
+            "    {\n"
+            '      "name": "entity_name (snake_case)",\n'
+            '      "description": "brief human-readable description",\n'
+            '      "required": true,\n'
+            '      "default_preference_key": "profile_store_key_or_null"\n'
+            "    }\n"
+            "  ]\n"
+            "}\n\n"
+            "Rules:\n"
+            "- tools_needed: list the tool IDs you think are needed "
+            "(provider.service format)\n"
+            "- default_preference_key: a plausible user preference key "
+            "(e.g. 'default_meeting_duration'), or null if not applicable"
+        )
+
+        user_prompt = (
+            f"Intent type: {intent_type}\n"
+            f"Already collected entities: {json.dumps(list(collected.keys()))}\n\n"
+            "Analyze and return JSON."
+        )
+
+        suggested_tools: list[str] = []
+        entities_data: list[dict[str, Any]] = []
+
+        try:
+            raw = await self._primary_breaker.call(
+                self._llm.generate,
+                model=self._fallback_model,  # Cheaper model for lightweight query
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                max_tokens=1024,
+                temperature=0.0,
+            )
+            # Strip markdown fences if present
+            cleaned = raw.strip()
+            if cleaned.startswith("```"):
+                cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0]
+            parsed = json.loads(cleaned.strip())
+
+            if isinstance(parsed, dict):
+                suggested_tools = parsed.get("tools_needed", [])
+                entities_data = parsed.get("entities", [])
+                if not isinstance(suggested_tools, list):
+                    suggested_tools = []
+                if not isinstance(entities_data, list):
+                    entities_data = []
+        except (CircuitOpenError, LLMCallError) as e:
+            logger.warning(
+                "entity_inference_llm_failed",
+                extra={"component": "planner", "intent_type": intent_type, "error": str(e)},
+            )
+        except (json.JSONDecodeError, Exception) as e:
+            logger.warning(
+                "entity_inference_parse_failed",
+                extra={"component": "planner", "intent_type": intent_type, "error": str(e)},
+            )
+
+        # ── Step 2: Validate tools against PluginRegistry ───────────────
+        registry_available = True
+        try:
+            catalog = await self._registry.list_catalog()
+            registered_ids = {t.tool_id for t in catalog.tools}
+        except Exception:
+            logger.warning(
+                "registry_unavailable_for_entities",
+                extra={"component": "planner", "intent_type": intent_type},
+            )
+            # Registry down — skip tool validation, let it through
+            registered_ids = set()
+            registry_available = False
+
+        resolved_tools: list[str] = []
+        if suggested_tools and registry_available:
+            resolved_tools = [t for t in suggested_tools if t in registered_ids]
+            missing_tools = [t for t in suggested_tools if t not in registered_ids]
+
+            if missing_tools:
+                logger.info(
+                    "tools_not_in_registry",
+                    extra={
+                        "component": "planner",
+                        "intent_type": intent_type,
+                        "suggested": suggested_tools,
+                        "missing": missing_tools,
+                    },
+                )
+
+            if not resolved_tools:
+                # None of the LLM-suggested tools exist in the registry
+                raise ToolNotAvailableError(
+                    intent_type=intent_type,
+                    required_tools=suggested_tools,
+                )
+        elif suggested_tools and not registry_available:
+            # Registry down — pass through LLM suggestions unvalidated
+            resolved_tools = suggested_tools
+
+        # ── Step 3: Build EntityRequirement list ─────────────────────────
+        required_entities = []
+        for item in entities_data:
+            if not isinstance(item, dict) or "name" not in item:
+                continue
+            required_entities.append(
+                EntityRequirement(
+                    name=item["name"],
+                    description=item.get("description", ""),
+                    required=item.get("required", True),
+                    default_preference_key=item.get("default_preference_key"),
+                )
+            )
+
+        # ── Step 4: Compute missing entities ─────────────────────────────
+        collected_keys = set(collected.keys())
+        missing_entities = [e for e in required_entities if e.name not in collected_keys]
+
+        logger.info(
+            "get_required_entities_complete",
+            extra={
+                "component": "planner",
+                "op": "get_required_entities",
+                "intent_type": intent_type,
+                "suggested_tools": suggested_tools,
+                "resolved_tools": resolved_tools,
+                "required_count": len(required_entities),
+                "missing_count": len(missing_entities),
+            },
+        )
+
+        return RequiredEntitiesResult(
+            intent_type=intent_type,
+            resolved_tools=resolved_tools,
+            required_entities=required_entities,
+            missing_entities=missing_entities,
+        )
 
     async def generate_plan(self, intent: Intent) -> PlannerResult:
         """Generate a validated, signed execution plan."""
