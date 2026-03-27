@@ -160,7 +160,7 @@ async def lifespan(app: FastAPI):
         # Reuse the shared LLM adapter from Planner if available, else create one
         llm_adapter: AnthropicAdapter | None = None
         if app.state.planner_service is not None:
-            llm_adapter = app.state.planner_service._llm  # noqa: SLF001
+            llm_adapter = app.state.planner_service._llm
         if llm_adapter is None:
             llm_adapter = AnthropicAdapter()
 
