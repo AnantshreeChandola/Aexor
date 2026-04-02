@@ -11,6 +11,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from .policy import PolicyAttestation
+
 
 class PlanOutcome(BaseModel):
     """
@@ -25,6 +27,9 @@ class PlanOutcome(BaseModel):
         total_steps: Total number of steps in the plan
         failed_step: Step number that failed (None if success)
         context_data: Additional context data (None if not available)
+        final_graph_json: Serialized final execution graph (None if not captured)
+        plan_revision: Which plan revision was executed (0 = original)
+        policy_attestations: Runtime policy attestation records
     """
 
     success: bool = Field(..., description="Whether the plan executed successfully")
@@ -46,3 +51,15 @@ class PlanOutcome(BaseModel):
     )
 
     context_data: dict[str, Any] | None = Field(default=None, description="Additional context data")
+
+    final_graph_json: dict[str, Any] | None = Field(
+        default=None, description="Serialized final execution graph after runtime mutations"
+    )
+
+    plan_revision: int = Field(
+        default=0, ge=0, description="Plan revision that was executed (0 = original)"
+    )
+
+    policy_attestations: list[PolicyAttestation] = Field(
+        default_factory=list, description="Runtime policy attestation records"
+    )

@@ -1,32 +1,50 @@
 # Personal Agent Dependencies
 # Python 3.11+
+# Aligned with pyproject.toml — this file mirrors [project.dependencies]
 
 # Web Framework
-fastapi>=0.104.0
-uvicorn[standard]>=0.24.0
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
 python-multipart>=0.0.6
 
 # Database
-sqlalchemy[asyncio]>=2.0.0
-asyncpg>=0.29.0
-alembic>=1.12.0
+sqlalchemy[asyncio]>=2.0
+asyncpg>=0.29
+alembic>=1.13.0
+pgvector>=0.2.4
+
+# Caching & Coordination
+redis[hiredis]>=5.0
 
 # Validation & Serialization
-pydantic>=2.5.0
+pydantic>=2.0
 pydantic-settings>=2.1.0
+pydantic-core>=2.14.0
+email-validator>=2.0.0
 
-# Security & Encryption
-cryptography>=41.0.0
+# AI / LLM (Anthropic Claude — sole external AI dependency)
+anthropic>=0.18.0
+
+# Embeddings (local CPU inference, no external API)
+onnxruntime>=1.24.3
+tokenizers>=0.22.2
+numpy>=2.4.0
+
+# Cryptography & Plan Signing (Ed25519, AES-256-GCM vault)
+cryptography>=41.0
+pynacl>=1.5.0
+
+# JWT Authentication
 python-jose[cryptography]>=3.3.0
-passlib[bcrypt]>=1.7.4
+passlib[bcrypt]>=1.7.4,<2.0
+bcrypt>=4.0,<5.0
 
-# Environment & Configuration
-python-dotenv>=1.0.0
-
-# Testing
-pytest>=7.4.0
-pytest-asyncio>=0.21.0
-httpx>=0.25.0
+# Structured Logging
+structlog>=24.1.0
+python-json-logger>=2.0.7
 
 # Utilities
-python-dateutil>=2.8.2
+httpx>=0.27
+python-dotenv>=1.0.0
+typing-extensions>=4.9.0
+ulid-py>=1.1.0

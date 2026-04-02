@@ -85,3 +85,93 @@ class TestComputePlanHash:
         hash1 = compute_plan_hash({"b": 1, "a": 2})
         hash2 = compute_plan_hash({"a": 2, "b": 1})
         assert hash1 == hash2
+
+
+class TestRuntimeFieldStripping:
+    """Tests for runtime field exclusion from canonical hashing."""
+
+    def test_status_result_error_stripped_from_steps(self) -> None:
+        """Step runtime fields (status, result, error) are excluded."""
+        plan_clean = {
+            "graph": [{"step": 1, "uses": "test.tool", "call": "op"}],
+        }
+        plan_with_runtime = {
+            "graph": [
+                {
+                    "step": 1,
+                    "uses": "test.tool",
+                    "call": "op",
+                    "status": "completed",
+                    "result": {"data": "value"},
+                    "error": None,
+                }
+            ],
+        }
+        assert canonicalize_plan(plan_clean) == canonicalize_plan(plan_with_runtime)
+
+    def test_policy_attestations_stripped_from_top_level(self) -> None:
+        """Top-level policy_attestations field is excluded."""
+        plan_clean = {"plan_id": "test"}
+        plan_with_attestations = {
+            "plan_id": "test",
+            "policy_attestations": [{"id": "att-1"}],
+        }
+        assert canonicalize_plan(plan_clean) == canonicalize_plan(plan_with_attestations)
+
+    def test_hash_stable_with_runtime_fields(self) -> None:
+        """Hash is identical whether runtime fields are present or not."""
+        base = {"graph": [{"step": 1, "role": "Fetcher"}], "meta": {"v": 1}}
+        with_runtime = {
+            "graph": [
+                {
+                    "step": 1,
+                    "role": "Fetcher",
+                    "status": "failed",
+                    "result": None,
+                    "error": {"msg": "timeout"},
+                }
+            ],
+            "meta": {"v": 1},
+            "policy_attestations": [{"att": 1}],
+        }
+        assert compute_plan_hash(base) == compute_plan_hash(with_runtime)
+
+    def test_non_runtime_step_fields_preserved(self) -> None:
+        """Non-runtime step fields like type, policy_ref are preserved in canonical."""
+        plan = {
+            "graph": [
+                {
+                    "step": 1,
+                    "type": "llm_reasoning",
+                    "policy_ref": "policy-1",
+                    "can_spawn": True,
+                }
+            ],
+        }
+        canonical = canonicalize_plan(plan)
+        assert '"type":"llm_reasoning"' in canonical
+        assert '"policy_ref":"policy-1"' in canonical
+        assert '"can_spawn":true' in canonical
+
+    def test_ts_and_nonce_stripped_from_top_level(self) -> None:
+        """Signing metadata (ts, nonce) is excluded from canonical hashing."""
+        plan_clean = {"plan_id": "test", "graph": [{"step": 1}]}
+        plan_with_signing_meta = {
+            "plan_id": "test",
+            "graph": [{"step": 1}],
+            "ts": "2026-04-01T00:00:00+00:00",
+            "nonce": "01JBXYZ1234567890ABCDEFGHI",
+            "signature": "b" * 88,
+        }
+        assert canonicalize_plan(plan_clean) == canonicalize_plan(plan_with_signing_meta)
+
+    def test_hash_stable_with_signing_metadata(self) -> None:
+        """Hash is identical whether signing metadata is present or not."""
+        base = {"plan_id": "test", "graph": [{"step": 1, "role": "Fetcher"}]}
+        with_meta = {
+            "plan_id": "test",
+            "graph": [{"step": 1, "role": "Fetcher"}],
+            "ts": "2026-04-01T12:00:00+00:00",
+            "nonce": "01JBXYZ1234567890ABCDEFGHI",
+        }
+        assert compute_plan_hash(base) == compute_plan_hash(with_meta)

@@ -23,7 +23,7 @@ from shared.schemas.plan import Plan
 
 logger = logging.getLogger(__name__)
 
-MAX_STEPS = 50
+MAX_STEPS = 100
 MAX_PARALLEL_STEPS = 10
 MAX_STEP_ARGS_SIZE = 10_240  # 10KB per step args
 MAX_PLAN_SIZE = 102_400  # 100KB total plan
@@ -121,6 +121,8 @@ class PlanValidator:
         tool_ids: set[str],
     ) -> None:
         """Layer 3: Business rule validation."""
+        step_set = {s.step for s in plan.graph}
+
         # Max steps
         if len(plan.graph) > MAX_STEPS:
             raise PlanValidationError(
@@ -165,6 +167,129 @@ class PlanValidator:
             raise PlanValidationError(
                 layer="business_rules",
                 message=f"Booker steps {booker_without_gate} missing gate_id",
+            )
+
+        # --- Hybrid execution rules (§2.3.1, §2.3.2) ---
+
+        # Reasoner role requires policy_ref
+        reasoner_no_policy = [
+            s.step for s in plan.graph if s.role == "Reasoner" and s.policy_ref is None
+        ]
+        if reasoner_no_policy:
+            raise PlanValidationError(
+                layer="business_rules",
+                message=f"Reasoner steps {reasoner_no_policy} missing policy_ref",
+            )
+
+        # llm_reasoning steps require reasoning_config
+        reasoning_no_config = [
+            s.step for s in plan.graph if s.type == "llm_reasoning" and s.reasoning_config is None
+        ]
+        if reasoning_no_config:
+            raise PlanValidationError(
+                layer="business_rules",
+                message=f"llm_reasoning steps {reasoning_no_config} missing reasoning_config",
+            )
+
+        # policy_check steps require policy_ref
+        policy_check_no_ref = [
+            s.step for s in plan.graph if s.type == "policy_check" and s.policy_ref is None
+        ]
+        if policy_check_no_ref:
+            raise PlanValidationError(
+                layer="business_rules",
+                message=f"policy_check steps {policy_check_no_ref} missing policy_ref",
+            )
+
+        # Spawning constraints: max_spawned_steps ≤ 10, absolute max
+        for step in plan.graph:
+            if (
+                step.can_spawn
+                and step.max_spawned_steps is not None
+                and step.max_spawned_steps > 10
+            ):
+                raise PlanValidationError(
+                    layer="business_rules",
+                    message=f"Step {step.step} max_spawned_steps={step.max_spawned_steps} exceeds limit of 10",
+                )
+
+        # context_from must reference valid earlier steps
+        for step in plan.graph:
+            for ref in step.context_from:
+                if ref >= step.step:
+                    raise PlanValidationError(
+                        layer="business_rules",
+                        message=f"Step {step.step} context_from references non-earlier step {ref}",
+                    )
+                if ref not in step_set:
+                    raise PlanValidationError(
+                        layer="business_rules",
+                        message=f"Step {step.step} context_from references non-existent step {ref}",
+                    )
+
+        # --- v6.1 trust boundary & spawning rules ---
+
+        step_by_num = {s.step: s for s in plan.graph}
+
+        # Rule A — Default-untrusted (§8.2): Tier 2 Reasoner must not
+        # reference an API step via context_from without an intervening
+        # Tier 1 sanitization step in the dependency chain.
+        for step in plan.graph:
+            if step.type == "llm_reasoning" and step.trust_level == "trusted":
+                for ref in step.context_from:
+                    ref_step = step_by_num.get(ref)
+                    if ref_step is None:
+                        continue  # already caught above
+                    if ref_step.type == "api":
+                        raise PlanValidationError(
+                            layer="business_rules",
+                            message=(
+                                f"Trust boundary violation: Tier 2 Reasoner step {step.step} "
+                                f"has context_from referencing API step {ref} directly. "
+                                f"A Tier 1 sanitization step (trust_level='untrusted_input') "
+                                f"must intervene."
+                            ),
+                        )
+
+        # Rule B — No recursive spawning (§2.3.2 rule 3): spawned steps
+        # cannot spawn further steps.
+        for step in plan.graph:
+            if step.spawned_by is not None and step.can_spawn:
+                raise PlanValidationError(
+                    layer="business_rules",
+                    message=(
+                        f"Step {step.step} is spawned (spawned_by={step.spawned_by}) "
+                        f"but has can_spawn=true. Spawned steps cannot spawn further steps."
+                    ),
+                )
+
+        # Rule C — Inherited plugins (§2.3.2 rule 4): all tools referenced
+        # by steps with can_spawn must be in the plan's plugins array.
+        plan_plugins = set(plan.plugins)
+        for step in plan.graph:
+            if step.can_spawn and step.uses not in plan_plugins:
+                raise PlanValidationError(
+                    layer="business_rules",
+                    message=(
+                        f"Step {step.step} has can_spawn=true but uses tool '{step.uses}' "
+                        f"which is not in the plan's plugins array."
+                    ),
+                )
+
+        # Rule D — Booker HITL on spawned steps (§2.3.2 rule 5): any
+        # spawned Booker step must also have a gate_id for HITL approval.
+        spawned_booker_no_gate = [
+            s.step
+            for s in plan.graph
+            if s.spawned_by is not None and s.role == "Booker" and s.gate_id is None
+        ]
+        if spawned_booker_no_gate:
+            raise PlanValidationError(
+                layer="business_rules",
+                message=(
+                    f"Spawned Booker steps {spawned_booker_no_gate} missing gate_id. "
+                    f"All Booker steps (including spawned) require HITL approval."
+                ),
             )
 
         # Step args size check

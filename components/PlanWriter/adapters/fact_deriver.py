@@ -73,8 +73,13 @@ def derive_fact(
     action = _build_action_summary(intent_type)
     entity_summary = _build_entity_summary(entities)
 
+    # Check for Reasoner/hybrid execution steps
+    reasoning_summary = _build_reasoning_summary(plan)
+
     if outcome.success:
         fact_text = _build_success_text(action, entity_summary, intent_type)
+        if reasoning_summary:
+            fact_text = f"{fact_text} ({reasoning_summary})"
     else:
         error_summary = _build_error_summary(outcome)
         fact_text = _build_failure_text(action, error_summary)
@@ -87,6 +92,22 @@ def derive_fact(
         source_plan_id=plan_id,
         ttl_days=DEFAULT_FACT_TTL_DAYS,
     )
+
+
+def _build_reasoning_summary(plan: Plan) -> str:
+    """Build a summary of LLM reasoning steps in the plan.
+
+    Example: Plan with 2 Reasoner steps -> "LLM analyzed 2 reasoning steps"
+    Example: Plan with 0 Reasoner steps -> ""
+    """
+    reasoning_steps = [s for s in plan.graph if s.role == "Reasoner" or s.type == "llm_reasoning"]
+    if not reasoning_steps:
+        return ""
+
+    count = len(reasoning_steps)
+    if count == 1:
+        return "LLM analyzed 1 reasoning step"
+    return f"LLM analyzed {count} reasoning steps"
 
 
 def _build_entity_summary(entities: dict) -> str:

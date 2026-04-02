@@ -1,6 +1,6 @@
 # Component Implementation Status
 
-**Last Updated**: 2026-03-20
+**Last Updated**: 2026-03-27
 **Total Components**: 16 (across 4 layers)
 
 Legend:
@@ -55,31 +55,46 @@ Legend:
 
 ---
 
-## Domain Layer (6 components)
+## Domain Layer (7 components)
 
 ### Intake
-- SPEC.md: ✗
-- LLD.md: ✗
-- Code: ✗
-- Tests: ✗
-- Schemas: ✗
-- **Purpose**: Understand user intent across multiple messages
+- SPEC.md: ✓
+- LLD.md: ✓
+- Code: ✓
+- Tests: ✓ (60 passing)
+- Schemas: ✓
+- **Purpose**: Understand user intent across multiple messages (multi-turn, LLM parsing, Redis sessions)
+- **Status**: ✅ **COMPLETED** - Multi-turn intent collection, LLM parsing via AnthropicAdapter, Redis sessions
+- **PR**: [#14](https://github.com/AnantshreeChandola/Personal-agent/pull/14) - Intake implementation
 
 ### ContextRAG
-- SPEC.md: ✗
-- LLD.md: ✗
-- Code: ✗
-- Tests: ✗
-- Schemas: ✗
-- **Purpose**: Gather relevant context (≤2KB, typed Evidence items)
+- SPEC.md: ✓
+- LLD.md: ✓
+- Code: ✓
+- Tests: ✓ (70 passing)
+- Schemas: ✓
+- **Purpose**: Gather relevant context (≤2KB, typed Evidence items) from 4 Memory Layer sources
+- **Status**: ✅ **COMPLETED** - Tiered evidence gathering, 2048-byte budget, library component
+- **PR**: [#12](https://github.com/AnantshreeChandola/Personal-agent/pull/12) - ContextRAG implementation
 
 ### Planner
+- SPEC.md: ✓
+- LLD.md: ✓
+- Code: ✓
+- Tests: ✓ (67 passing)
+- Schemas: ✓
+- **Purpose**: Create deterministic step-by-step plans (API + LLM reasoning steps)
+- **Status**: ✅ **COMPLETED** - Anthropic Claude API, 4-level fallback, 3-layer validation, circuit breakers
+- **PR**: [#13](https://github.com/AnantshreeChandola/Personal-agent/pull/13) - Planner implementation
+
+### PolicyEngine
 - SPEC.md: ✗
 - LLD.md: ✗
-- Code: ✗
-- Tests: ✗
-- Schemas: ✗
-- **Purpose**: Create deterministic step-by-step plans
+- Code: ✓
+- Tests: ✓
+- Schemas: ✓
+- **Purpose**: Evaluate policy rules for LLM reasoning steps, issue attestations, enforce HITL for critical actions
+- **Status**: Code implemented (service, adapters, cache, DB tables, DI wiring, tests). SPEC and LLD docs not yet written.
 
 ### Signer
 - SPEC.md: ✓
@@ -113,15 +128,7 @@ Legend:
 
 ---
 
-## Orchestration Layer (5 components)
-
-### WorkflowBuilder
-- SPEC.md: ✗
-- LLD.md: ✗
-- Code: ✗
-- Tests: ✗
-- Schemas: ✗
-- **Purpose**: Convert plan dependency graph → n8n workflow JSON
+## Orchestration Layer (4 components)
 
 ### PreviewOrchestrator
 - SPEC.md: ✗
@@ -145,7 +152,7 @@ Legend:
 - Code: ✗
 - Tests: ✗
 - Schemas: ✗
-- **Purpose**: Do actual work with idempotency and compensation
+- **Purpose**: Do actual work with idempotency and compensation (absorbs WorkflowBuilder's DAG traversal and MCP dispatch)
 
 ### ExecutionMonitor
 - SPEC.md: ✗
@@ -153,7 +160,7 @@ Legend:
 - Code: ✗
 - Tests: ✗
 - Schemas: ✗
-- **Purpose**: Detect stuck executions and trigger workflow-level retries (polling service)
+- **Purpose**: Detect stuck executions and enforce timeout policies (infrastructure watchdog)
 
 ---
 
@@ -172,24 +179,26 @@ Legend:
 ## Summary Statistics
 
 ### By Status
-- ✓ Completed: 7/16 (44%)
+- ✓ Completed: 10/16 (63%)
 - WIP In Progress: 0/16 (0%)
-- ✗ Not Started: 9/16 (56%)
+- ✗ Not Started: 6/16 (38%)
 
 ### By Layer
 - Memory Layer: 4/4 completed (ProfileStore ✅, PlanLibrary ✅, History ✅, VectorIndex ✅)
-- Domain Layer: 3/6 completed (Signer ✅, PluginRegistry ✅, PlanWriter ✅)
-- Orchestration Layer: 0/5 started
+- Domain Layer: 6/7 completed (Intake ✅, ContextRAG ✅, Planner ✅, Signer ✅, PluginRegistry ✅, PlanWriter ✅)
+- Orchestration Layer: 0/4 started
 - Platform Layer: 0/1 started
 
 ### Critical Path (Recommended Order)
 1. **Phase 1**: Foundation ✅
    - ~~ProfileStore~~ ✅, ~~PlanLibrary~~ ✅, ~~History~~ ✅, ~~PluginRegistry~~ ✅, ~~Signer~~ ✅, ~~VectorIndex~~ ✅, ~~PlanWriter~~ ✅
-2. **Phase 2**: Planning
-   - Intake, ContextRAG, Planner
-3. **Phase 3**: Orchestration
-   - WorkflowBuilder, PreviewOrchestrator, ApprovalGate, ExecuteOrchestrator
-4. **Phase 4**: Advanced
+2. **Phase 2**: Planning ✅
+   - ~~Intake~~ ✅, ~~ContextRAG~~ ✅, ~~Planner~~ ✅
+3. **Phase 2.5**: Policy & Adaptive Infrastructure
+   - PolicyEngine
+4. **Phase 3**: Orchestration
+   - PreviewOrchestrator, ApprovalGate, ExecuteOrchestrator
+5. **Phase 4**: Advanced
    - ExecutionMonitor, Audit
 
 ---

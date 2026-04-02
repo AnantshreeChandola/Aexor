@@ -1,88 +1,143 @@
 # Personal Agent
 
 **Status:** Architecture & Scaffolding Phase
-**Default Timezone:** America/Chicago
+**Architecture:** HLD v6.1 / GLOBAL_SPEC v3.0
+**Deployment:** Self-hosted, single-tenant, multi-user
 
-A preview-first personal assistant system with deterministic planning, multi-agent orchestration, and component-first architecture. The system uses asynchronous runtime agents for responsibility isolation, enabling parallel task execution across calendars, shopping, travel, and more.
+A preview-first personal assistant with deterministic planning and adaptive execution. The system produces immutable, signed plan DAGs (revision 0) where LLM Reasoner steps can spawn bounded new steps at runtime, creating versioned revisions with PolicyEngine attestations. All execution runs through a pure Python/FastAPI runtime with MCP tool invocations — no external workflow engines.
 
 ---
 
-## Tech Stack
+## How It Works
 
-### Core Backend
-- **Python 3.11+** with type hints
-- **FastAPI** for async HTTP
-- **Pydantic v2** for data validation
-- **SQLAlchemy 2.0** with asyncpg
-- **aioredis** for async Redis
+```
+User Request → Understand → Plan → Preview → Approve → Execute → Learn
+     ↓            ↓          ↓        ↓          ↓         ↓        ↓
+  [Message]   [Intent]   [Signed   [Show    [Confirm]  [Do It]  [Remember]
+                          DAG]      Me]
+```
 
-### Orchestration
-- **n8n** (self-hosted) for all workflows with built-in persistence and scheduling
-- **ExecutionMonitor** (polling service) for stuck execution detection and workflow-level retries
-
-### Data Storage
-- **PostgreSQL 16** with pgvector extension
-- **Redis 7** for caching and coordination
-
-### AI/LLM
-- **Anthropic Claude API** (Sonnet 4/Opus) for planning and reasoning
-- **OpenAI API** for embeddings only
-- **No LangChain** - direct API calls for simplicity and control
-
-### Testing & Quality
-- **pytest** with async support
-- **ruff** for linting/formatting
-- **mypy** for static type checking
-
-### Infrastructure
-- **Docker** for local development and deployment
-- **GitHub Actions** for CI/CD
-
-> See [docs/architecture/Project_HLD.md](docs/architecture/Project_HLD.md#11-tech-stack) for detailed rationale and integration patterns.
+**Core flow:**
+1. **Intake** collects user intent across multiple messages (LLM parsing, Redis sessions)
+2. **ContextRAG** gathers relevant context from 4 Memory Layer sources (≤2KB budget)
+3. **Planner** generates a deterministic plan DAG (same inputs → same graph → same Ed25519 signature)
+4. **PreviewOrchestrator** shows what will happen (no side effects)
+5. **ApprovalGate** waits for user confirmation (JWT token, 15min TTL)
+6. **ExecuteOrchestrator** dispatches steps — API steps via MCP, reasoning via Anthropic API
+7. **PlanWriter** persists outcomes back to Memory Layer for future context
 
 ---
 
 ## Architecture
 
-The system follows a **component-first architecture** with:
+### 4 Layers, 16 Components
 
-- **Preview-first safety model** - all operations preview before execution
-- **Deterministic planning** - same inputs always produce same plan
-- **Six runtime agent roles** (logical categories, not separate services):
-  - Fetcher (one-time reads)
-  - Analyzer (data processing)
-  - Watcher (long-running monitoring)
-  - Resolver (disambiguation)
-  - Booker (writes with multi-user safe idempotency)
-  - Notifier (updates and alerts)
-- **Single orchestration runtime** - n8n for all workflows (short and long-running)
-- **ExecutionMonitor** - detects stuck executions and triggers workflow-level retries
-- **Ed25519 signatures** for plan integrity
-- **Human-in-the-loop gates** for approval workflows
+**Layer 1 — Memory & Persistence** (all implemented)
+| Component | Purpose |
+|-----------|---------|
+| ProfileStore | Stable user preferences and consent settings |
+| History | Normalized, PII-light facts about past actions (30-day TTL) |
+| PlanLibrary | All past plans with signatures and outcomes |
+| VectorIndex | Hybrid BM25 + semantic search (pgvector + ONNX Runtime) |
+
+**Layer 2 — Domain Services** (all implemented)
+| Component | Purpose |
+|-----------|---------|
+| Intake | Multi-turn intent collection with LLM parsing |
+| ContextRAG | Tiered evidence gathering from Memory Layer (≤2KB) |
+| Planner | Deterministic plan generation via Anthropic Claude API |
+| PolicyEngine | Policy rule evaluation, attestations, HITL enforcement |
+| Signer | Ed25519 plan signing and verification |
+| PluginRegistry | Tool catalog with scope verification and credential resolution |
+| PlanWriter | Outcome persistence with fact derivation |
+
+**Layer 3 — Orchestration** (not yet implemented)
+| Component | Purpose |
+|-----------|---------|
+| PreviewOrchestrator | Side-effect-free plan preview |
+| ApprovalGate | HITL approval workflow with JWT tokens |
+| ExecuteOrchestrator | Pure agentic runtime — MCP dispatch, two-tier LLM, spawning |
+| ExecutionMonitor | Stuck execution detection and timeout enforcement |
+
+**Layer 4 — Platform** (not yet implemented)
+| Component | Purpose |
+|-----------|---------|
+| Audit | Full audit trail for debugging and analytics |
+
+### Key Architectural Principles
+
+1. **Preview-first safety** — never execute without showing the user first
+2. **Deterministic planning with adaptive execution** — initial plan (revision 0) is immutable and signed; Reasoner steps may spawn bounded new steps at runtime, creating new revisions with PolicyAttestations
+3. **Pure agentic runtime** — Python ExecuteOrchestrator dispatches all steps via MCP (APIs) and Anthropic API (reasoning)
+4. **Two-tier LLM execution** — sandboxed Tier 1 (untrusted external data, no tools) + capable Tier 2 (agent reasoning, MCP tools)
+5. **Default-untrusted rule** — all external API data must pass through Tier 1 sanitization before reaching Tier 2 Reasoners
+6. **PolicyEngine governance** — deny-by-default; actions are only allowed when an explicit policy rule matches
+7. **Seven runtime roles** — Fetcher, Analyzer, Watcher, Resolver, Booker, Notifier, Reasoner
 
 ### Key Documents
-- [GLOBAL_SPEC.md](docs/architecture/GLOBAL_SPEC.md) - Universal operating contract
-- [Project_HLD.md](docs/architecture/Project_HLD.md) - High-level design and components
-- [PROJECT_STRUCTURE.md](docs/architecture/PROJECT_STRUCTURE.md) - Repository layout
+- [GLOBAL_SPEC.md](docs/architecture/GLOBAL_SPEC.md) — Universal operating contract (v3.0)
+- [Project_HLD.md](docs/architecture/Project_HLD.md) — High-level design with examples (v6.1)
+- [QUICK_REFERENCE.md](docs/architecture/QUICK_REFERENCE.md) — Tech stack, roles, and troubleshooting
+- [COMPONENT_STATUS.md](COMPONENT_STATUS.md) — Implementation progress per component
+
+---
+
+## Tech Stack
+
+| Category | Technology | Notes |
+|----------|-----------|-------|
+| Backend | Python 3.11+, FastAPI, Pydantic v2 | Async, type hints |
+| Database | PostgreSQL 16 + pgvector | Relational + vector + credential vault |
+| Cache | Redis 7 with hiredis | Sessions, idempotency, approval gates |
+| AI/LLM | **Anthropic Claude (sole paid external dependency)** | Planning + intent parsing + runtime reasoning |
+| Embeddings | ONNX Runtime (all-MiniLM-L6-v2, 384-dim) | Fully local CPU inference, zero API cost |
+| Signing | Ed25519 (cryptography + PyNaCl) | Plan integrity + PolicyEngine attestations |
+| Credentials | AES-256-GCM vault in PostgreSQL | Master key from env; LLM never sees plaintext |
+| Testing | pytest, ruff, mypy | Async support, strict type checking |
+| CI/CD | GitHub Actions | Lint, test, type-check |
+
+### LLM Models
+
+| Purpose | Default Model | Env Var |
+|---------|--------------|---------|
+| Planning (primary) | `claude-sonnet-4-5-20250929` | `PLANNER_PRIMARY_MODEL` |
+| Planning (fallback) | `claude-haiku-4-5-20251001` | `PLANNER_FALLBACK_MODEL` |
+| Intent parsing | `claude-haiku-4-5-20251001` | `INTAKE_PARSER_MODEL` |
+| Runtime reasoning | Per-step via `reasoning_config.model` | Set in plan by Planner |
+| Embeddings | `all-MiniLM-L6-v2` (ONNX, local) | Bundled, no API |
 
 ---
 
 ## Project Structure
 
 ```
-/Users/anantshreechandola/Desktop/Personal-agent/
-├── components/          # Self-contained component packets
-│   └── <Name>/          # SPEC.md, LLD.md, schemas/, tests/, code
-├── usecases/            # End-to-end use case definitions
-│   └── <UseCase>/       # SPEC.md, LLD.md, plans/, tests/, fixtures/
-├── shared/             # Cross-component utilities
-│   └── schemas/         # Shared schemas (Intent, Evidence, Plan, Signature)
+Personal-agent/
+├── components/           # Self-contained component packages
+│   ├── Intake/           # Multi-turn intent collection
+│   ├── ContextRAG/       # Evidence gathering
+│   ├── Planner/          # Plan generation + validation
+│   ├── PolicyEngine/     # Policy rules + attestations
+│   ├── Signer/           # Ed25519 signing
+│   ├── PluginRegistry/   # Tool catalog
+│   ├── PlanWriter/       # Outcome persistence
+│   ├── ProfileStore/     # User preferences
+│   ├── History/          # Past action facts
+│   ├── PlanLibrary/      # Plan storage
+│   └── VectorIndex/      # Hybrid search
+├── shared/               # Cross-component infrastructure
+│   ├── schemas/          # Pydantic models (Intent, Plan, Signature, Evidence, Policy)
+│   ├── database/         # SQLAlchemy models, session management
+│   ├── middleware/        # Auth middleware
+│   ├── security/         # Encryption utilities
+│   ├── api/              # Shared error handlers
+│   ├── app.py            # FastAPI app factory with DI wiring
+│   └── dependencies.py   # Dependency injection (get_*_service)
 ├── docs/
-│   ├── architecture/    # GLOBAL_SPEC, HLD, ADRs
-│   └── dev/             # Development guides (PYTHON_GUIDE.md)
-├── tests/               # Acceptance and contract tests
-├── .claude/             # Claude Code agents and commands
-└── .github/workflows/   # CI/CD pipelines
+│   └── architecture/     # GLOBAL_SPEC, Project_HLD, QUICK_REFERENCE
+├── specs/                # Feature specifications
+├── tests/                # Shared acceptance and contract tests
+├── .github/workflows/    # CI pipeline
+└── pyproject.toml        # Dependencies, ruff, mypy, pytest config
 ```
 
 ---
@@ -91,67 +146,47 @@ The system follows a **component-first architecture** with:
 
 ### Prerequisites
 - Python 3.11+
-- Docker & Docker Compose
-- n8n instance (local or cloud)
-- PostgreSQL 16 with pgvector
+- PostgreSQL 16 with pgvector extension
 - Redis 7
+- Anthropic API key (`ANTHROPIC_API_KEY`)
 
 ### Getting Started
 
-1. **Clone the repository**
-   ```bash
-   git clone <repo-url>
-   cd Personal-agent
-   ```
+```bash
+# Clone and setup
+git clone <repo-url>
+cd Personal-agent
+python -m venv venv && source venv/bin/activate
+pip install -e ".[dev]"
 
-2. **Follow Python setup**
-   See [docs/dev/PYTHON_GUIDE.md](docs/dev/PYTHON_GUIDE.md) for environment setup, dependencies, and coding standards.
+# Configure environment
+cp .env.example .env  # Add ANTHROPIC_API_KEY, database URLs, signing keys
 
-3. **Review architecture**
-   Read [docs/architecture/Project_HLD.md](docs/architecture/Project_HLD.md) to understand the system design.
+# Run tests
+pytest components/ tests/
 
-4. **Create a feature branch**
-   ```bash
-   git checkout -b feat/<short-name>
-   ```
+# Lint
+ruff check .
+```
 
-5. **Run tests**
-   ```bash
-   pytest tests/
-   ```
+### Creating a Feature Branch
+```bash
+git checkout -b feat/<short-name>
+# Implement with tests → iterate until CI green
+# Open PR linking relevant spec
+```
 
 ---
 
 ## Contributing
 
-Before making changes:
-1. Read [.claude/CLAUDE.md](.claude/CLAUDE.md) for project rules and working context
-2. Read [docs/architecture/GLOBAL_SPEC.md](docs/architecture/GLOBAL_SPEC.md) for universal contracts
-3. Create a branch `feat/<short-name>` and link relevant specs
-4. Ensure CI passes before merging
-
-### Component Development
-Each component must include:
-- `SPEC.md` - Declares conformance to GLOBAL_SPEC
-- `LLD.md` - Low-level design and implementation details
-- `schemas/` - Pydantic models and validation
-- `tests/` - Unit and integration tests
-- Code implementing the component
-
-### Workflow
-1. Create/update component SPEC → get approval
-2. Design LLD → review
-3. Implement with tests → iterate until CI green
-4. Open PR linking spec and (if applicable) draft plan in `/plans/drafts/`
+1. Read [GLOBAL_SPEC.md](docs/architecture/GLOBAL_SPEC.md) for universal contracts
+2. Read [Project_HLD.md](docs/architecture/Project_HLD.md) for system design and examples
+3. Each component follows the structure: `SPEC.md`, `LLD.md`, `schemas/`, `tests/`, code
+4. Create branch `feat/<short-name>`, ensure CI passes, open PR
 
 ---
 
 ## License
 
-[License details to be added]
-
----
-
-## Contact
-
-[Contact information to be added]
+MIT — see [pyproject.toml](pyproject.toml)

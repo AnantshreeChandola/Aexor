@@ -173,6 +173,8 @@ class PlanService:
             total_steps=outcome.get("total_steps", step_count),
             failed_step=outcome.get("failed_step"),
             context_data=outcome.get("context_data"),
+            final_graph_json=outcome.get("final_graph_json"),
+            plan_revision=outcome.get("plan_revision", 0),
         )
 
         metrics_db = PlanMetricsDB(

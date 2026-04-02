@@ -22,7 +22,7 @@ class PromptBuilder:
 
     def build_system_prompt(self) -> str:
         """Static system prompt with Plan JSON schema instructions."""
-        return """You are a deterministic plan generator. Your job is to produce a valid JSON execution plan.
+        return """You are a hybrid plan generator. Your job is to produce a valid JSON execution plan.
 
 ## Output Format
 Return ONLY a valid JSON object (no markdown, no code fences) matching this schema:
@@ -32,20 +32,33 @@ Return ONLY a valid JSON object (no markdown, no code fences) matching this sche
     {
       "step": <int, 1-indexed>,
       "mode": "interactive" | "durable",
-      "role": "Fetcher" | "Analyzer" | "Watcher" | "Resolver" | "Booker" | "Notifier",
+      "role": "Fetcher" | "Analyzer" | "Watcher" | "Resolver" | "Booker" | "Notifier" | "Reasoner",
       "uses": "<tool_id from catalog>",
       "call": "<operation_id>",
       "args": { ... },
       "after": [<step numbers this depends on>],
       "timeout_s": <int, 5-3600, default 30>,
       "gate_id": "<required for Booker role, null otherwise>",
-      "dry_run": true
+      "dry_run": true,
+      "type": "api" | "llm_reasoning" | "policy_check",
+      "context_from": [<step numbers whose results feed into this step>],
+      "can_spawn": false,
+      "max_spawned_steps": null | <int, 1-10>,
+      "policy_ref": "<policy_id or null>",
+      "reasoning_config": null | {
+        "model": "<model_id>",
+        "temperature": <float, 0.0-1.0>,
+        "max_tokens": <int, 256-8192>,
+        "system_prompt_ref": "<prompt template reference>",
+        "output_schema_ref": null | "<json schema reference>"
+      }
     }
   ],
   "constraints": {
     "scopes": ["<aggregated OAuth scopes from all tools used>"],
     "ttl_s": 900,
-    "max_retries": 3
+    "max_retries": 3,
+    "policy_version": 0
   },
   "plugins": ["<unique tool_ids used in graph>"]
 }
@@ -65,7 +78,17 @@ Return ONLY a valid JSON object (no markdown, no code fences) matching this sche
    - Resolver: Resolve conflicts or ambiguities
    - Booker: Actions that modify external state (requires gate_id)
    - Notifier: Send notifications or alerts
-9. Return raw JSON only. No explanation, no markdown wrapping."""
+   - Reasoner: LLM-based adaptive reasoning (requires type="llm_reasoning", policy_ref, reasoning_config)
+9. Step types:
+   - "api" (default): Deterministic tool call
+   - "llm_reasoning": LLM-based adaptive decision — MUST have role="Reasoner", policy_ref, and reasoning_config
+   - "policy_check": Policy evaluation gate — MUST have policy_ref
+10. Spawning rules:
+   - Steps with can_spawn=true may create child steps at runtime (max_spawned_steps ≤ 10)
+   - Spawned steps inherit their parent's policy_ref
+   - No recursive spawning (spawned steps cannot themselves spawn)
+   - Total graph size must stay ≤ 100 steps
+11. Return raw JSON only. No explanation, no markdown wrapping."""
 
     def build_user_prompt(
         self,

@@ -33,14 +33,14 @@ It does NOT expose user-facing Preview/Execute wrappers. It operates as a librar
 | Document | Version | Reference |
 |----------|---------|-----------|
 | GLOBAL_SPEC.md | v2.2 (2026-03-05) | §3 NFRs (vector search < 100ms), §7 Context Policy |
-| Project_HLD.md | Current | §4 Memory Layer, §12 VectorIndex deferred (now un-deferred) |
+| Project_HLD.md | v5.1 | §4 Memory Layer (VectorIndex active) |
 | MODULAR_ARCHITECTURE.md | v1.2 | §3 Table Ownership (vectors table), §4 Component Dependency Matrix |
 | SHARED_INFRASTRUCTURE.md | v1.0.0 | §1.1 PostgreSQL, §1.2 Users Table |
 
 **Deviations from existing architecture docs**:
-- MODULAR_ARCHITECTURE §3 lists `vectors` table with 1536-dim OpenAI embeddings. This LLD uses `plan_embeddings` table (already in models.py) with 384-dim local ONNX embeddings. Requires MODULAR_ARCHITECTURE update.
-- MODULAR_ARCHITECTURE §4 lists OpenAI API as VectorIndex external dependency. This LLD uses local ONNX Runtime instead. Requires MODULAR_ARCHITECTURE update.
-- Project_HLD.md §12 marks VectorIndex as deferred. Requires un-deferral update.
+- ~~MODULAR_ARCHITECTURE §3 listed `vectors` table with 1536-dim OpenAI embeddings~~ — **Resolved in v1.5**: Updated to `plan_embeddings` table with 384-dim local ONNX embeddings.
+- ~~MODULAR_ARCHITECTURE §4 listed OpenAI API as VectorIndex external dependency~~ — **Resolved in v1.5**: Updated to local ONNX Runtime.
+- ~~Project_HLD.md §12 marked VectorIndex as deferred~~ — **Resolved in v5.1**: VectorIndex is now active with hybrid BM25 + semantic search.
 
 ---
 
@@ -1000,7 +1000,7 @@ PostgreSQL's `ts_rank_cd` uses cover density ranking (TF-IDF variant), not true 
 | pgvector extension not in dev PostgreSQL | Medium | Docker Compose uses `pgvector/pgvector:pg16` image; document setup |
 | tsvector insufficient for complex queries | Low | Upgrade path: ParadeDB pg_search (open-source BM25) |
 | Embedding quality (MiniLM-384) insufficient | Low | Upgrade path: larger model (e5-base, 768-dim) with same ONNX pattern |
-| MODULAR_ARCHITECTURE docs still say "deferred" | Medium | Must update Project_HLD, MODULAR_ARCHITECTURE as part of this work |
+| ~~MODULAR_ARCHITECTURE docs still say "deferred"~~ | ~~Medium~~ | **Resolved**: Project_HLD v5.1 and MODULAR_ARCHITECTURE v1.5 updated — VectorIndex active |
 
 ### Open Questions
 
