@@ -207,9 +207,7 @@ async def lifespan(app: FastAPI):
             policy_service=app.state.policy_service,
             registry_service=app.state.registry_service,
             plan_writer_service=app.state.plan_writer_service,
-            mcp_client=MCPClientAdapter(
-                registry_service=app.state.registry_service
-            ),
+            mcp_client=MCPClientAdapter(registry_service=app.state.registry_service),
             llm_client=AnthropicReasoningAdapter(),
             credential_vault=CredentialVaultAdapter(db=db),
             redis_client=intake_redis,
