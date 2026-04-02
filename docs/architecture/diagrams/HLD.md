@@ -1,26 +1,50 @@
 ```mermaid
-  flowchart LR
-  U[User] --> IN[Intake & Reason]
-  IN --> RAG((ContextRAG: prefs/history/exemplars))
-  IN --> PLIB[Plan Library]
-  PLIB --> RET[Retrieve & Score Plans]
-  IN --> REG[Plugin Registry- MCP bindings]
-  REG --> SEL[Select Tools]
-  SEL --> PLAN[Planner dry_run plan]
-  PLAN --> SIG[Signer Ed25519]
-  SIG --> PREV[Preview Orchestrator MCP, read-only]
-  PREV -->|Preview card + evidence| U
-  U -->|Approve Gate A/B/…| GATE[Approval Gates]
-  GATE --> EXE[ExecuteOrchestrator MCP + Anthropic API]
-  EXE --> CRED[Credential Vault AES-256-GCM decrypt]
-  EXE --> MCP[MCP Tool Invocations GCal/Gmail/HTTP/Slack…]
-  EXE --> SCHED[APScheduler + Redis for long jobs]
-  MCP --> AUD[Audit & Metrics]
-  SCHED --> AUD
-  MCP --> PW[PlanWriter → Plan Library + History]
-  SCHED --> PW
-  AUD --> U
-  PW --> RAG
-  ```
+flowchart LR
+  %% ── Interface Layer ──
+  U[User] --> IN[Intake]
 
-  context aware, personalized, self learning.
+  %% ── Memory Layer ──
+  IN --> RAG((ContextRAG))
+  RAG --> PS[(ProfileStore)]
+  RAG --> HIST[(History)]
+  RAG --> PLIB[(PlanLibrary)]
+  RAG --> VI[(VectorIndex)]
+
+  %% ── Domain Layer: Planning ──
+  IN --> REG[PluginRegistry\nMCP tool catalog]
+  REG --> PLAN[Planner\nAnthropic Claude API]
+  RAG --> PLAN
+  PLAN --> SIG[Signer\nEd25519]
+
+  %% ── Orchestration Layer: Preview ──
+  SIG --> PREV[PreviewOrchestrator\nMCP read-only]
+  PREV -->|Preview card + evidence| U
+
+  %% ── Orchestration Layer: Approve ──
+  U -->|Approve Gate A/B/…| GATE[ApprovalGate\nJWT tokens, Redis]
+
+  %% ── Orchestration Layer: Execute ──
+  GATE --> EXE[ExecuteOrchestrator\nDAG dispatch]
+  EXE --> CRED[Credential Vault\nAES-256-GCM]
+  EXE --> MCP[MCP Tool Invocations\nAPI steps]
+  EXE --> LLM[Anthropic API\nTier 1 sandbox / Tier 2 agent]
+  EXE --> PE[PolicyEngine\nspawn eval, deny-by-default]
+  EXE --> SCHED[APScheduler + Redis\ndurable / long jobs]
+
+  %% ── Orchestration Layer: Monitor ──
+  EXE -.-> MON[ExecutionMonitor\nstuck detection]
+
+  %% ── Write-back ──
+  MCP --> PW[PlanWriter]
+  LLM --> PW
+  SCHED --> PW
+  PW --> PLIB
+  PW --> HIST
+  PW --> VI
+
+  %% ── Platform Layer ──
+  MCP --> AUD[Audit & Metrics]
+  LLM --> AUD
+  SCHED --> AUD
+  AUD --> U
+```
