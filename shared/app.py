@@ -189,6 +189,35 @@ async def lifespan(app: FastAPI):
         logger.warning("Intake init failed: %s", exc)
         app.state.intake_service = None
 
+    # ExecuteOrchestrator service (Orchestration Layer -- graceful degradation)
+    try:
+        from components.ExecuteOrchestrator.adapters.credential_vault import (
+            CredentialVaultAdapter,
+        )
+        from components.ExecuteOrchestrator.adapters.llm_client import (
+            AnthropicReasoningAdapter,
+        )
+        from components.ExecuteOrchestrator.adapters.mcp_client import MCPClientAdapter
+        from components.ExecuteOrchestrator.service.execute_service import (
+            create_execute_service,
+        )
+
+        app.state.execute_service = create_execute_service(
+            signer_service=app.state.signer_service,
+            policy_service=app.state.policy_service,
+            registry_service=app.state.registry_service,
+            plan_writer_service=app.state.plan_writer_service,
+            mcp_client=MCPClientAdapter(
+                registry_service=app.state.registry_service
+            ),
+            llm_client=AnthropicReasoningAdapter(),
+            credential_vault=CredentialVaultAdapter(db=db),
+            redis_client=intake_redis,
+        )
+    except Exception as exc:
+        logger.warning("ExecuteOrchestrator init failed: %s", exc)
+        app.state.execute_service = None
+
     logger.info("All services initialized")
 
     yield
@@ -229,6 +258,10 @@ def create_app() -> FastAPI:
     app.include_router(history_router)
     app.include_router(registry_router)
     app.include_router(intake_router)
+
+    from components.ExecuteOrchestrator.api.routes import router as execute_router
+
+    app.include_router(execute_router)
 
     # Root health check
     @app.get("/health")
