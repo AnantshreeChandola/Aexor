@@ -26,9 +26,7 @@ class PlanStep(BaseModel):
 
     step: int = Field(..., ge=1, description="Step number (1-indexed)")
 
-    mode: Literal["interactive", "durable"] = Field(
-        ..., description="Execution mode"
-    )
+    mode: Literal["interactive", "durable"] = Field(..., description="Execution mode")
 
     role: Literal[
         "Fetcher", "Analyzer", "Watcher", "Resolver", "Booker", "Notifier", "Reasoner"
