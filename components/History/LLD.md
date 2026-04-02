@@ -867,7 +867,7 @@ class StorageError(HistoryError):
 
 ### Relevant ADRs Impacting Design
 - **ADR-0001 Component-first**: Self-contained packet structure with `components/History/` layout
-- **VectorIndex Deferred** (Project_HLD.md section 12): History stores structured facts only; semantic search is VectorIndex responsibility
+- **VectorIndex Active** (Project_HLD.md §4): History stores structured facts only; semantic search is VectorIndex responsibility (hybrid BM25 + semantic via pgvector, ONNX Runtime)
 
 ### Component Design Adherence
 - **Memory Layer Patterns**: Direct database access without orchestration logic

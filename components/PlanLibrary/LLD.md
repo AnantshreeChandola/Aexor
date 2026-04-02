@@ -17,7 +17,7 @@ PlanLibrary is a Memory Layer component that stores executed plans with their ou
 - **Evidence Item Generation**: Integration with ContextRAG for plan pattern context
 - **Performance Analytics**: Execution metrics for system optimization
 
-> **Note**: Semantic similarity search (embeddings) is deferred to the VectorIndex component. PlanLibrary provides structured queries only (by intent_type, plan_id, success rate). See Project_HLD.md §12.
+> **Note**: Semantic similarity search (embeddings) is handled by the VectorIndex component (hybrid BM25 + semantic via pgvector, ONNX Runtime). PlanLibrary provides structured queries only (by intent_type, plan_id, success rate).
 
 ### Layer Placement
 **Memory Layer** - Direct database interactions with no business logic orchestration. This component provides data persistence and retrieval services to upper layers without implementing preview/execute patterns (internal component).
@@ -413,7 +413,7 @@ Not applicable - PlanLibrary is an internal component with no user-facing operat
 - **Test-First Development**: Comprehensive test coverage with TDD methodology
 
 ### New Decisions Requiring ADR Creation
-- **VectorIndex Deferred**: Embedding/similarity search deferred to VectorIndex component (see Project_HLD.md §12)
+- **VectorIndex Active**: Embedding/similarity search handled by VectorIndex component (hybrid BM25 + semantic via pgvector, ONNX Runtime)
 
 ---
 

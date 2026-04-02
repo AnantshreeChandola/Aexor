@@ -136,6 +136,8 @@ class PlanOutcomeDB(BaseModel):
     total_steps: int = Field(..., ge=0)
     failed_step: int | None = None
     context_data: dict[str, Any] | None = None
+    final_graph_json: dict[str, Any] | None = None
+    plan_revision: int = Field(default=0, ge=0)
 
 
 class PlanMetricsDB(BaseModel):

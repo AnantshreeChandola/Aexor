@@ -146,6 +146,16 @@ async def lifespan(app: FastAPI):
         logger.warning("Planner init failed (ANTHROPIC_API_KEY may not be set): %s", exc)
         app.state.planner_service = None
 
+    # PolicyEngine service (library -- no routes, cache-optional)
+    from components.PolicyEngine.adapters.db import PolicyDatabaseAdapter
+    from components.PolicyEngine.service.policy_service import create_policy_service
+
+    policy_db = PolicyDatabaseAdapter()
+    app.state.policy_service = create_policy_service(
+        db_adapter=policy_db,
+        redis_client=None,  # Redis wired below when available
+    )
+
     # Intake service (API layer -- Redis sessions, LLM parsing)
     intake_redis = None
     try:
@@ -170,6 +180,11 @@ async def lifespan(app: FastAPI):
             planner_service=app.state.planner_service,
             preference_service=app.state.preference_service,
         )
+
+        # Wire Redis into PolicyEngine cache now that it's available
+        from components.PolicyEngine.adapters.cache import PolicyCacheAdapter
+
+        app.state.policy_service._cache = PolicyCacheAdapter(intake_redis)
     except Exception as exc:
         logger.warning("Intake init failed: %s", exc)
         app.state.intake_service = None

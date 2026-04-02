@@ -93,6 +93,8 @@ class DatabaseAdapter:
                         total_steps=outcome.total_steps,
                         failed_step=outcome.failed_step,
                         context_data=outcome.context_data,
+                        final_graph_json=outcome.final_graph_json,
+                        plan_revision=outcome.plan_revision,
                     )
                 )
 
@@ -295,6 +297,8 @@ class DatabaseAdapter:
                     total_steps=row.total_steps,
                     failed_step=row.failed_step,
                     context_data=row.context_data,
+                    final_graph_json=row.final_graph_json,
+                    plan_revision=row.plan_revision,
                 )
                 for row in rows
             ]

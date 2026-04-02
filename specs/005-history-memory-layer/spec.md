@@ -26,7 +26,7 @@
 * **Session Data**: Temporary context from current conversation (owned by Intake via Redis, Tier 1)
 * **User Preferences**: Stable settings like meeting duration or work hours (owned by ProfileStore, Tier 2)
 * **Plan Storage**: Full plan graphs, signatures, and execution outcomes (owned by PlanLibrary)
-* **Vector Embeddings**: Semantic similarity search over facts (owned by VectorIndex, deferred)
+* **Vector Embeddings**: Semantic similarity search over facts (owned by VectorIndex — hybrid BM25 + semantic via pgvector, ONNX Runtime)
 * **Raw Data Storage**: Storing raw emails, API responses, or unprocessed provider data
 * **Plan Execution**: Running or orchestrating plans (owned by ExecuteOrchestrator)
 * **Fact Generation**: Creating derived facts from raw execution data (owned by PlanWriter, which calls History to persist)

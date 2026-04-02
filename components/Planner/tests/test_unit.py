@@ -175,8 +175,27 @@ class TestPromptBuilder:
 
     def test_system_prompt_contains_all_roles(self):
         prompt = self.builder.build_system_prompt()
-        for role in ["Fetcher", "Analyzer", "Watcher", "Resolver", "Booker", "Notifier"]:
+        for role in [
+            "Fetcher",
+            "Analyzer",
+            "Watcher",
+            "Resolver",
+            "Booker",
+            "Notifier",
+            "Reasoner",
+        ]:
             assert role in prompt
+
+    def test_system_prompt_contains_hybrid_step_types(self):
+        prompt = self.builder.build_system_prompt()
+        assert "llm_reasoning" in prompt
+        assert "policy_check" in prompt
+        assert "api" in prompt
+
+    def test_system_prompt_contains_spawning_rules(self):
+        prompt = self.builder.build_system_prompt()
+        assert "can_spawn" in prompt
+        assert "max_spawned_steps" in prompt
 
     def test_system_prompt_contains_dry_run_rule(self):
         prompt = self.builder.build_system_prompt()
@@ -347,13 +366,13 @@ class TestPlanValidator:
         assert exc_info.value.layer == "business_rules"
 
     @pytest.mark.asyncio
-    async def test_layer3_exceeds_50_steps_raises_business_error(self):
+    async def test_layer3_exceeds_100_steps_raises_error(self):
+        """Plans with >100 steps are rejected (by schema or business rules layer)."""
         with pytest.raises(PlanValidationError) as exc_info:
             await self.validator.validate(
                 SAMPLE_PLAN_TOO_MANY_STEPS, SAMPLE_INTENT, 1, {"system.echo"}
             )
-        assert exc_info.value.layer == "business_rules"
-        assert "50" in exc_info.value.message or "51" in exc_info.value.message
+        assert exc_info.value.layer in ("schema", "business_rules")
 
     @pytest.mark.asyncio
     async def test_layer3_valid_plan_passes_all_layers(self):
@@ -362,6 +381,455 @@ class TestPlanValidator:
         )
         assert isinstance(plan, Plan)
         assert len(plan.graph) == 4
+
+    # --- Hybrid execution validation tests ---
+
+    @pytest.mark.asyncio
+    async def test_layer3_reasoner_without_policy_ref_raises(self):
+        import json
+        from datetime import datetime
+
+        data = {
+            "plan_id": "01JBXYZ1234567890ABCDEFGHI",
+            "intent": SAMPLE_INTENT.model_dump(mode="json"),
+            "trace_id": SAMPLE_INTENT.trace_id,
+            "graph": [
+                {
+                    "step": 1,
+                    "mode": "interactive",
+                    "role": "Reasoner",
+                    "uses": "system.echo",
+                    "call": "analyze",
+                    "type": "llm_reasoning",
+                    "args": {},
+                    "after": [],
+                    "timeout_s": 30,
+                    "dry_run": True,
+                    "reasoning_config": {
+                        "system_prompt_ref": "test.prompt",
+                    },
+                }
+            ],
+            "constraints": {"scopes": [], "ttl_s": 900, "max_retries": 3},
+            "plugins": ["system.echo"],
+            "meta": {
+                "created_at": datetime.now(UTC).isoformat(),
+                "canonical_hash": "a" * 64,
+            },
+        }
+        with pytest.raises(PlanValidationError) as exc_info:
+            await self.validator.validate(json.dumps(data), SAMPLE_INTENT, 1, self.tool_ids)
+        assert exc_info.value.layer == "business_rules"
+        assert "policy_ref" in exc_info.value.message
+
+    @pytest.mark.asyncio
+    async def test_layer3_llm_reasoning_without_config_raises(self):
+        import json
+        from datetime import datetime
+
+        data = {
+            "plan_id": "01JBXYZ1234567890ABCDEFGHI",
+            "intent": SAMPLE_INTENT.model_dump(mode="json"),
+            "trace_id": SAMPLE_INTENT.trace_id,
+            "graph": [
+                {
+                    "step": 1,
+                    "mode": "interactive",
+                    "role": "Reasoner",
+                    "uses": "system.echo",
+                    "call": "analyze",
+                    "type": "llm_reasoning",
+                    "args": {},
+                    "after": [],
+                    "timeout_s": 30,
+                    "dry_run": True,
+                    "policy_ref": "policy-1",
+                }
+            ],
+            "constraints": {"scopes": [], "ttl_s": 900, "max_retries": 3},
+            "plugins": ["system.echo"],
+            "meta": {
+                "created_at": datetime.now(UTC).isoformat(),
+                "canonical_hash": "a" * 64,
+            },
+        }
+        with pytest.raises(PlanValidationError) as exc_info:
+            await self.validator.validate(json.dumps(data), SAMPLE_INTENT, 1, self.tool_ids)
+        assert exc_info.value.layer == "business_rules"
+        assert "reasoning_config" in exc_info.value.message
+
+    @pytest.mark.asyncio
+    async def test_layer3_policy_check_without_policy_ref_raises(self):
+        import json
+        from datetime import datetime
+
+        data = {
+            "plan_id": "01JBXYZ1234567890ABCDEFGHI",
+            "intent": SAMPLE_INTENT.model_dump(mode="json"),
+            "trace_id": SAMPLE_INTENT.trace_id,
+            "graph": [
+                {
+                    "step": 1,
+                    "mode": "interactive",
+                    "role": "Analyzer",
+                    "uses": "system.echo",
+                    "call": "check",
+                    "type": "policy_check",
+                    "args": {},
+                    "after": [],
+                    "timeout_s": 30,
+                    "dry_run": True,
+                }
+            ],
+            "constraints": {"scopes": [], "ttl_s": 900, "max_retries": 3},
+            "plugins": ["system.echo"],
+            "meta": {
+                "created_at": datetime.now(UTC).isoformat(),
+                "canonical_hash": "a" * 64,
+            },
+        }
+        with pytest.raises(PlanValidationError) as exc_info:
+            await self.validator.validate(json.dumps(data), SAMPLE_INTENT, 1, self.tool_ids)
+        assert exc_info.value.layer == "business_rules"
+        assert "policy_ref" in exc_info.value.message
+
+    @pytest.mark.asyncio
+    async def test_layer3_context_from_forward_ref_raises(self):
+        import json
+        from datetime import datetime
+
+        data = {
+            "plan_id": "01JBXYZ1234567890ABCDEFGHI",
+            "intent": SAMPLE_INTENT.model_dump(mode="json"),
+            "trace_id": SAMPLE_INTENT.trace_id,
+            "graph": [
+                {
+                    "step": 1,
+                    "mode": "interactive",
+                    "role": "Fetcher",
+                    "uses": "system.echo",
+                    "call": "echo",
+                    "args": {},
+                    "after": [],
+                    "timeout_s": 30,
+                    "dry_run": True,
+                    "context_from": [2],
+                }
+            ],
+            "constraints": {"scopes": [], "ttl_s": 900, "max_retries": 3},
+            "plugins": ["system.echo"],
+            "meta": {
+                "created_at": datetime.now(UTC).isoformat(),
+                "canonical_hash": "a" * 64,
+            },
+        }
+        with pytest.raises(PlanValidationError) as exc_info:
+            await self.validator.validate(json.dumps(data), SAMPLE_INTENT, 1, self.tool_ids)
+        assert exc_info.value.layer == "business_rules"
+        assert "context_from" in exc_info.value.message
+
+    @pytest.mark.asyncio
+    async def test_layer3_valid_reasoner_step_passes(self):
+        import json
+        from datetime import datetime
+
+        data = {
+            "plan_id": "01JBXYZ1234567890ABCDEFGHI",
+            "intent": SAMPLE_INTENT.model_dump(mode="json"),
+            "trace_id": SAMPLE_INTENT.trace_id,
+            "graph": [
+                {
+                    "step": 1,
+                    "mode": "interactive",
+                    "role": "Fetcher",
+                    "uses": "google.calendar",
+                    "call": "list_events",
+                    "args": {},
+                    "after": [],
+                    "timeout_s": 30,
+                    "dry_run": True,
+                },
+                {
+                    "step": 2,
+                    "mode": "interactive",
+                    "role": "Reasoner",
+                    "uses": "system.echo",
+                    "call": "analyze",
+                    "type": "llm_reasoning",
+                    "args": {},
+                    "after": [1],
+                    "context_from": [1],
+                    "timeout_s": 60,
+                    "dry_run": True,
+                    "policy_ref": "policy-flight-analysis",
+                    "reasoning_config": {
+                        "system_prompt_ref": "reasoner.flight_analysis",
+                    },
+                },
+            ],
+            "constraints": {"scopes": [], "ttl_s": 900, "max_retries": 3},
+            "plugins": ["google.calendar", "system.echo"],
+            "meta": {
+                "created_at": datetime.now(UTC).isoformat(),
+                "canonical_hash": "a" * 64,
+            },
+        }
+        plan = await self.validator.validate(json.dumps(data), SAMPLE_INTENT, 1, self.tool_ids)
+        assert isinstance(plan, Plan)
+        assert plan.graph[1].role == "Reasoner"
+        assert plan.graph[1].type == "llm_reasoning"
+
+    @pytest.mark.asyncio
+    async def test_layer3_existing_api_steps_default_type(self):
+        """Existing plans without type field default to 'api'."""
+        plan = await self.validator.validate(
+            SAMPLE_VALID_PLAN_JSON, SAMPLE_INTENT, 1, self.tool_ids
+        )
+        for step in plan.graph:
+            assert step.type == "api"
+
+    # --- v6.1 trust boundary & spawning rules ---
+
+    @pytest.mark.asyncio
+    async def test_layer3_trust_boundary_tier2_direct_api_ref_raises(self):
+        """Rule A: Tier 2 Reasoner referencing API step via context_from is rejected."""
+        import json
+        from datetime import datetime
+
+        data = {
+            "plan_id": "01JBXYZ1234567890ABCDEFGHI",
+            "intent": SAMPLE_INTENT.model_dump(mode="json"),
+            "trace_id": SAMPLE_INTENT.trace_id,
+            "graph": [
+                {
+                    "step": 1,
+                    "mode": "interactive",
+                    "role": "Fetcher",
+                    "type": "api",
+                    "uses": "google.calendar",
+                    "call": "list_events",
+                    "args": {},
+                    "after": [],
+                    "timeout_s": 30,
+                    "dry_run": True,
+                },
+                {
+                    "step": 2,
+                    "mode": "interactive",
+                    "role": "Reasoner",
+                    "type": "llm_reasoning",
+                    "trust_level": "trusted",
+                    "context_from": [1],
+                    "uses": "system.echo",
+                    "call": "analyze",
+                    "args": {},
+                    "after": [1],
+                    "timeout_s": 60,
+                    "dry_run": True,
+                    "policy_ref": "policy-test",
+                    "reasoning_config": {
+                        "system_prompt_ref": "test.prompt",
+                    },
+                },
+            ],
+            "constraints": {"scopes": [], "ttl_s": 900, "max_retries": 3},
+            "plugins": ["google.calendar", "system.echo"],
+            "meta": {
+                "created_at": datetime.now(UTC).isoformat(),
+                "canonical_hash": "a" * 64,
+            },
+        }
+        with pytest.raises(PlanValidationError) as exc_info:
+            await self.validator.validate(json.dumps(data), SAMPLE_INTENT, 1, self.tool_ids)
+        assert exc_info.value.layer == "business_rules"
+        assert "trust boundary" in exc_info.value.message.lower()
+
+    @pytest.mark.asyncio
+    async def test_layer3_trust_boundary_tier1_sanitizer_passes(self):
+        """Rule A: Tier 2 Reasoner referencing Tier 1 sanitizer (not API) passes."""
+        import json
+        from datetime import datetime
+
+        data = {
+            "plan_id": "01JBXYZ1234567890ABCDEFGHI",
+            "intent": SAMPLE_INTENT.model_dump(mode="json"),
+            "trace_id": SAMPLE_INTENT.trace_id,
+            "graph": [
+                {
+                    "step": 1,
+                    "mode": "interactive",
+                    "role": "Fetcher",
+                    "type": "api",
+                    "uses": "google.calendar",
+                    "call": "list_events",
+                    "args": {},
+                    "after": [],
+                    "timeout_s": 30,
+                    "dry_run": True,
+                },
+                {
+                    "step": 2,
+                    "mode": "interactive",
+                    "role": "Reasoner",
+                    "type": "llm_reasoning",
+                    "trust_level": "untrusted_input",
+                    "context_from": [1],
+                    "uses": "system.echo",
+                    "call": "sanitize",
+                    "args": {},
+                    "after": [1],
+                    "timeout_s": 60,
+                    "dry_run": True,
+                    "policy_ref": "policy-sanitize",
+                    "reasoning_config": {
+                        "system_prompt_ref": "sanitize.prompt",
+                    },
+                },
+                {
+                    "step": 3,
+                    "mode": "interactive",
+                    "role": "Reasoner",
+                    "type": "llm_reasoning",
+                    "trust_level": "trusted",
+                    "context_from": [2],
+                    "uses": "system.echo",
+                    "call": "analyze",
+                    "args": {},
+                    "after": [2],
+                    "timeout_s": 60,
+                    "dry_run": True,
+                    "policy_ref": "policy-analyze",
+                    "reasoning_config": {
+                        "system_prompt_ref": "analyze.prompt",
+                    },
+                },
+            ],
+            "constraints": {"scopes": [], "ttl_s": 900, "max_retries": 3},
+            "plugins": ["google.calendar", "system.echo"],
+            "meta": {
+                "created_at": datetime.now(UTC).isoformat(),
+                "canonical_hash": "a" * 64,
+            },
+        }
+        plan = await self.validator.validate(json.dumps(data), SAMPLE_INTENT, 1, self.tool_ids)
+        assert plan.graph[2].trust_level == "trusted"
+
+    @pytest.mark.asyncio
+    async def test_layer3_no_recursive_spawning_raises(self):
+        """Rule B: Spawned step with can_spawn=true is rejected."""
+        import json
+        from datetime import datetime
+
+        data = {
+            "plan_id": "01JBXYZ1234567890ABCDEFGHI",
+            "intent": SAMPLE_INTENT.model_dump(mode="json"),
+            "trace_id": SAMPLE_INTENT.trace_id,
+            "graph": [
+                {
+                    "step": 1,
+                    "mode": "interactive",
+                    "role": "Fetcher",
+                    "uses": "google.calendar",
+                    "call": "list_events",
+                    "args": {},
+                    "after": [],
+                    "timeout_s": 30,
+                    "dry_run": True,
+                    "spawned_by": 0,
+                    "can_spawn": True,
+                },
+            ],
+            "constraints": {"scopes": [], "ttl_s": 900, "max_retries": 3},
+            "plugins": ["google.calendar"],
+            "meta": {
+                "created_at": datetime.now(UTC).isoformat(),
+                "canonical_hash": "a" * 64,
+            },
+        }
+        with pytest.raises(PlanValidationError) as exc_info:
+            await self.validator.validate(json.dumps(data), SAMPLE_INTENT, 1, self.tool_ids)
+        assert exc_info.value.layer == "business_rules"
+        assert "spawned" in exc_info.value.message.lower()
+        assert "can_spawn" in exc_info.value.message
+
+    @pytest.mark.asyncio
+    async def test_layer3_spawned_booker_without_gate_raises(self):
+        """Rule D: Spawned Booker step without gate_id is rejected."""
+        import json
+        from datetime import datetime
+
+        data = {
+            "plan_id": "01JBXYZ1234567890ABCDEFGHI",
+            "intent": SAMPLE_INTENT.model_dump(mode="json"),
+            "trace_id": SAMPLE_INTENT.trace_id,
+            "graph": [
+                {
+                    "step": 1,
+                    "mode": "interactive",
+                    "role": "Booker",
+                    "uses": "google.calendar",
+                    "call": "create_event",
+                    "args": {},
+                    "after": [],
+                    "timeout_s": 60,
+                    "dry_run": True,
+                    "spawned_by": 0,
+                },
+            ],
+            "constraints": {"scopes": [], "ttl_s": 900, "max_retries": 3},
+            "plugins": ["google.calendar"],
+            "meta": {
+                "created_at": datetime.now(UTC).isoformat(),
+                "canonical_hash": "a" * 64,
+            },
+        }
+        with pytest.raises(PlanValidationError) as exc_info:
+            await self.validator.validate(json.dumps(data), SAMPLE_INTENT, 1, self.tool_ids)
+        assert exc_info.value.layer == "business_rules"
+        assert "booker" in exc_info.value.message.lower()
+        assert "gate_id" in exc_info.value.message.lower()
+
+    @pytest.mark.asyncio
+    async def test_layer3_spawning_step_tool_not_in_plugins_raises(self):
+        """Rule C: Step with can_spawn using tool not in plugins is rejected."""
+        import json
+        from datetime import datetime
+
+        data = {
+            "plan_id": "01JBXYZ1234567890ABCDEFGHI",
+            "intent": SAMPLE_INTENT.model_dump(mode="json"),
+            "trace_id": SAMPLE_INTENT.trace_id,
+            "graph": [
+                {
+                    "step": 1,
+                    "mode": "interactive",
+                    "role": "Reasoner",
+                    "type": "llm_reasoning",
+                    "uses": "google.calendar",
+                    "call": "analyze",
+                    "args": {},
+                    "after": [],
+                    "timeout_s": 60,
+                    "dry_run": True,
+                    "can_spawn": True,
+                    "max_spawned_steps": 3,
+                    "policy_ref": "policy-test",
+                    "reasoning_config": {
+                        "system_prompt_ref": "test.prompt",
+                    },
+                },
+            ],
+            "constraints": {"scopes": [], "ttl_s": 900, "max_retries": 3},
+            "plugins": ["system.echo"],
+            "meta": {
+                "created_at": datetime.now(UTC).isoformat(),
+                "canonical_hash": "a" * 64,
+            },
+        }
+        with pytest.raises(PlanValidationError) as exc_info:
+            await self.validator.validate(json.dumps(data), SAMPLE_INTENT, 1, self.tool_ids)
+        assert exc_info.value.layer == "business_rules"
+        assert "plugins" in exc_info.value.message.lower()
 
 
 # ===========================

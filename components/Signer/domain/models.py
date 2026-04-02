@@ -35,6 +35,14 @@ class PlanSignature(BaseModel):
         min_length=64,
         max_length=64,
     )
+    ts: str = Field(
+        description="ISO 8601 timestamp of when the signature was created",
+    )
+    nonce: str = Field(
+        description="ULID nonce to prevent replay attacks",
+        min_length=26,
+        max_length=26,
+    )
 
 
 # --- Error Classes ---

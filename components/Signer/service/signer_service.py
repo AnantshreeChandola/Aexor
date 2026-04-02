@@ -8,8 +8,10 @@ plans and verifies signatures for integrity and audit purposes.
 import base64
 import logging
 import os
+from datetime import UTC, datetime
 from typing import Any
 
+import ulid
 from cryptography.exceptions import InvalidSignature as CryptoInvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PrivateKey,
@@ -83,6 +85,8 @@ class SignerService:
             signature=sig_b64,
             pubkey_id=self._pubkey_id,
             plan_hash=plan_hash,
+            ts=datetime.now(UTC).isoformat(),
+            nonce=str(ulid.new()),
         )
 
         logger.info(

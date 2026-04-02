@@ -75,3 +75,8 @@ def get_planner_service(request: Request) -> Any:
 def get_intake_service(request: Request) -> Any:
     """Get IntakeService singleton from app state."""
     return request.app.state.intake_service
+
+
+def get_policy_service(request: Request) -> Any:
+    """Get PolicyService singleton from app state."""
+    return request.app.state.policy_service

@@ -34,11 +34,8 @@ dependencies = [
     "alembic>=1.13.0",
     # Caching & Coordination
     "redis[hiredis]>=5.0",
-    # AI/LLM
+    # AI/LLM (Anthropic Claude — sole external AI dependency)
     "anthropic>=0.18.0",
-    "openai>=1.10.0",
-    # Temporal SDK
-    "temporalio>=1.5.0",
     # Utilities
     "httpx>=0.27",
     "python-dotenv>=1.0.0",
@@ -207,9 +204,7 @@ strict_equality = true
 
 [[tool.mypy.overrides]]
 module = [
-    "temporalio.*",
     "anthropic.*",
-    "openai.*",
 ]
 ignore_missing_imports = true
 

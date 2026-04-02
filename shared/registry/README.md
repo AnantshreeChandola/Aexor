@@ -1,9 +1,9 @@
 # Plugin Registry
 
-Logical `uses/call` → n8n node binding and safety metadata.
+Logical `uses/call` → MCP tool binding and safety metadata.
 
 - Fields per entry:
-  - node, operation, param map
+  - mcp_server, mcp_tool, operation, param map
   - previewability (true/false), scopes[], idempotency key strategy, compensation (op)
   - safety class, rate limits
 
@@ -11,8 +11,8 @@ Logical `uses/call` → n8n node binding and safety metadata.
 ```
 uses: google.calendar
 call: create_event
-node: Google Calendar
-operation: create
+mcp_server: google-calendar
+mcp_tool: create_event
 params: { title, attendees, start, end, conferencing }
 previewable: false
 scopes: ["calendar.write"]
@@ -20,4 +20,4 @@ idempotency: plan_id:step:arg_hash
 compensation: delete_event
 ```
 
-Add/modify capabilities here; n8n flows remain generic (Preview/Execute only).
+Add/modify capabilities here; MCP tool invocations remain generic (Preview/Execute only).

@@ -14,6 +14,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     String,
     UniqueConstraint,
     text,
@@ -142,6 +143,8 @@ class PlanOutcomeTable(Base):
     total_steps = Column(Integer, nullable=False)
     failed_step = Column(Integer, nullable=True)
     context_data = Column(JSONB, nullable=True)
+    final_graph_json = Column(JSONB, nullable=True)
+    plan_revision = Column(Integer, nullable=False, server_default=text("0"))
 
     __table_args__ = (
         Index("idx_plan_outcomes_plan_id", plan_id),
@@ -336,7 +339,7 @@ class ToolTable(Base):
     Tools table - registered external integrations.
 
     Owned by PluginRegistry component.
-    Stores credential ID templates only, NEVER actual secrets.
+    Stores credential vault IDs only, NEVER actual secrets.
     """
 
     __tablename__ = "tools"
@@ -344,7 +347,8 @@ class ToolTable(Base):
     tool_id = Column(String(128), primary_key=True)
     display_name = Column(String(255), nullable=False)
     credential_template = Column(String(512), nullable=False)
-    n8n_credential_type = Column(String(128), nullable=False)
+    mcp_server = Column(String(128), nullable=False)
+    transport = Column(String(32), nullable=False, server_default=text("'stdio'"))
     active = Column(Boolean, nullable=False, default=True)
     created_at = Column(
         DateTime(timezone=True),
@@ -386,7 +390,7 @@ class OperationTable(Base):
         ForeignKey("tools.tool_id", ondelete="CASCADE"),
         nullable=False,
     )
-    n8n_node = Column(String(255), nullable=False)
+    mcp_tool = Column(String(255), nullable=False)
     previewable = Column(Boolean, nullable=False, default=False)
     idempotent = Column(Boolean, nullable=False, default=False)
     scopes = Column(
@@ -427,3 +431,110 @@ class RegistryVersionTable(Base):
         server_default=text("NOW()"),
     )
     change_summary = Column(String(512), nullable=False)
+
+
+# PolicyEngine Tables - Owned by PolicyEngine component
+
+
+class PolicyTable(Base):
+    """
+    Policies table - policy rules for spawn/step evaluation.
+
+    Owned by PolicyEngine component. Reference: GLOBAL_SPEC §2.9.
+    """
+
+    __tablename__ = "policies"
+
+    policy_id = Column(String(128), primary_key=True)
+    name = Column(String(256), nullable=False)
+    version = Column(Integer, nullable=False, server_default=text("1"))
+    scope = Column(String(32), nullable=False)  # step, role, system
+    allowed_tools = Column(JSONB, nullable=False, server_default=text("'[\"*\"]'"))
+    allowed_roles = Column(JSONB, nullable=False, server_default=text("'[]'"))
+    max_spawned_steps = Column(Integer, nullable=False, server_default=text("3"))
+    require_approval = Column(Boolean, nullable=False, server_default=text("false"))
+    data_access = Column(JSONB, nullable=False, server_default=text("'[\"tier1\"]'"))
+    forbidden_actions = Column(JSONB, nullable=False, server_default=text("'[]'"))
+    token_budget = Column(Integer, nullable=False, server_default=text("8192"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("NOW()"))
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=text("NOW()"))
+
+    __table_args__ = (
+        Index("idx_policies_scope", scope),
+        Index("idx_policies_version", policy_id, version),
+    )
+
+
+class PolicyAttestationTable(Base):
+    """
+    Policy attestations table - audit records for spawned steps.
+
+    Owned by PolicyEngine component. Reference: GLOBAL_SPEC §2.4.1.
+    """
+
+    __tablename__ = "policy_attestations"
+
+    attestation_id = Column(String(26), primary_key=True)  # ULID format
+    plan_id = Column(String(26), ForeignKey("plans.plan_id"), nullable=False)
+    plan_revision = Column(Integer, nullable=False)
+    spawned_by_step = Column(Integer, nullable=False)
+    new_steps = Column(JSONB, nullable=False)
+    policy_id = Column(String(128), ForeignKey("policies.policy_id"), nullable=False)
+    policy_version = Column(Integer, nullable=False)
+    decision = Column(JSONB, nullable=False)
+    attested_at = Column(DateTime(timezone=True), nullable=False, server_default=text("NOW()"))
+
+    __table_args__ = (
+        Index("idx_policy_attestations_plan_id", plan_id),
+        Index("idx_policy_attestations_policy_id", policy_id),
+        Index("idx_policy_attestations_attested_at", attested_at),
+    )
+
+
+# Credential Vault Tables - Owned by PluginRegistry component
+
+
+class CredentialVaultTable(Base):
+    """
+    Credential vault table - AES-256-GCM encrypted credentials.
+
+    Owned by PluginRegistry component. LLM never sees plaintext values.
+    Credentials are decrypted at execution time by ExecuteOrchestrator only.
+    """
+
+    __tablename__ = "credential_vault"
+
+    credential_id = Column(
+        SQLAlchemy_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    user_id = Column(
+        SQLAlchemy_UUID(as_uuid=True),
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    tool_id = Column(
+        String(128),
+        ForeignKey("tools.tool_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    encrypted_value = Column(LargeBinary, nullable=False)
+    iv = Column(LargeBinary, nullable=False)
+    key_version = Column(Integer, nullable=False, server_default=text("1"))
+    credential_metadata = Column("metadata", JSONB, nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("NOW()"),
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("NOW()"),
+    )
+
+    __table_args__ = (
+        Index("idx_credential_vault_user_tool", user_id, tool_id),
+        Index("idx_credential_vault_user_id", user_id),
+    )

@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://personal-agent.dev/schemas/plan.schema.json",
   "title": "Plan",
-  "description": "Deterministic execution plan (GLOBAL_SPEC v2 §2.3)",
+  "description": "Deterministic execution plan with adaptive execution points (GLOBAL_SPEC v3.0 §2.3)",
   "type": "object",
   "required": ["plan_id", "intent", "graph", "constraints", "plugins", "meta"],
   "properties": {
@@ -21,6 +21,12 @@
       "pattern": "^[0-9a-f]{32}$",
       "examples": ["4bf92f3577b34da6a3ce929d0e0e4736"]
     },
+    "plan_revision": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Plan revision number. Revision 0 is the initial immutable plan. Each spawn event increments this."
+    },
     "graph": {
       "type": "array",
       "description": "Execution steps graph",
@@ -38,12 +44,24 @@
           "mode": {
             "type": "string",
             "enum": ["interactive", "durable"],
-            "description": "Execution mode (n8n or Temporal)"
+            "description": "Execution mode"
           },
           "role": {
             "type": "string",
-            "enum": ["Fetcher", "Analyzer", "Watcher", "Resolver", "Booker", "Notifier"],
+            "enum": ["Fetcher", "Analyzer", "Watcher", "Resolver", "Booker", "Notifier", "Reasoner"],
             "description": "Runtime agent role"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["api", "llm_reasoning", "policy_check"],
+            "default": "api",
+            "description": "Step type: api (MCP tool invocation), llm_reasoning (Anthropic API), policy_check (PolicyEngine evaluation)"
+          },
+          "trust_level": {
+            "type": ["string", "null"],
+            "enum": ["untrusted_input", "trusted", null],
+            "default": null,
+            "description": "LLM trust tier. untrusted_input = Tier 1 (sandboxed, no tools), trusted = Tier 2 (agent reasoning, MCP tools). null for non-LLM steps."
           },
           "uses": {
             "type": "string",
@@ -70,6 +88,73 @@
             },
             "default": []
           },
+          "context_from": {
+            "type": "array",
+            "description": "Step numbers whose outputs are passed as context to this step (for Reasoner steps)",
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "default": []
+          },
+          "can_spawn": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether this step can spawn new steps at runtime (Reasoner only, PolicyEngine-bounded)"
+          },
+          "max_spawned_steps": {
+            "type": ["integer", "null"],
+            "minimum": 1,
+            "maximum": 10,
+            "default": null,
+            "description": "Maximum steps this step can spawn (cap: 10). null if can_spawn is false."
+          },
+          "spawned_by": {
+            "type": ["integer", "null"],
+            "default": null,
+            "description": "Step number that spawned this step at runtime. null for original plan steps."
+          },
+          "policy_ref": {
+            "type": ["string", "null"],
+            "default": null,
+            "description": "PolicyEngine rule reference. Required for Reasoner and policy_check steps."
+          },
+          "reasoning_config": {
+            "oneOf": [
+              { "type": "null" },
+              {
+                "type": "object",
+                "description": "LLM reasoning configuration for llm_reasoning steps",
+                "properties": {
+                  "model": {
+                    "type": "string",
+                    "description": "Anthropic model ID (e.g., 'claude-sonnet-4-5-20250929')"
+                  },
+                  "temperature": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "max_tokens": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 16384
+                  },
+                  "system_prompt_ref": {
+                    "type": "string",
+                    "description": "Reference to a registered system prompt template"
+                  },
+                  "output_schema_ref": {
+                    "type": "string",
+                    "description": "Reference to a JSON schema for structured output validation"
+                  }
+                },
+                "additionalProperties": false
+              }
+            ],
+            "default": null,
+            "description": "Reasoning configuration. Required for llm_reasoning steps, null otherwise."
+          },
           "timeout_s": {
             "type": "integer",
             "description": "Step timeout in seconds (fails if exceeded, supports fault isolation)",
@@ -91,6 +176,28 @@
             "type": "boolean",
             "description": "Preview mode flag",
             "default": true
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pending", "running", "completed", "failed", "skipped"],
+            "default": "pending",
+            "description": "Runtime execution status (not part of plan signature)"
+          },
+          "result": {
+            "type": ["object", "null"],
+            "default": null,
+            "description": "Runtime step result (not part of plan signature)"
+          },
+          "error": {
+            "type": ["object", "null"],
+            "default": null,
+            "description": "Runtime error details (not part of plan signature)"
+          },
+          "execute_mode": {
+            "type": ["string", "null"],
+            "enum": ["preview_only", "execute_only", "both", null],
+            "default": null,
+            "description": "Execution mode override for preview/execute phases"
           }
         },
         "additionalProperties": false
@@ -124,6 +231,11 @@
           "minimum": 0,
           "maximum": 5,
           "default": 3
+        },
+        "policy_version": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "PolicyEngine rules version snapshot at plan creation time"
         }
       },
       "additionalProperties": true
@@ -169,6 +281,12 @@
           "enum": ["sha256"],
           "default": "sha256",
           "description": "Hash algorithm used for canonical_hash"
+        },
+        "plan_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "Current plan revision (mirrors top-level plan_revision for meta completeness)"
         }
       },
       "additionalProperties": true

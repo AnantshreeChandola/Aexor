@@ -182,10 +182,10 @@ SAMPLE_PLAN_FORWARD_DEP = json.dumps(
 
 
 def _make_too_many_steps_json() -> str:
-    """Generate plan JSON with 51 steps."""
+    """Generate plan JSON with 101 steps (exceeds MAX_STEPS=100)."""
     now = datetime.now(UTC).isoformat()
     steps = []
-    for i in range(1, 52):
+    for i in range(1, 102):
         steps.append(
             {
                 "step": i,

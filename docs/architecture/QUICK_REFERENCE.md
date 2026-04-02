@@ -4,18 +4,19 @@
 
 ---
 
-## 6 Runtime Agent Roles
+## 7 Runtime Agent Roles
 
-Runtime agents are **logical plan-step categories** (not separate services). All execution happens inside n8n workflow nodes.
+Runtime agents are **logical plan-step categories** (not separate services). API steps execute via MCP tool invocations; LLM reasoning steps execute in Python.
 
 | Role | Purpose | Examples | Implementation |
 |------|---------|----------|----------------|
-| **Fetcher** | One-time data retrieval | Get calendar availability, fetch contact info, check flight prices | n8n HTTP/connector nodes |
-| **Analyzer** | Data processing | Find overlapping slots, rank options, compare routes, calculate totals | n8n Function nodes |
-| **Watcher** | Long-running monitoring | Poll visa slots (2 weeks), monitor price drops (daily), track package delivery | n8n workflows with Wait nodes and scheduled triggers |
-| **Resolver** | User interaction | "Which John?", "Pick from 3 options", confirm choice | n8n Wait nodes with webhooks |
-| **Booker** | Write operations | Create events, send emails, make purchases, book appointments | n8n connector nodes with idempotency |
-| **Notifier** | Updates and alerts | "✓ Meeting booked", "Visa slot found!", progress updates, errors | n8n Slack/email nodes |
+| **Fetcher** | One-time data retrieval | Get calendar availability, fetch contact info, check flight prices | MCP tool invocations (HTTP, API connectors) |
+| **Analyzer** | Data processing | Find overlapping slots, rank options, compare routes, calculate totals | Python functions or MCP tool invocations |
+| **Watcher** | Long-running monitoring | Poll visa slots (2 weeks), monitor price drops (daily), track package delivery | Python asyncio tasks with APScheduler, Redis-backed state |
+| **Resolver** | User interaction | "Which John?", "Pick from 3 options", confirm choice | Python async approval gates (Redis-backed, webhook resume) |
+| **Booker** | Write operations | Create events, send emails, make purchases, book appointments | MCP tool invocations with idempotency wrapper |
+| **Notifier** | Updates and alerts | "✓ Meeting booked", "Visa slot found!", progress updates, errors | MCP tool invocations (Slack, email connectors) |
+| **Reasoner** | LLM-based adaptive decisions | Analyze flight options, rank with judgment, decide if more data needed, generate summaries | Python service (Anthropic API, two-tier trust model, PolicyEngine-bounded, may spawn steps) |
 
 ---
 
@@ -24,8 +25,8 @@ Runtime agents are **logical plan-step categories** (not separate services). All
 | Layer | Components | Purpose |
 |-------|-----------|---------|
 | **Memory** | ProfileStore, History, VectorIndex, PlanLibrary | Stores everything the system knows |
-| **Domain** | Intake, ContextRAG, Planner, Signer, PluginRegistry, PlanWriter | Understands requests and builds plans |
-| **Orchestration** | WorkflowBuilder, PreviewOrchestrator, ApprovalGate, ExecuteOrchestrator, ExecutionMonitor | Previews and executes plans safely |
+| **Domain** | Intake, ContextRAG, Planner, Signer, PluginRegistry, PlanWriter, PolicyEngine | Understands requests, builds plans, enforces policies |
+| **Orchestration** | PreviewOrchestrator, ApprovalGate, ExecuteOrchestrator, ExecutionMonitor | Previews and executes plans safely |
 | **Platform** | API Gateway, Audit | Interface and observability |
 
 ---
@@ -49,13 +50,15 @@ User Request → Preview → Approval → Execute → Learn
 ## Core Architectural Principles
 
 1. **Preview-first safety**: Never execute without showing user first
-2. **Deterministic planning**: Same inputs → same plan → same signature
-3. **Single runtime**: n8n for all workflows (short and long-running) with ExecutionMonitor
+2. **Deterministic planning with adaptive execution**: Initial plan (revision 0) is a fixed, signed DAG (same inputs → same graph → same signature). At runtime, Reasoner steps may spawn new steps within PolicyEngine bounds — each spawn creates a new plan revision with a PolicyAttestation. The original graph is never mutated.
+3. **Pure agentic runtime**: Python ExecuteOrchestrator dispatches all steps — MCP for APIs, Anthropic for reasoning
 4. **Idempotency**: Multi-user safe retry (`user:integration:plan:step:op:hash`)
 5. **Compensation**: Undo failed operations (Saga pattern)
 6. **Fine-grained locking**: Prevent conflicts without blocking parallelism
 7. **Privacy tiers**: Context access controlled by consent level (Tier 1-5)
-8. **No LLM iteration**: One-shot planning, not agentic loops
+8. **Policy-bounded execution**: All LLM runtime decisions governed by PolicyEngine; critical actions require HITL
+9. **Two-tier LLM execution**: Sandboxed Tier 1 (untrusted data, no tools) + capable Tier 2 (agent reasoning, MCP tools)
+10. **Default-untrusted API outputs**: All external API responses must pass through Tier 1 sanitization before reaching Tier 2 Reasoners. Plan validator enforces this at creation time.
 
 ---
 
@@ -97,7 +100,7 @@ User Request → Preview → Approval → Execute → Learn
     {
       "step": 1,                     // Sequential number
       "mode": "interactive",         // autonomous/interactive/supervised
-      "role": "Fetcher",             // One of 6 runtime roles
+      "role": "Fetcher",             // One of 7 runtime roles
       "uses": "google.calendar",     // Connector name
       "call": "list_free_busy",      // Method name
       "args": {...},                 // Parameters
@@ -291,12 +294,25 @@ async def execute(approved: ApprovedPreview) -> ExecuteWrapper:
 | Category | Technology | Rationale |
 |----------|-----------|-----------|
 | Backend | Python 3.11+, FastAPI | Async, type hints, Pydantic |
-| Orchestration | n8n | All workflows (short and long-running) with built-in persistence |
-| Database | PostgreSQL 16 + pgvector | Relational + vector in one DB |
-| Cache | Redis 7 | Sessions, tokens, idempotency (3-state), preview state |
-| AI | Anthropic Claude | Planning (temperature=0) |
-| Embeddings | OpenAI | Vector search only |
+| Orchestration | Python/FastAPI + MCP protocol | ExecuteOrchestrator dispatches all steps via MCP tool invocations |
+| Credentials | AES-256-GCM vault in PostgreSQL | Master key from env; LLM never sees plaintext values |
+| Database | PostgreSQL 16 + pgvector | Relational + vector + credential vault in one DB |
+| Cache | Redis 7 | Sessions, tokens, idempotency (3-state), preview state, approval gates |
+| AI | Anthropic Claude (**only paid external dependency**) | Planning, intent parsing, two-tier runtime reasoning |
+| Embeddings | ONNX Runtime (local, all-MiniLM-L6-v2) | Vector search, 384-dim, ~10ms inference, zero API cost |
 | Testing | pytest, ruff, mypy | Type safety + fast tests |
+
+### LLM Model Configuration
+
+| Purpose | Default Model | Env Var | Notes |
+|---------|--------------|---------|-------|
+| Planning (primary) | `claude-sonnet-4-5-20250929` | `PLANNER_PRIMARY_MODEL` | temperature=0, deterministic plan generation |
+| Planning (fallback) | `claude-haiku-4-5-20251001` | `PLANNER_FALLBACK_MODEL` | Used when primary circuit-breaks |
+| Intent parsing | `claude-haiku-4-5-20251001` | `INTAKE_PARSER_MODEL` | Fast/cheap for multi-turn message parsing |
+| Runtime reasoning | Per-step via `reasoning_config.model` | N/A (set in plan) | Planner chooses model per Reasoner step |
+| Embeddings | `all-MiniLM-L6-v2` (384-dim) | N/A (bundled ONNX) | Fully local CPU inference, no external API |
+
+**External dependencies summary**: Anthropic API is the sole paid external service. PostgreSQL, Redis, and ONNX Runtime are self-hosted. User integration APIs (Google, Slack, etc.) use the user's own accounts.
 
 ---
 
@@ -310,7 +326,7 @@ async def execute(approved: ApprovedPreview) -> ExecuteWrapper:
 | Tests failing | Check acceptance criteria mapping |
 | CI failing | Run `pytest` + `ruff check` locally |
 | Slow preview | Check ContextRAG budget (≤2KB) |
-| Stuck execution | ExecutionMonitor detects stuck workflows (5min timeout) and triggers retry |
+| Stuck execution | ExecutionMonitor detects stuck tasks (5min timeout) and cancels; step failures handled by LLM reasoning |
 
 ---
 

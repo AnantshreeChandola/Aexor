@@ -1,5 +1,5 @@
-# Personal Agent — High-Level Design (HLD) v4.0
-_Preview-first • Human-approved • Deterministic planning • Multi-agent execution_
+# Personal Agent — High-Level Design (HLD) v6.1
+_Preview-first • Human-approved • Pure agentic execution • Policy-bounded • MCP connectors_
 
 **Purpose:** System architecture overview with clear component responsibilities and real-world examples.
 **Audience:** Developers, architects, and stakeholders.
@@ -19,9 +19,12 @@ User Request → Preview → Approval → Execute → Learn
 
 ### Core Idea
 1. **Never do anything without showing the user first** (Preview-first safety)
-2. **Plans are deterministic and signed** (Same inputs → same plan → same signature)
-3. **Single execution runtime** optimized for personal agent scale:
-   - **n8n**: All workflows (short and long-running) with built-in persistence and retry logic
+2. **Plans are deterministic graphs with adaptive execution points** — The Planner produces a fixed DAG of steps (same inputs → same graph → same signature). The **initial plan (revision 0)** is immutable and cryptographically signed. At runtime, Reasoner steps can spawn new steps within PolicyEngine bounds — each spawn event increments `plan_revision` and is recorded as a PolicyAttestation. The original graph is never mutated; spawned steps extend it into a new revision. API steps execute exactly as specified. Only Reasoner steps introduce runtime variability.
+3. **Pure agentic execution** — all steps execute via Python/FastAPI ExecuteOrchestrator:
+   - **API steps**: Dispatched via MCP tool invocations (community-maintained connector ecosystem)
+   - **LLM reasoning steps**: Anthropic API with two-tier trust model (sandboxed Tier 1 for untrusted data, capable Tier 2 for agent reasoning)
+   - **Credential isolation**: AES-256-GCM encrypted vault in PostgreSQL; LLM never sees plaintext values
+4. **PolicyEngine is the safety moat** — All runtime LLM decisions are bounded by explicit policy rules. Deny-by-default. Critical actions always require human approval.
 
 ### Key Innovation
 **Preview State Caching**: User choices made during preview are reused during execution—no need to repeat steps.
@@ -29,6 +32,66 @@ User Request → Preview → Approval → Execute → Learn
 **Example**: Shopping flow
 - Preview: Search 10 sweaters → User picks one
 - Execute: Only buy that sweater (skip the search)
+
+### Execution Model: Deterministic Graph, Adaptive Execution
+
+The system supports three execution patterns. The plan graph is ALWAYS fully specified upfront — all output-dependent decisions go through explicit Reasoner steps. There is no conditional branching in the graph itself.
+
+#### A) Pure API Plans (no Reasoner steps)
+- Every step is `type: "api"` — fully deterministic
+- Step outputs flow via template resolution: `args: {"content": "{{step_1.result.event_id}}"}`
+- No LLM processes the data at execution time → no prompt injection surface
+- If a step fails after step-level retries → plan is terminal
+- Example: "Book meeting with Alice" (§2a below)
+
+#### B) Adaptive Plans with Reasoner (has `type: "llm_reasoning"` steps)
+- The initial plan (revision 0) is immutable and signed. Reasoner steps are explicit decision points in the DAG.
+- Reasoner steps see previous outputs via `context_from` and make judgments
+- Reasoners can spawn new steps (Fetcher, Analyzer) within PolicyEngine bounds — each spawn creates a new plan revision with a PolicyAttestation
+- **All data flowing from API steps → Reasoner goes through Tier 1 sanitization first** (see Data Trust Boundary below)
+- Example: "Find best flights to Tokyo" (§2b below)
+
+#### C) Failure Recovery (step fails, Reasoner adapts)
+- When API step N fails, the error object (system-generated, NOT the raw API response) routes to the nearest Reasoner with `can_spawn=true`
+- Reasoner proposes a recovery action (retry with different params, alternative API, skip)
+- Recovery action goes through PolicyEngine evaluation. **"Deny-by-default"** means nothing is implicitly allowed — but if an explicit policy rule matches the proposed action (tool in `plugins`, role in `allowed_recovery_roles`, within `max_recovery_actions` limit), PolicyEngine **approves automatically**. Write operations (Booker role) always require HITL approval via ApprovalGate, same as any other Booker step.
+- If recovery is exhausted or PolicyEngine denies (no matching rule) → plan is terminal
+- Example: Flight API returns 503 → Reasoner spawns Fetcher with alternative date range (§2c below)
+
+### Data Trust Boundary
+
+**RULE**: All data crossing the system boundary (API responses, external content) is UNTRUSTED. Before a Tier 2 Reasoner can act on it, it MUST pass through a Tier 1 sanitization step.
+
+| Data Origin | Trust Level | Needs Tier 1 Sanitization? |
+|-------------|-------------|---------------------------|
+| System-generated (plan metadata, PolicyEngine decisions, error objects) | Trusted | No |
+| Internal computation (Analyzer output, Tier 1 output) | Trusted | No |
+| External API responses (ANY MCP tool invocation result) | Untrusted | Yes — before Tier 2 Reasoner |
+| User raw input | Untrusted | Handled by Intake (separate component) |
+
+**Data flow through the trust boundary:**
+
+```
+External API (Fetcher)  →  raw response (UNTRUSTED)
+                              ↓
+                        Tier 1 Reasoner (trust_level: "untrusted_input")
+                          - No tools, no spawning, no MCP access
+                          - Strict output_schema_ref (validates output shape)
+                          - Extracts structured facts, strips free-text injection
+                              ↓
+                        Schema-validated output (TRUSTED)
+                              ↓
+                        Tier 2 Reasoner (trust_level: "trusted")
+                          - Can spawn steps, PolicyEngine-bounded
+                          - Receives ONLY clean structured data
+                          - Makes adaptive decisions
+```
+
+**Planner responsibility**: The Planner (temperature=0) MUST insert a Tier 1 sanitization step between any API step and a Tier 2 Reasoner step. This is a **plan validation rule** — the plan validator rejects plans where a Tier 2 Reasoner's `context_from` includes an API step without an intervening Tier 1 step.
+
+**Pure API plans exempt**: When API step output flows to another API step via template args (`{{step_1.result.id}}`), no sanitization is needed — no LLM processes the data.
+
+**Failure errors exempt**: Step failure objects (`{ error_type, error_details, status_code }`) are system-generated metadata, not external data. They can go directly to a Tier 2 Reasoner for recovery decisions.
 
 ---
 
@@ -41,26 +104,29 @@ The system has **4 layers** that work together:
 - **ProfileStore**: Your stable preferences (work hours, meeting duration)
 - **History**: What you've done before ("usually meets Alice on Tuesdays")
 - **PlanLibrary**: Reusable successful plans
-- **VectorIndex** _(deferred)_: Semantic similarity search — deferred until exact-match queries prove insufficient (see §11 Architectural Decisions)
+- **VectorIndex**: Hybrid BM25 + semantic similarity search via pgvector + tsvector (ONNX Runtime, all-MiniLM-L6-v2, 384-dim)
 
 **Example**: When you say "book a meeting," the system remembers you prefer 30-minute meetings at 10 AM.
 
 ### Layer 2: Domain Services
-**What it does**: Understands your request and builds a plan
+**What it does**: Understands your request, builds a plan, and enforces policies
 - **Intake**: Figures out what you want across multiple messages
-- **ContextRAG**: Assembles relevant context from Memory Layer via structured queries (≤2KB budget, consent tier enforcement) — not embedding-based RAG
-- **Planner**: Creates a step-by-step plan (deterministic, signed)
+- **ContextRAG**: Assembles relevant context from Memory Layer via structured queries + optional VectorIndex hybrid search (≤2KB budget, consent tier enforcement, graceful degradation)
+- **Planner**: Creates a step-by-step plan (deterministic, signed) — may include LLM reasoning steps for open-ended tasks
+- **PolicyEngine**: Governs all runtime LLM decisions — evaluates policy rules, issues attestations for spawned steps, enforces HITL for critical actions. Technology: PostgreSQL (policy rules) + Redis (cached policies, <5ms evaluation)
 - **PluginRegistry**: Knows what tools are available (Google Calendar, Slack, etc.)
 
-**Example**: "Book meeting with Alice" → Intent + Context → Plan with 4 steps
+**Example**: "Book meeting with Alice" → Intent + Context → Plan with 4 steps (pure API)
+**Example**: "Plan my trip to Tokyo" → Intent + Context → Hybrid plan with Reasoner steps that can spawn additional data-fetching steps
 
 ### Layer 3: Orchestration
 **What it does**: Previews and executes plans safely
 - **PreviewOrchestrator**: Shows you what will happen (no side effects)
 - **ApprovalGate**: Waits for your confirmation
-- **ExecuteOrchestrator**: Does the actual work (n8n workflows for all task types)
+- **ExecuteOrchestrator**: Does the actual work — dispatches API steps via MCP tool invocations, runs LLM reasoning with two-tier trust model, evaluates spawned steps via PolicyEngine
 
-**Example**: Shows you 3 time slots → You pick one → Creates the calendar event
+**Example (deterministic)**: Shows you 3 time slots → You pick one → Creates the calendar event (all via MCP)
+**Example (adaptive)**: Python Reasoner analyzes flight options → Spawns Fetcher for adjacent dates → PolicyEngine approves → MCP tool invocation executes spawned step → Results merged
 
 ### Layer 4: API & Frontend
 **What it does**: Your interface to the system
@@ -69,7 +135,9 @@ The system has **4 layers** that work together:
 
 ---
 
-## 2) How It Works: Complete Example
+## 2a) How It Works: Pure API Plan (Meeting Booking)
+
+> **Pure API plan** — Every step is `type: "api"`. Fully deterministic, no LLM at execution time, no prompt injection surface. Step outputs flow via template args. If a step fails after step-level retries → plan is terminal.
 
 **User Request**: "Book a meeting with Alice next week"
 
@@ -94,13 +162,15 @@ Planner receives:
   - Evidence: [30min preference, Tuesday pattern, Alice's email]
   - Available tools: Google Calendar, Slack
 
-Creates Plan:
-  Step 1 (Fetcher): Get Alice's availability  [parallel]
-  Step 2 (Fetcher): Get your availability      [parallel]
-  Step 3 (Analyzer): Find overlapping slots   [after 1,2]
-  Step 4 (Resolver): User picks slot          [gate-A]
-  Step 5 (Booker): Create calendar event      [after 4]
-  Step 6 (Notifier): Send confirmation        [after 5]
+Creates Plan (all steps type: "api" — no Reasoner, no trust tier needed):
+  Step 1 (Fetcher, api): Get Alice's availability  [parallel]
+  Step 2 (Fetcher, api): Get your availability      [parallel]
+  Step 3 (Analyzer, api): Find overlapping slots   [after 1,2]
+  Step 4 (Resolver, api): User picks slot          [gate-A]
+  Step 5 (Booker, api): Create calendar event      [after 4]
+    args: { slot: "{{step_4.result.selected_slot}}" }  ← template resolution
+  Step 6 (Notifier, api): Send confirmation        [after 5]
+    args: { content: "Meeting booked: {{step_5.result.event_id}}" }  ← template resolution
 
 Signer: Signs plan with Ed25519
   → Plan hash: "sha256:abc123..."
@@ -113,7 +183,7 @@ PreviewOrchestrator:
   ✓ Verifies plan signature
   ✓ Runs steps 1-3 in READ-ONLY mode
 
-n8n workflow executes:
+MCP tool invocations execute:
   [Fetch Alice's calendar] ──┐
                              ├→ [Find overlap] → Results
   [Fetch your calendar]   ───┘
@@ -186,6 +256,202 @@ Audit:
 
 ---
 
+## 2b) How Adaptive Execution Works: Travel Planning Example
+
+**User Request**: "Find me the best flights to Tokyo next month and summarize options"
+
+> **Adaptive plan with Reasoner** — The initial plan (revision 0) is immutable and signed. Reasoner steps are explicit decision points that may spawn new steps at runtime, creating new plan revisions. All external API data passes through Tier 1 sanitization before reaching Tier 2 Reasoners.
+
+This example demonstrates **adaptive execution** — the plan includes LLM reasoning steps that can spawn new steps at runtime, with the Data Trust Boundary enforced via explicit Tier 1 sanitization.
+
+### The Plan (Generated by Planner)
+
+```json
+{
+  "plan_id": "01JXYZ...",
+  "plan_revision": 0,
+  "graph": [
+    {
+      "step": 1, "type": "api", "role": "Fetcher",
+      "uses": "flights.api", "call": "search",
+      "args": {"origin": "ORD", "dest": "NRT", "dates": "2026-04-01..2026-04-30"},
+      "after": []
+    },
+    {
+      "step": 2, "type": "api", "role": "Fetcher",
+      "uses": "hotels.api", "call": "search",
+      "args": {"city": "Tokyo", "dates": "2026-04-01..2026-04-30"},
+      "after": []
+    },
+    {
+      "step": 3, "type": "llm_reasoning", "role": "Reasoner",
+      "trust_level": "untrusted_input",
+      "context_from": [1, 2],
+      "can_spawn": false,
+      "policy_ref": "policy-travel-sanitize",
+      "reasoning_config": {
+        "model": "claude-sonnet-4-5-20250929",
+        "temperature": 0.1,
+        "max_tokens": 2048,
+        "system_prompt_ref": "travel_data_sanitize_v1",
+        "output_schema_ref": "travel_data_sanitized_v1"
+      },
+      "after": [1, 2]
+    },
+    {
+      "step": 4, "type": "llm_reasoning", "role": "Reasoner",
+      "trust_level": "trusted",
+      "context_from": [3],
+      "can_spawn": true, "max_spawned_steps": 3,
+      "policy_ref": "policy-travel-reasoning",
+      "reasoning_config": {
+        "model": "claude-sonnet-4-5-20250929",
+        "temperature": 0.3,
+        "max_tokens": 2048,
+        "system_prompt_ref": "travel_analysis_v1"
+      },
+      "after": [3]
+    },
+    {
+      "step": 5, "type": "llm_reasoning", "role": "Reasoner",
+      "trust_level": "trusted",
+      "context_from": [3, 4],
+      "can_spawn": false,
+      "policy_ref": "policy-travel-reasoning",
+      "reasoning_config": {
+        "model": "claude-sonnet-4-5-20250929",
+        "temperature": 0.3,
+        "max_tokens": 4096,
+        "system_prompt_ref": "travel_summary_v1"
+      },
+      "after": [4]
+    },
+    {
+      "step": 6, "type": "api", "role": "Notifier",
+      "uses": "slack", "call": "send_message",
+      "args": {"channel": "user-dm", "content": "{{step_5.result}}"},
+      "after": [5]
+    }
+  ],
+  "constraints": {"scopes": ["flights.read", "hotels.read"], "ttl_s": 1800, "policy_version": 1},
+  "plugins": ["flights.api", "hotels.api", "slack"]
+}
+```
+
+**Notice the trust boundary**: Steps 1-2 (API) → Step 3 (Tier 1 sanitizer) → Steps 4-5 (Tier 2 Reasoners). The Planner inserted Step 3 as a Tier 1 sanitization step because Steps 4-5 are Tier 2 Reasoners that consume API output. The plan validator would reject a plan where Step 4's `context_from` referenced Step 1 directly.
+
+### Runtime Execution (Pure Agentic: Python + MCP)
+
+```
+t=0ms:    Steps 1,2 execute in parallel via asyncio.gather() (Fetcher, MCP tool invocations)
+t=400ms:  Both fetches complete → raw API responses cached (UNTRUSTED)
+
+t=401ms:  Step 3 (Tier 1 Reasoner, trust_level="untrusted_input") executes:
+          - Receives raw flight and hotel API responses
+          - No tools, no spawning, no MCP access
+          - Extracts structured facts:
+            { "flights": [{"airline": "ANA", "price_usd": 1200, "dates": "Apr 15-22"}...],
+              "hotels": [{"name": "Park Hyatt", "price_per_night": 350}...] }
+          - Strips free-text descriptions (potential injection vector):
+            e.g., a hotel description containing "Ignore previous instructions..."
+            → silently dropped, only structured fields retained
+          - Output validated against travel_data_sanitized_v1 schema
+t=500ms:  Step 3 output is now TRUSTED (schema-validated structured data)
+
+t=501ms:  Step 4 (Tier 2 Reasoner, trust_level="trusted") executes:
+          - Receives ONLY clean structured data from Step 3
+          - Analyzes prices: "Flights Apr 15-20 are $1200+, adjacent dates may be cheaper"
+          → Proposes spawned step: Fetcher, flights.api, search(dates: April 10-14)
+t=502ms:  PolicyEngine evaluates spawned step:
+          ✓ flights.api is in plan's plugins array
+          ✓ Fetcher role (read-only, no HITL needed)
+          ✓ 1 spawned step ≤ max_spawned_steps (3)
+          ✓ Total steps: 6 + 1 = 7 ≤ 100
+          → PolicyDecision: { allowed: true, requires_approval: false }
+          → PolicyAttestation created, plan_revision → 1
+t=503ms:  Spawned Fetcher step dispatched via MCP tool invocation
+t=700ms:  Spawned step completes → raw results (UNTRUSTED)
+t=701ms:  Spawned results routed through Step 3 (Tier 1) for sanitization → TRUSTED
+t=750ms:  Step 4 continues with enriched data, completes analysis
+
+t=751ms:  Step 5 (Tier 2 Reasoner, trust_level="trusted") generates travel summary
+          - Receives clean data from Steps 3 and 4
+          - Cannot spawn (can_spawn=false)
+t=900ms:  Step 6 (Notifier, api) sends summary via MCP tool invocation (Slack)
+```
+
+**Key points**:
+- Steps 1-2 are pure **API steps** — identical to deterministic execution
+- Step 3 is a **Tier 1 Reasoner** (sanitizes raw API output → structured facts). No tools, strict schema.
+- Step 4 is a **Tier 2 Reasoner** (makes adaptive decisions on clean data, can spawn). PolicyEngine-bounded.
+- Step 5 is a **Tier 2 Reasoner** (summarizes, cannot spawn)
+- **Trust boundary enforced**: API output never reaches Tier 2 directly — always through Tier 1 first
+- Spawned step results also go through Tier 1 sanitization before Tier 2 consumes them
+- The **original plan signature** remains valid; the spawned step has a **PolicyAttestation** for audit
+
+### What If the LLM Tries Something Forbidden?
+
+```
+Scenario: Step 4 Reasoner tries to spawn a Booker step to auto-book a flight
+
+Python PolicyEngine evaluates:
+  ✗ role=Booker → require_approval=true (non-overridable)
+  → PolicyDecision: { allowed: true, requires_approval: true }
+  → gate_id injected automatically
+
+Result: Spawned Booker step pauses at HITL gate, user must approve before booking
+```
+
+---
+
+## 2c) Failure Recovery Example
+
+> **Failure recovery** — When an API step fails, the error object (system-generated, trusted) routes to the nearest Tier 2 Reasoner with `can_spawn=true` for adaptive recovery.
+
+**Scenario**: Step 1 (flights.api search) fails with 503 Service Unavailable — using the same plan from §2b.
+
+```
+t=0ms:    Steps 1,2 execute in parallel via asyncio.gather()
+t=200ms:  Step 2 (hotels.api) completes successfully
+t=201ms:  Step 1 (flights.api) fails after 3 step-level retries (RetryPolicy exhausted)
+
+t=202ms:  Error object generated (system-generated, TRUSTED — not raw API response):
+          { "step": 1, "error_type": "api_unavailable", "status_code": 503,
+            "retries_exhausted": true, "api": "flights.api" }
+
+t=203ms:  Step 3 (Tier 1 Reasoner) runs on partial data (hotels only):
+          - Receives hotel API response → sanitizes → structured hotel data (TRUSTED)
+          - Flight data absent (Step 1 failed)
+
+t=300ms:  Step 4 (Tier 2 Reasoner, can_spawn=true) receives:
+          - Clean hotel data from Step 3 (TRUSTED)
+          - Error object from Step 1 (system-generated, TRUSTED — goes directly to Tier 2)
+          Reasoner decides: "Primary flight API down, try alternative provider"
+          → Proposes spawned step: Fetcher, alt-flights.api, search(same args as Step 1)
+
+t=301ms:  PolicyEngine evaluates:
+          ✓ alt-flights.api is in plan's plugins array
+          ✓ Fetcher role (read-only)
+          ✓ 1 spawned ≤ max_spawned_steps (3)
+          → Approved, PolicyAttestation created, plan_revision → 1
+
+t=302ms:  Spawned Fetcher executes via MCP tool invocation
+t=500ms:  Spawned Fetcher returns results (UNTRUSTED — raw API response)
+
+t=501ms:  Results routed through Step 3 (Tier 1 sanitization) → TRUSTED
+t=550ms:  Step 4 (Tier 2 Reasoner) continues with enriched data (hotels + alternative flights)
+t=600ms:  Step 5 (Tier 2 Reasoner) generates summary from Steps 3 + 4
+t=800ms:  Step 6 (Notifier) sends summary via Slack
+```
+
+**Key points**:
+- Error objects are **system-generated metadata** (step ID, error type, status code) — not raw API responses. They are TRUSTED and go directly to Tier 2 Reasoners.
+- Spawned recovery steps still go through **Tier 1 sanitization** before Tier 2 consumes their output.
+- **PolicyEngine** evaluates all recovery actions — same deny-by-default rules as normal spawning.
+- If recovery is exhausted (`max_recovery_actions` reached or no alternative available) → **plan is terminal** → user notified.
+
+---
+
 ## 3) Component Details
 
 Below are the 16 core components organized by layer. Each will have its own `SPEC.md` and `LLD.md` during implementation.
@@ -212,9 +478,9 @@ Below are the 16 core components organized by layer. Each will have its own `SPE
 **Note**: This stores *structured facts*, not raw emails or messages.
 
 #### VectorIndex
-**What it does**: Finds similar past situations by semantic meaning
+**What it does**: Finds similar past situations via hybrid BM25 + semantic search with Reciprocal Rank Fusion (RRF) score merging
 **Example query**: "Find times I've booked meetings with executives"
-**Technology**: PostgreSQL with pgvector extension (HNSW index)
+**Technology**: PostgreSQL with pgvector extension (HNSW index, 384-dim), tsvector (BM25 keyword search), ONNX Runtime (all-MiniLM-L6-v2, ~10ms local inference)
 
 #### PlanLibrary
 **What it does**: Stores all past plans with signatures and outcomes
@@ -259,16 +525,20 @@ Intake: [ready! triggers planning]
 **Why small?**: LLM context window is expensive; we only send what's needed.
 
 #### Planner
-**What it does**: Creates a deterministic step-by-step plan
-**Input**: Intent + Evidence + Available tools (from PluginRegistry)
+**What it does**: Creates a deterministic step-by-step plan (may include hybrid LLM reasoning steps)
+**Input**: Intent + Evidence + Available tools (from PluginRegistry) + Policy version (from PolicyEngine)
 **Process**: Calls Anthropic Claude API (temperature=0) via LLMAdapter protocol to generate plan
-**Output**: Plan graph with steps, dependencies, roles, and **credential ID references**
+**Output**: Plan graph with steps, dependencies, roles, step types (`api`/`llm_reasoning`/`policy_check`), and **credential ID references**
 
 **Key features**:
-- **Deterministic**: Same inputs always produce same plan
+- **Deterministic**: Same inputs always produce same plan (initial plan)
+- **Hybrid plans**: For open-ended tasks, Planner includes `type: "llm_reasoning"` steps with `can_spawn=true` and `policy_ref`
+- **PolicyEngine integration**: Planner snapshots `policy_version` at plan creation and assigns `policy_ref` to reasoning steps
 - **No access to credentials**: Plans reference credential IDs (e.g., `"gcal_user_123"`), not actual API tokens or secrets
-- **Credential resolution deferred**: n8n resolves credential IDs to actual values at execution time
+- **Credential resolution deferred**: ExecuteOrchestrator decrypts credentials from vault at execution time
 - **LLMAdapter protocol**: Anthropic Claude API for MVP; protocol abstraction allows future provider swaps (Ollama, vLLM)
+
+**Planner LLM vs Runtime LLM**: The Planner generates the initial plan (temperature=0, deterministic). Runtime LLM reasoning steps (temperature=0.1-0.7) execute during plan execution and adapt within PolicyEngine bounds. Both have ZERO credential access.
 
 #### Signer
 **What it does**: Cryptographically signs plans to prevent tampering
@@ -283,24 +553,25 @@ Intake: [ready! triggers planning]
 **What it does**: Source of truth for available tools and their credential requirements
 **Includes**:
 - Tool capabilities (operations, scopes, previewable, idempotent)
-- **Credential ID templates**: Maps user + integration → n8n credential ID
-- n8n node bindings (which n8n node to use for each operation)
+- **Credential vault ID templates**: Maps user + integration → encrypted credential vault ID
+- MCP server bindings (which MCP server and tool to use for each operation)
 
 **Example entry**:
 ```json
 {
   "tool_id": "google.calendar",
+  "mcp_server": "google-workspace-mcp",
+  "transport": "stdio",
   "credential_template": "gcal_user_{{user_id}}_{{account_name}}",
-  "n8n_credential_type": "googleCalendarOAuth2Api",
   "operations": {
     "list_free_busy": {
-      "n8n_node": "Google Calendar",
+      "mcp_tool": "calendar_list_free_busy",
       "previewable": true,
       "scopes": ["calendar.read"],
       "idempotent": true
     },
     "create_event": {
-      "n8n_node": "Google Calendar",
+      "mcp_tool": "calendar_create_event",
       "previewable": false,
       "scopes": ["calendar.write"],
       "idempotent": true,
@@ -310,10 +581,32 @@ Intake: [ready! triggers planning]
 }
 ```
 
-**Security**: PluginRegistry provides credential ID templates to Planner, NOT credential values. Actual credentials (OAuth tokens, API keys) are stored in n8n Secrets Vault and never exposed to the LLM
-```
+**Security**: PluginRegistry provides credential vault IDs to Planner, NOT credential values. Actual credentials (OAuth tokens, API keys) are stored in the encrypted credential vault (AES-256-GCM in PostgreSQL) and never exposed to the LLM.
+
+**Three connector sources**:
+1. **MCP servers**: Community-maintained protocol connectors (primary)
+2. **OpenAPI adapters**: Auto-generated MCP wrappers for REST APIs
+3. **Aggregator services**: Multi-provider APIs (e.g., SerpAPI for search)
 
 **Why important**: Adding new capabilities only requires editing the Registry, not the orchestrators.
+
+#### PolicyEngine
+**What it does**: Governs all runtime LLM decisions — evaluates whether reasoning steps can spawn new steps, what roles/tools are allowed, and whether human approval is required.
+
+**Key responsibilities**:
+1. **Rule evaluation**: Checks proposed actions against policy rules (step-level → role-level → system-level)
+2. **Attestation**: Issues signed PolicyAttestation records for approved runtime modifications
+3. **HITL enforcement**: Automatically injects `gate_id` for spawned Booker steps (non-overridable)
+4. **Deny-by-default**: Rejects any action without a matching policy rule
+
+**Default policies**:
+- LLM Reasoning: Allows Fetcher/Analyzer/Reasoner/Notifier roles, forbids Booker, max 3 spawned steps
+- No recursive spawning: Spawned steps cannot have `can_spawn=true`
+- Token budget: Max 8192 tokens per reasoning step
+
+**Technology**: PostgreSQL (policy rules), Redis (cached policies for <5ms evaluation)
+
+**Example**: Reasoning step proposes spawning a Fetcher step → PolicyEngine checks: tool in plugins? role allowed? under step limit? → Approves with attestation.
 
 #### PlanWriter
 **What it does**: Persists execution results back to memory
@@ -327,35 +620,17 @@ Intake: [ready! triggers planning]
 
 ---
 
-### Orchestration Layer (5 components)
+### Orchestration Layer (4 components)
 
 #### WorkflowBuilder
-**What it does**: Converts plan dependency graph → n8n workflow JSON
-**Input**: Plan + mode ("preview" or "execute")
-**Output**: n8n workflow with parallel execution structure
-
-**Example**:
-```
-Plan steps:
-  Step 1: Fetch Alice's calendar [after: []]
-  Step 2: Fetch your calendar   [after: []]
-  Step 3: Find overlap          [after: [1, 2]]
-
-n8n workflow:
-  Split → [Step 1 || Step 2] → Merge → Step 3
-```
-
-**Modes**:
-- `preview`: Only dry_run steps, read-only operations
-- `execute`: All steps, with idempotency and compensation
+> **REMOVED in v6.0** — WorkflowBuilder's responsibilities (DAG traversal, parallel grouping, step dispatch) have been absorbed into ExecuteOrchestrator. With n8n removed in favor of direct MCP tool invocations, the intermediate workflow JSON generation step is no longer needed. ExecuteOrchestrator handles DAG resolution, `asyncio.gather()` parallelism, and MCP dispatch natively.
 
 #### PreviewOrchestrator
 **What it does**: Shows you what will happen (no side effects!)
 **Process**:
 1. Verifies plan signature
-2. Calls WorkflowBuilder with mode="preview"
-3. Executes n8n workflow (read-only)
-4. Returns Preview wrapper with results
+2. Dispatches read-only MCP tool invocations for previewable steps
+3. Returns Preview wrapper with results
 
 **Safety**: Only runs operations marked `previewable: true` in Registry
 
@@ -385,16 +660,22 @@ n8n workflow:
 
 
 #### ExecuteOrchestrator
-**What it does**: Does the actual work (writes to external systems)
+**What it does**: Does the actual work (writes to external systems). Absorbs WorkflowBuilder's DAG traversal and parallel grouping responsibilities.
 **Process**:
 1. Verifies signature + approval token
 2. **Retrieves cached preview state** (skip repeated steps!)
-3. Calls WorkflowBuilder with mode="execute"
-4. Executes n8n workflow with:
-   - Idempotency checks (plan_id:step:arg_hash)
-   - Resource locking (prevent conflicts)
-   - Compensation on failure (undo operations)
-5. Returns Execute wrappers
+3. Resolves plan DAG into execution levels (topological sort)
+4. Dispatches steps by type:
+   - `type: "api"` → MCP tool invocation with decrypted credentials from vault
+   - `type: "llm_reasoning"` → Anthropic API call with two-tier trust model:
+     - `trust_level: "untrusted_input"` (Tier 1): No tools, strict output schema, input sanitized
+     - `trust_level: "trusted"` (Tier 2): MCP tool access, may spawn steps, PolicyEngine-bounded
+   - `type: "policy_check"` → PolicyEngine evaluation
+5. Parallel execution via `asyncio.gather()` for independent steps
+6. Idempotency checks (plan_id:step:arg_hash)
+7. Resource locking (prevent conflicts)
+8. Compensation on failure (undo operations)
+9. Returns Execute wrappers
 
 **Preview state reuse**:
 - Steps marked `execute_mode: "preview_only"` are skipped
@@ -402,71 +683,46 @@ n8n workflow:
 - Example: `product_id: "{{preview.cached_state.selected_product}}"`
 
 #### ExecutionMonitor
-**What it does**: Monitors n8n workflow executions and triggers retries for stuck/failed workflows
+**What it does**: Monitors asyncio task executions for infrastructure-level failures (hung processes, server crashes, time budget violations)
 
 **Responsibilities**:
-1. **Poll n8n API** every 30 seconds for active executions
-2. **Detect stuck executions**: No progress for 5+ minutes → mark as stale, trigger retry
-3. **Detect failed executions**: Apply retry policy with attempt caps (max 3 attempts)
-4. **Enforce time budgets**: Cancel workflows exceeding max execution time
-5. **Notify users**: Alert on terminal failures (max retries exhausted)
-6. **Track execution state**: Maintain execution_tracker table (plan_id, n8n_execution_id, status, attempt_count)
+1. **Poll execution task registry** every 30 seconds for active executions
+2. **Detect stuck executions**: No progress for 5+ minutes → cancel and notify user
+3. **Enforce time budgets**: Cancel tasks exceeding max execution time (60 minutes)
+4. **Notify users**: Alert on infrastructure failures so they can start a new plan
+5. **Track execution state**: Maintain execution_tracker table (plan_id, task_id, status)
+
+**What it does NOT do**:
+- ❌ Workflow-level replay (step failures are handled by LLM reasoning steps)
+- ❌ Automatic retry of failed plans (failed plans are terminal)
 
 **Why needed**:
-- n8n may not automatically recover stuck executions after restart
-- Workflow-level retry requires external trigger (n8n doesn't auto-retry workflows)
-- Centralized retry policy enforcement across all workflows
+- Asyncio tasks may hang indefinitely (waiting for external event that never arrives)
+- Time budget enforcement prevents resource leaks from runaway tasks
+- User notification ensures awareness of infrastructure failures
 
 **Process**:
 ```python
 async def monitor_loop():
     while True:
-        # 1. Query n8n for active executions
-        executions = await n8n_client.get_active_executions()
+        # 1. Query execution task registry for active tasks
+        executions = await task_registry.get_active_executions()
 
         for execution in executions:
             # 2. Check for stuck execution (no progress for 5min)
             if is_stuck(execution, timeout_minutes=5):
-                await handle_stuck_execution(execution)
+                await task_registry.cancel_execution(execution.task_id)
+                await notify_user("Execution stuck — please start a new plan")
 
-            # 3. Check for failed execution needing retry
-            if execution.status == "failed":
-                tracker = await get_execution_tracker(execution.id)
-                if tracker.attempt_count < 3:
-                    await retry_workflow(execution, tracker)
-                else:
-                    await notify_user_terminal_failure(execution)
-
-            # 4. Enforce time budget (cancel if exceeded)
+            # 3. Enforce time budget (cancel if exceeded)
             if is_over_time_budget(execution, max_minutes=60):
-                await n8n_client.cancel_execution(execution.id)
+                await task_registry.cancel_execution(execution.task_id)
                 await notify_user_timeout(execution)
 
         await asyncio.sleep(30)  # Poll every 30 seconds
 ```
 
-**Retry policy** (workflow-level):
-```python
-retry_backoff = [60, 300, 900]  # 1min, 5min, 15min (exponential)
-
-async def retry_workflow(execution, tracker):
-    attempt = tracker.attempt_count
-
-    if attempt < 3:
-        # Wait with exponential backoff
-        await asyncio.sleep(retry_backoff[attempt])
-
-        # Trigger new execution with same input
-        await n8n_client.execute_workflow(
-            workflow_id=execution.workflow_id,
-            input_data=execution.input_data
-        )
-
-        # Update tracker
-        await update_tracker(execution.id, attempt_count=attempt + 1)
-```
-
-**Technology**: FastAPI background task + n8n REST API
+**Technology**: FastAPI background task + asyncio task registry
 
 ---
 
@@ -484,18 +740,18 @@ async def retry_workflow(execution, tracker):
 
 **IMPORTANT (MVP Scope)**: Runtime roles are **logical plan-step categories**, NOT separate runtime workers or services.
 
-**All execution happens inside n8n.** Roles serve as metadata for policies and safety rules.
+**API steps execute via MCP tool invocations; LLM reasoning steps execute in Python.** Roles serve as metadata for policies and safety rules.
 
 ### Purpose of Roles
 
-Roles are assigned to plan steps during planning and used by WorkflowBuilder to determine:
+Roles are assigned to plan steps during planning and used by ExecuteOrchestrator to determine:
 - **Idempotency requirement**: Does this step need idempotency keys? (Booker: yes, Fetcher: no)
 - **HITL requirement**: Does this step need human approval? (Resolver: yes, Analyzer: no)
 - **Retry policy**: How should failures be handled? (Watcher: aggressive retries, Notifier: best-effort)
 - **Compensation requirement**: Does this step need undo logic? (Booker: yes, Fetcher: no)
 - **Resource locking**: Does this step need locks? (Booker: yes, Analyzer: no)
 
-### The 6 Roles
+### The 7 Roles
 
 #### 1. Fetcher (Read Operations)
 **Policy Metadata**:
@@ -511,7 +767,7 @@ Roles are assigned to plan steps during planning and used by WorkflowBuilder to 
 - Look up product details
 - Check flight prices
 
-**n8n Implementation**: HTTP Request nodes, connector nodes in read mode
+**Implementation**: MCP tool invocations (HTTP, API connectors)
 
 #### 2. Analyzer (Data Processing)
 **Policy Metadata**:
@@ -527,7 +783,7 @@ Roles are assigned to plan steps during planning and used by WorkflowBuilder to 
 - Compare flight routes
 - Calculate expense totals
 
-**n8n Implementation**: Function nodes, Code nodes (JavaScript/Python)
+**Implementation**: Python functions or MCP tool invocations
 
 #### 3. Watcher (Long-Running Monitoring)
 **Policy Metadata**:
@@ -543,7 +799,7 @@ Roles are assigned to plan steps during planning and used by WorkflowBuilder to 
 - Watch for email replies
 - Track package delivery
 
-**n8n Implementation**: Loop workflows with Wait nodes, scheduled triggers, webhook listeners
+**Implementation**: Python asyncio tasks with APScheduler, Redis-backed state
 
 #### 4. Resolver (User Interaction)
 **Policy Metadata**:
@@ -558,7 +814,7 @@ Roles are assigned to plan steps during planning and used by WorkflowBuilder to 
 - "Pick from these 3 options"
 - "Confirm this choice"
 
-**n8n Implementation**: Wait nodes with webhook resume, approval flows
+**Implementation**: Python async approval gates (Redis-backed, webhook resume)
 
 #### 5. Booker (Write Operations)
 **Policy Metadata**:
@@ -574,9 +830,9 @@ Roles are assigned to plan steps during planning and used by WorkflowBuilder to 
 - Make purchases
 - Book appointments
 
-**n8n Implementation**: Connector nodes (Google Calendar, Slack, etc.) with idempotency wrapper
+**Implementation**: MCP tool invocations with idempotency wrapper
 
-**Critical Requirement**: WorkflowBuilder MUST inject idempotency checks before Booker nodes
+**Critical Requirement**: ExecuteOrchestrator MUST inject idempotency checks before Booker steps
 
 #### 6. Notifier (Updates and Alerts)
 **Policy Metadata**:
@@ -592,15 +848,40 @@ Roles are assigned to plan steps during planning and used by WorkflowBuilder to 
 - Progress updates
 - Error notifications
 
-**n8n Implementation**: Slack nodes, email nodes, webhook notifications
+**Implementation**: MCP tool invocations (Slack, email connectors)
 
-### How n8n Executes Steps
+#### 7. Reasoner (LLM-Based Adaptive Decisions)
+**Policy Metadata**:
+- Side-effecting: **No** (LLM reasoning only; spawned Booker steps handle writes)
+- Requires HITL: No (PolicyEngine governs; spawned Booker steps get automatic HITL)
+- Retry policy: Moderate (3 attempts with circuit breaker)
+- Compensation: Not applicable (reasoning itself is not side-effecting)
+- Resource locking: No
+- **PolicyEngine bounded**: Must declare `policy_ref`, respects token budget (evaluated in Python)
+- **May spawn steps**: `can_spawn=true` allows creating new plan steps at runtime (max 3 per step, max 10 absolute); spawned API steps dispatched via MCP tool invocations
 
-**All steps execute as n8n workflow nodes.** WorkflowBuilder generates n8n workflow JSON where:
-- Each plan step → one or more n8n nodes
-- Dependencies → n8n connections between nodes
-- Parallel steps → Split/Merge nodes
-- HITL gates → Wait nodes with webhooks
+**Examples**:
+- Analyze flight options and decide if more data is needed
+- Rank restaurant options considering user preferences and context
+- Generate natural language summary of comparison results
+- Decide which dates to check based on initial price analysis
+
+**Implementation**: Python service (ExecuteOrchestrator + Anthropic API). PolicyEngine evaluates spawned steps before execution. Spawned API steps dispatched via MCP tool invocations.
+
+**Spawning constraints**:
+1. Spawned steps CANNOT have `can_spawn=true` (no recursive spawning)
+2. Spawned steps can only use tools in the plan's `plugins` array
+3. Spawned steps with `role=Booker` always get `gate_id` injected (non-overridable HITL)
+4. Deny-by-default: if no policy matches, action is denied
+5. Total plan steps (original + spawned) cannot exceed 100
+
+### How Steps Execute (Pure Agentic: Python + MCP)
+
+**API steps execute via MCP tool invocations; LLM reasoning steps execute in Python.** ExecuteOrchestrator resolves the plan DAG and dispatches steps directly:
+- Each plan step → MCP tool invocation or Anthropic API call
+- Dependencies → `asyncio.gather()` waits for prerequisite steps
+- Parallel steps → `asyncio.gather()` for concurrent execution
+- HITL gates → Redis-backed async approval gates
 
 **Parallel execution** (steps with no dependencies):
 ```
@@ -608,8 +889,11 @@ Plan:
   Step 1 (Fetcher): Get Alice's calendar  [after: []]
   Step 2 (Fetcher): Get Bob's calendar    [after: []]
 
-n8n Workflow:
-  Split → [HTTP Request: Alice || HTTP Request: Bob] → Merge
+Execution:
+  results = await asyncio.gather(
+      mcp_invoke("calendar_list_free_busy", alice_args),
+      mcp_invoke("calendar_list_free_busy", bob_args),
+  )
 ```
 
 **Sequential execution** (steps with dependencies):
@@ -617,8 +901,9 @@ n8n Workflow:
 Plan:
   Step 3 (Analyzer): Find overlap  [after: [1, 2]]
 
-n8n Workflow:
-  Merge (from 1 & 2) → Function: Find Overlap
+Execution:
+  # Steps 1,2 completed via asyncio.gather() above
+  overlap = await analyze_overlap(results[0], results[1])
 ```
 
 **Booker with idempotency** (side-effecting steps):
@@ -626,25 +911,23 @@ n8n Workflow:
 Plan:
   Step 4 (Booker): Create calendar event  [after: [3]]
 
-n8n Workflow:
-  1. HTTP Request: Check idempotency key (Redis GET)
-  2. IF: Already executed?
-     - Yes → Return cached result
-     - No → Continue
-  3. Google Calendar: Create Event
-  4. HTTP Request: Store idempotency result (Redis SET)
+Execution:
+  1. Check idempotency key (Redis GET)
+  2. Already executed? → Return cached result
+  3. Not found → MCP tool invocation: calendar_create_event
+  4. Store idempotency result (Redis SET)
 ```
 
 **Real execution timeline** (meeting booking example):
-- t=0ms: n8n starts workflow execution
-- t=0ms: Steps 1 & 2 execute in parallel (Split node)
+- t=0ms: ExecuteOrchestrator starts plan execution
+- t=0ms: Steps 1 & 2 execute in parallel (asyncio.gather)
 - t=200ms: Both Fetcher steps complete
-- t=201ms: Merge node combines results
+- t=201ms: Results combined
 - t=202ms: Step 3 (Analyzer) executes
 - t=350ms: Step 3 completes
-- t=351ms: Step 4 (Booker) checks idempotency → not found → executes
+- t=351ms: Step 4 (Booker) checks idempotency → not found → executes via MCP
 - t=580ms: Step 4 completes, stores result
-- t=581ms: Workflow finishes
+- t=581ms: Plan execution finishes
 
 ---
 
@@ -664,14 +947,21 @@ n8n Workflow:
    - Checks idempotency (prevents duplicate operations)
    - Supports compensation (undo if something fails)
 
-### Deterministic Planning
-**Guarantee**: Same inputs always produce the same plan
+### Deterministic Planning with Adaptive Execution
+
+**Key distinction**:
+- **"Deterministic"** refers to the **initial plan (revision 0)** — same inputs always produce the same DAG topology (same steps, same dependencies, same roles). Revision 0 is immutable and cryptographically signed.
+- **"Adaptive"** refers to what happens at runtime — Reasoner steps observe step outputs, make judgments, and may spawn new steps within PolicyEngine bounds. Each spawn event creates a **new plan revision** (revision 1, 2, ...) with a PolicyAttestation. The original graph is never mutated; new steps extend it.
+- These are not contradictory: the initial plan is deterministic and signed, runtime extensions are versioned and audited.
+
+**Guarantee**: Same inputs always produce the same **initial plan graph** (revision 0). The plan signature covers revision 0; runtime spawned steps increment `plan_revision` and get PolicyAttestations (§2.4.1).
 
 **Inputs** (frozen tuple):
 - Intent (finalized user request)
 - Evidence (context from ContextRAG, ≤2KB)
 - Registry (available tools snapshot)
 - Policy (GLOBAL_SPEC version)
+- PolicyVersion (PolicyEngine rules version snapshot)
 
 **Process**:
 1. Planner calls Anthropic Claude API with temperature=0 (via LLMAdapter protocol)
@@ -679,57 +969,98 @@ n8n Workflow:
 3. Sign with Ed25519 (cryptographic signature)
 4. Hash: SHA-256 of canonical plan bytes
 
-**Benefits**:
-- Same request tomorrow = same plan
-- Tamper detection (signature verification)
-- Auditability (reproducible plans)
+**At runtime** (for plans with `type: "llm_reasoning"` steps):
+5. LLM reasoning steps execute with per-step ReasoningConfig (temperature 0.1–0.7)
+6. Spawned steps are evaluated by PolicyEngine before execution
+7. Each spawn event creates a PolicyAttestation (supplements, doesn't replace, the original signature)
+8. `plan_revision` increments on each spawn event
 
-### Retry Strategy (Node-Level + Workflow-Level)
+**Benefits**:
+- Same request tomorrow = same initial plan graph
+- Tamper detection (signature verification + policy attestation chain)
+- Auditability (reproducible initial plans + audited runtime adaptations)
+- Adaptive execution for open-ended tasks (ranking, summarizing, deciding what data to fetch)
+- Clear separation: plan graph is reviewable upfront, Reasoner behavior is policy-bounded at runtime
+
+### Policy-Bounded Execution
+**Rule**: All runtime LLM decisions are bounded by PolicyEngine rules
+
+**How it works**:
+1. **Deny-by-default**: If no policy rule matches a proposed action, it is rejected
+2. **Role enforcement**: Spawned Booker steps always require HITL (non-overridable)
+3. **Scope inheritance**: Spawned steps can only use tools in the plan's `plugins` array
+4. **No recursive spawning**: Spawned steps cannot spawn further steps
+5. **Attestation chain**: Every spawn event produces a PolicyAttestation linking to the policy rule, decision, and new steps — forming a complete audit trail alongside the original signature
+
+**Credential isolation**: Runtime LLM reasoning steps (Python service) have the same ZERO credential access as the Planner LLM. Credentials are decrypted from the encrypted vault (AES-256-GCM in PostgreSQL) by ExecuteOrchestrator at execution time for API steps only, held in-memory briefly, zeroed after MCP call, and never exposed to any LLM.
+
+### Retry Strategy (Node-Level + LLM-Adaptive + Infrastructure)
 
 **MVP supports two retry mechanisms:**
 
-#### A) Node-Level Retries (Transient Failures)
+#### A) Step-Level Retries (Transient Failures)
 For individual step failures (network timeouts, rate limits, temporary API errors):
 
-```yaml
-# n8n node configuration (generated by WorkflowBuilder)
-node:
-  retry_on_fail: true
-  max_retries: 3
-  wait_between: 1000  # Linear backoff (1 second)
+```python
+# Python RetryPolicy (applied by ExecuteOrchestrator per step)
+retry_policy = RetryPolicy(
+    max_retries=3,
+    backoff="exponential",  # 1s, 2s, 4s
+    retry_on=[503, 504, "timeout", "connection_reset"],
+)
 ```
 
 **When to use**: Transient failures (503 errors, timeouts, connection resets)
 
-**Limitations**: n8n only supports linear backoff. For exponential backoff, WorkflowBuilder generates custom retry loops with IF/Wait nodes.
+#### B) LLM-Adaptive Recovery (Primary Recovery Mechanism)
+For step-level failures in hybrid plans, LLM reasoning handles recovery inline:
 
-#### B) Workflow-Level Retries (Execution Failures)
-For entire workflow failures (unhandled errors, node crashes, n8n restarts):
+**How it works**:
+1. A plan step fails (API error, unexpected response, data issue)
+2. The failure routes back to the ExecuteOrchestrator, which passes it to the nearest Reasoner step
+3. The Reasoner (Python/Anthropic API) analyzes the failure and proposes a fix within PolicyEngine bounds:
+   - **Correctable errors**: Spawn a replacement step with adjusted parameters (e.g., different search query, alternative API endpoint)
+   - **Transient errors**: Request a retry of the same step (subject to policy retry limits)
+   - **Policy rejection**: Adjust the approach (e.g., use a read-only alternative instead of a write)
+4. PolicyEngine evaluates the proposed recovery action
+5. If approved → fixed step executes → plan continues forward
+6. If retries exhausted (per policy) → **plan is terminal** → error returned to user
 
-**Trigger mechanisms**:
-1. **n8n error workflow**: Catches workflow failures and logs to execution_tracker table
-2. **ExecutionMonitor**: Background service polls n8n API every 30 seconds, detects stuck/failed executions
-
-**Retry policy**:
+**Recovery policy** (configured per reasoning step via PolicyEngine):
 ```python
-max_attempts = 3
-backoff_strategy = [60, 300, 900]  # seconds (1min, 5min, 15min)
-
-if attempt_count < max_attempts:
-    await asyncio.sleep(backoff_strategy[attempt_count - 1])
-    await n8n_client.trigger_workflow(workflow_id, input_data)
-else:
-    await notify_user("Workflow failed after 3 attempts")
+# PolicyEngine recovery rules
+recovery_policy = {
+    "max_retry_per_step": 2,         # Max retries for a single failed step
+    "max_recovery_actions": 5,        # Max total recovery actions per plan execution
+    "allowed_recovery_roles": ["Fetcher", "Analyzer"],  # What roles can be spawned for recovery
+    "recovery_timeout_s": 120,        # Max time for recovery attempts
+}
 ```
 
-**Critical requirement**: Workflow-level retry starts from the beginning → **MUST have idempotency** to prevent duplicate side effects.
+**Key principle**: **No workflow-level replay.** If the Reasoner exhausts its policy-bounded recovery attempts, the plan fails terminally. The user is notified and must start a new plan for the same task. This avoids:
+- Complex partial-execution state management
+- "Resume from step N" logic
+- Idempotency-dependent full workflow replays
+
+**For pure API plans** (no Reasoner steps): Step-level retries (§A) handle transient failures. If a step fails after step-level retries, the plan fails terminally.
+
+#### C) Infrastructure-Level Recovery (ExecutionMonitor)
+For infrastructure failures that are outside the plan's control:
+
+**Scope**: Hung execution tasks, server crashes, network partitions — NOT step-level failures.
+
+**Trigger**: ExecutionMonitor (polls task registry every 30s) detects:
+- Stuck executions: No progress for 5+ minutes → cancel and notify user
+- Time budget exceeded: >60 minutes → cancel and notify user
+
+**Outcome**: Infrastructure failures are terminal. The user is notified and must start a new plan. There is no automatic workflow-level replay — the LLM reasoning model makes this unnecessary for step-level failures, and infrastructure failures typically indicate systemic issues that replay wouldn't fix.
 
 ### Idempotency (Multi-User Safe, No Duplicate Operations)
 
 **Problem**:
 1. Network fails after creating a calendar event → Retry would create duplicates
 2. Multiple users run similar workflows → Must not collide on idempotency keys
-3. Workflow retry starts from beginning → Must skip already-executed side effects
+3. LLM reasoning spawns a recovery step that retries the same operation → Must detect duplicate
 
 **Solution**: 3-state idempotency records with multi-user scoping
 
@@ -772,7 +1103,7 @@ Each side-effecting step (Booker role) has a state record:
 ```python
 {
   "state": "IN_FLIGHT | SUCCEEDED | FAILED",
-  "owner_execution_id": "n8n-exec-12345",  # Which n8n execution owns this
+  "owner_execution_id": "task-12345",  # Which execution task owns this
   "started_at": "2026-03-03T10:00:00Z",
   "completed_at": "2026-03-03T10:00:15Z",
   "expires_at": "2026-03-04T10:00:00Z",   # 24h TTL
@@ -871,42 +1202,34 @@ async def execute_with_idempotency(
         raise
 ```
 
-**How WorkflowBuilder injects idempotency** (n8n workflow nodes):
+**How ExecuteOrchestrator injects idempotency** (per Booker step):
 
-```yaml
-# For each Booker step, generate 4 nodes:
+```python
+# For each Booker step, ExecuteOrchestrator wraps execution:
 
-nodes:
-  # 1. Check idempotency state
-  - id: "idem_check_step_5"
-    type: "HTTP Request"
-    url: "{{$env.REDIS_API}}/idempotency/{{$json.idem_key}}"
-    method: "GET"
+async def execute_booker_step(step: PlanStep, plan_id: str):
+    idem_key = f"idem:{user_id}:{integration_id}:{plan_id}:{step.step}:{step.call}:{input_hash}"
 
-  # 2. Conditional execution based on state
-  - id: "should_execute_step_5"
-    type: "IF"
-    conditions:
-      - "={{$node.idem_check_step_5.json.state !== 'SUCCEEDED'}}"
+    # 1. Check idempotency state
+    existing = await redis.get(idem_key)
+    if existing and json.loads(existing)["state"] == "SUCCEEDED":
+        return json.loads(existing)["result"]  # Return cached result
 
-  # 3. Main operation (only if not already succeeded)
-  - id: "step_5_create_event"
-    type: "Google Calendar"
-    operation: "createEvent"
-    # ... parameters
+    # 2. Claim execution slot (atomic SET NX)
+    claimed = await redis.set(idem_key, json.dumps({"state": "IN_FLIGHT"}), nx=True, ex=86400)
+    if not claimed:
+        raise IdempotencyConflict("Operation already in progress")
 
-  # 4. Store result with SUCCEEDED state
-  - id: "idem_store_step_5"
-    type: "HTTP Request"
-    url: "{{$env.REDIS_API}}/idempotency/{{$json.idem_key}}"
-    method: "POST"
-    body:
-      state: "SUCCEEDED"
-      result: "={{$node.step_5_create_event.json}}"
+    # 3. Execute via MCP tool invocation
+    result = await mcp_invoke(step.uses, step.call, step.args, credentials=decrypted_creds)
+
+    # 4. Store result with SUCCEEDED state
+    await redis.setex(idem_key, 86400, json.dumps({"state": "SUCCEEDED", "result": result}))
+    return result
 ```
 
 **Benefits**:
-- ✅ Safe workflow-level retry (skips already-executed steps)
+- ✅ Safe LLM-adaptive recovery (spawned replacement steps detect prior execution)
 - ✅ Multi-user safe (keys scoped by user/integration)
 - ✅ Prevents thundering herd (IN_FLIGHT blocks concurrent executions)
 - ✅ Stale execution recovery (takeover after timeout)
@@ -1090,7 +1413,8 @@ See [README.md Tech Stack section](../../README.md#tech-stack) for the complete 
 
 **Summary**:
 - **Backend**: Python 3.11+ (FastAPI, Pydantic, SQLAlchemy async)
-- **Orchestration**: n8n (self-hosted, all workflows with built-in persistence and Secrets Vault)
+- **Orchestration**: Python/FastAPI ExecuteOrchestrator with MCP protocol for tool invocations
+- **Credentials**: AES-256-GCM encrypted vault in PostgreSQL (master key from env)
 - **Data**: PostgreSQL 16 + pgvector, Redis 7
 - **AI**: Anthropic Claude API (plan generation, temperature=0); ONNX Runtime (local embeddings, 384-dim all-MiniLM-L6-v2)
 - **Testing**: pytest, ruff, mypy
@@ -1098,7 +1422,7 @@ See [README.md Tech Stack section](../../README.md#tech-stack) for the complete 
 
 **Key architectural decisions**:
 - **No LangChain**: Direct API calls for one-shot planning (not iterative agents)
-- **Single runtime**: n8n for all workflows with built-in persistence and scheduling
+- **Pure agentic runtime**: Python ExecuteOrchestrator dispatches all steps — MCP for APIs, Anthropic for reasoning
 - **pgvector**: Single database for relational + vector (upgrade to dedicated vector DB if needed)
 
 ### Application Factory & Dependency Injection
@@ -1146,12 +1470,12 @@ async def store_plan(service: PlanService = Depends(get_plan_service)):
 
 **Scenario**: "Monitor German visa appointment slots for the next 2 weeks"
 
-### Why n8n?
-- Built-in persistence and state management
-- Survives server restarts
-- Native scheduling and retry capabilities
-- Visual workflow management and debugging
-- Webhook triggers for user interactions
+### Why Python Asyncio?
+- Native Python async/await for all scheduling
+- APScheduler for periodic polling with persistence
+- Redis-backed state for approval gates and progress tracking
+- Survives server restarts via Redis state persistence
+- Simple deployment — no separate runtime to manage
 
 ### How It Works
 
@@ -1171,159 +1495,103 @@ async def store_plan(service: PlanService = Depends(get_plan_service)):
 }
 ```
 
-**n8n Workflow**:
-```yaml
-workflow: "visa_slot_monitor"
-trigger:
-  type: "manual"
-  
-nodes:
-  - name: "start_monitoring"
-    type: "function"
-    code: |
-      const startTime = new Date();
-      const durationDays = {{$json.duration_days}};
-      const maxDuration = durationDays * 24 * 60 * 60 * 1000;
-      
-      return {
-        startTime,
-        maxDuration,
-        location: {{$json.location}},
-        userId: {{$json.user_id}},
-        planId: {{$json.plan_id}}
-      };
-    
-  - name: "check_visa_slots"
-    type: "http_request"
-    url: "{{embassy_api}}/slots"
-    retry_on_fail: true
-    max_retries: 3
-    backoff_strategy: "exponential"
-    
-  - name: "slots_available_check"
-    type: "if"
-    condition: "{{$node.check_visa_slots.json.available_slots.length > 0}}"
-    
-  - name: "notify_user_slots_found"
-    type: "webhook"
-    url: "{{approval_gate_url}}/visa-slots-found"
-    method: "POST"
-    body: |
-      {
-        "user_id": "{{$node.start_monitoring.json.userId}}",
-        "plan_id": "{{$node.start_monitoring.json.planId}}",
-        "slot_date": "{{$node.check_visa_slots.json.available_slots[0].date}}",
-        "slot_id": "{{$node.check_visa_slots.json.available_slots[0].id}}"
-      }
-    
-  - name: "wait_for_approval"
-    type: "wait_for_webhook"
-    webhook_path: "/visa-approval/{{$node.start_monitoring.json.planId}}"
-    timeout: 86400  # 24 hours
-    
-  - name: "book_approved_slot"
-    type: "http_request"
-    condition: "{{$node.wait_for_approval.json.approved === true}}"
-    url: "{{embassy_api}}/book"
-    method: "POST"
-    body: |
-      {
-        "slot_id": "{{$node.notify_user_slots_found.json.slot_id}}"
-      }
-    
-  - name: "notify_booking_success"
-    type: "webhook"
-    url: "{{notification_service}}/send"
-    method: "POST"
-    body: |
-      {
-        "user_id": "{{$node.start_monitoring.json.userId}}",
-        "message": "✓ Visa appointment booked successfully!"
-      }
-    
-  - name: "check_time_elapsed"
-    type: "function"
-    code: |
-      const startTime = new Date({{$node.start_monitoring.json.startTime}});
-      const now = new Date();
-      const elapsed = now - startTime;
-      const maxDuration = {{$node.start_monitoring.json.maxDuration}};
-      
-      return {
-        shouldContinue: elapsed < maxDuration,
-        elapsed,
-        remaining: maxDuration - elapsed
-      };
-    
-  - name: "wait_6_hours"
-    type: "wait"
-    amount: 6
-    unit: "hours"
-    condition: "{{$node.check_time_elapsed.json.shouldContinue === true}}"
-    
-  - name: "continue_monitoring"
-    type: "set"
-    connects_to: "check_visa_slots"
-    condition: "{{$node.check_time_elapsed.json.shouldContinue === true}}"
-    
-  - name: "notify_monitoring_ended"
-    type: "webhook"
-    url: "{{notification_service}}/send"
-    method: "POST"
-    condition: "{{$node.check_time_elapsed.json.shouldContinue === false}}"
-    body: |
-      {
-        "user_id": "{{$node.start_monitoring.json.userId}}",
-        "message": "Visa slot monitoring ended (14 days elapsed)"
-      }
+**Python Implementation**:
+```python
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+class DurableWatcher:
+    """Long-running monitoring via APScheduler + Redis state."""
+
+    def __init__(self, mcp_client, redis, scheduler: AsyncIOScheduler):
+        self.mcp = mcp_client
+        self.redis = redis
+        self.scheduler = scheduler
+
+    async def start_monitoring(self, plan_id: str, step: PlanStep):
+        """Start periodic monitoring job."""
+        job_id = f"watch:{plan_id}:{step.step}"
+
+        # Store state in Redis (survives restarts)
+        await self.redis.hset(f"watcher:{job_id}", mapping={
+            "plan_id": plan_id,
+            "status": "monitoring",
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "max_duration_days": step.args["duration_days"],
+        })
+
+        # Schedule periodic checks
+        self.scheduler.add_job(
+            self._check_slots,
+            "interval",
+            hours=6,
+            id=job_id,
+            args=[plan_id, step],
+            replace_existing=True,
+        )
+
+    async def _check_slots(self, plan_id: str, step: PlanStep):
+        """Check for available slots via MCP tool invocation."""
+        result = await self.mcp.invoke(
+            step.uses, step.call, step.args
+        )
+
+        if result.get("available_slots"):
+            # Slots found — notify user and pause for approval
+            await self._notify_and_wait_approval(plan_id, step, result)
+
+        # Check time budget
+        state = await self.redis.hgetall(f"watcher:watch:{plan_id}:{step.step}")
+        started = datetime.fromisoformat(state["started_at"])
+        max_days = int(state["max_duration_days"])
+        if (datetime.now(timezone.utc) - started).days >= max_days:
+            self.scheduler.remove_job(f"watch:{plan_id}:{step.step}")
+            await self._notify_user(plan_id, "Monitoring ended (duration elapsed)")
+
+    async def _notify_and_wait_approval(self, plan_id, step, result):
+        """Redis-backed approval gate for booking."""
+        gate_key = f"approval:{plan_id}:{step.step}"
+        await self.redis.hset(gate_key, mapping={
+            "status": "pending",
+            "slots": json.dumps(result["available_slots"]),
+        })
+        # Webhook notification triggers user approval flow
+        await self._notify_user(plan_id, f"Visa slots found! {len(result['available_slots'])} available")
 ```
 
 **Key Features**:
-1. **Built-in persistence**: n8n automatically manages workflow state
-2. **Visual debugging**: Monitor workflow execution in real-time
-3. **Native scheduling**: Built-in wait nodes and cron triggers
-4. **Webhook integration**: Seamless user approval flows
-5. **Node-level retries**: Configurable retry with linear backoff
-6. **Loop handling**: Workflow can loop back to previous nodes
-
-### n8n Persistence & Recovery
-
-**What n8n provides**:
-- Stores workflow execution state in PostgreSQL database
-- Waiting executions (Wait nodes) can survive n8n server restarts IF persistence is configured
-- Each node execution result is saved to database (enables debugging and resume)
-
-**What n8n does NOT provide**:
-- ❌ Automatic workflow-level retry after failure
-- ❌ Exponential backoff (only linear: 1s, 2s, 3s...)
-- ❌ Stuck execution detection (workflow may hang indefinitely)
-- ❌ Time budget enforcement (no automatic timeout/cancellation)
+1. **APScheduler persistence**: Jobs survive server restarts
+2. **Redis state**: Monitoring progress and approval gates stored in Redis
+3. **MCP tool invocations**: Visa API called via MCP protocol
+4. **Approval gates**: Redis-backed async gates for user confirmation
+5. **Time budget enforcement**: Automatic cleanup after duration expires
+6. **No separate runtime**: Pure Python, same deployment as the rest of the system
 
 ### ExecutionMonitor Role
 
-**Why we need ExecutionMonitor** (even with n8n persistence):
+**Why we need ExecutionMonitor** (infrastructure monitoring only):
 
-1. **Detect stuck executions**: n8n may not detect workflows that hang (e.g., waiting for external webhook that never arrives)
-2. **Trigger workflow-level retries**: n8n only retries individual nodes, not entire workflows
-3. **Enforce time budgets**: Cancel workflows exceeding max execution time (prevent resource leaks)
-4. **Apply retry policy**: Exponential backoff for workflow retries (1min, 5min, 15min)
-5. **User notifications**: Alert users when workflows fail terminally
+1. **Detect stuck executions**: Asyncio tasks may hang (e.g., waiting for external event that never arrives)
+2. **Enforce time budgets**: Cancel tasks exceeding max execution time (prevent resource leaks)
+3. **User notifications**: Alert users of infrastructure failures so they can start a new plan
+
+**What ExecutionMonitor does NOT do**:
+- ❌ Replay failed executions (step failures → LLM reasoning recovery; infrastructure failures → terminal)
+- ❌ Apply retry policies (retries happen at step-level or via LLM reasoning)
 
 **How it works**:
 ```
 ExecutionMonitor (polls every 30s)
   ↓
-Query n8n API: /api/v1/executions?status=running
+Query execution task registry for active tasks
   ↓
 Check each execution:
-  - Stuck? (no progress for 5min) → Mark stale, trigger retry
-  - Failed? (error status) → Apply retry policy (attempt 1/3)
-  - Timeout? (exceeded 60min) → Cancel execution, notify user
+  - Stuck? (no progress for 5min) → Cancel, notify user
+  - Timeout? (exceeded 60min) → Cancel, notify user
   ↓
-Update execution_tracker table (plan_id, attempt_count, status)
+Update execution_tracker table (plan_id, status)
 ```
 
-**Result**: Monitors visa slots 24/7 for 2 weeks with automatic recovery from stuck/failed executions
+**Result**: Monitors long-running tasks (e.g., visa slot watcher) for infrastructure failures. Step-level failures within those tasks are handled by LLM reasoning steps.
 
 ---
 
@@ -1432,10 +1700,10 @@ usecases/<UseCase>/
 └── fixtures/           # Test data
 ```
 
-**15 Active Components** (VectorIndex deferred):
-1. ProfileStore, History, PlanLibrary (Memory Layer) — VectorIndex deferred (§12)
-2. Intake, ContextRAG, Planner, Signer, PluginRegistry, PlanWriter (Domain Layer)
-3. WorkflowBuilder, PreviewOrchestrator, ApprovalGate, ExecuteOrchestrator, ExecutionMonitor (Orchestration Layer)
+**16 Active Components**:
+1. ProfileStore, History, PlanLibrary, VectorIndex (Memory Layer)
+2. Intake, ContextRAG, Planner, Signer, PluginRegistry, PlanWriter, **PolicyEngine** (Domain Layer)
+3. PreviewOrchestrator, ApprovalGate, ExecuteOrchestrator, ExecutionMonitor (Orchestration Layer)
 4. Audit (Utilities)
 
 ---
@@ -1460,42 +1728,99 @@ usecases/<UseCase>/
 
 ## 12) Architectural Decisions
 
-### VectorIndex Deferred
+### VectorIndex Implementation
 
-**Decision**: VectorIndex (semantic embedding search) is deferred until exact-match queries prove insufficient with real usage data.
+**Decision**: VectorIndex implements hybrid BM25 + semantic search with Reciprocal Rank Fusion (RRF) score merging, using ONNX Runtime for local embeddings.
 
 **Rationale**:
-- **All current queries are structured**: ContextRAG queries Memory Layer components by `intent_type`, `preference_key`, `user_id`, and `created_at` — all indexed PostgreSQL columns. No query requires fuzzy semantic matching.
-- **ContextRAG is a context assembler, not RAG**: Despite the name, ContextRAG makes structured API calls to ProfileStore/History/PlanLibrary and assembles Evidence Items with budget management (≤2KB) and consent tier enforcement. It does not perform embedding-based retrieval.
-- **Embedding latency violates NFRs**: An OpenAI embedding call (~200-500ms) would blow the ContextRAG <150ms p95 latency budget.
-- **Scale doesn't justify it**: A personal agent has ~20-50 intent types and hundreds of plans. At this scale, exact-match by `intent_type` covers the real need. Semantic search adds value at thousands of diverse records.
-- **Architecture slot preserved**: pgvector is in the stack. When exact-match returns empty for novel intents frequently enough to hurt plan quality, VectorIndex can be added as a small lift — not a rewrite.
+- **Hybrid search covers both structured and fuzzy queries**: BM25 (tsvector/tsquery) handles keyword matching; semantic search (pgvector HNSW) handles novel intents that don't match existing `intent_type` values exactly.
+- **ONNX Runtime solves the latency problem**: Local CPU inference with all-MiniLM-L6-v2 achieves ~10ms embedding generation — well within ContextRAG's <150ms p95 budget (vs ~200-500ms for external API calls).
+- **Single database**: pgvector extension keeps everything in PostgreSQL — no separate vector DB infrastructure.
+- **RRF score fusion**: Combines BM25 and cosine similarity rankings without requiring score normalization — robust and tuning-light.
 
-**Trigger to revisit**: ContextRAG returns empty results for >10% of novel intent queries in production.
+**Implementation** (PR #9, merged):
+- `plan_embeddings` table: 384-dim vectors + tsvector column + intent_type filter
+- HNSW index (m=16, ef_construction=64) for cosine similarity
+- GIN index for BM25 keyword search
+- ContextRAG uses VectorIndex as optional dependency with graceful degradation
 
-### PlanLibrary Has No Embedding Dependencies
+### PlanLibrary and VectorIndex Separation
 
-**Decision**: PlanLibrary stores and retrieves plans via structured queries only. Embedding generation, storage, and similarity search are removed from PlanLibrary scope.
+**Decision**: PlanLibrary stores and retrieves plans via structured queries. VectorIndex indexes plan data separately for hybrid search. PlanWriter triggers re-indexing via VectorIndex.
 
-**Rationale**: Embedding is VectorIndex's responsibility per the MODULAR_ARCHITECTURE separation. PlanLibrary is a foundation Memory Layer component — it provides CRUD operations for plan data. If semantic search is needed later, VectorIndex indexes PlanLibrary data externally (PlanWriter triggers re-indexing).
+**Rationale**: Clear separation of concerns — PlanLibrary is a CRUD component (foundation Memory Layer), VectorIndex provides search capabilities. PlanWriter coordinates: after persisting outcomes to PlanLibrary and History, it stores plan embeddings via VectorIndex for future similarity search.
 
-### Secrets Management & LLM Isolation
+### Hybrid Execution Model
 
-**Decision**: All credentials, API keys, and secrets are stored exclusively in n8n's Secrets Vault. The LLM/Planner agent has **zero access** to credential values.
+**Decision**: Evolve from a fully deterministic execution model (Planner generates complete static DAG → executor runs mechanically) to a hybrid model where plans include LLM reasoning steps as first-class nodes alongside deterministic API steps.
+
+**Rationale**:
+- **Open-ended tasks**: Pure deterministic plans cannot handle tasks requiring judgment (ranking options, deciding what data to fetch, generating contextual summaries)
+- **Adaptive execution**: LLM reasoning steps can request additional data at runtime based on initial results, without requiring the user to re-plan
+- **Plan continuation**: Failure recovery becomes natural — reasoning steps can propose alternatives within policy bounds
+
+**Trade-offs**:
+- **+** Handles open-ended tasks that pure deterministic plans cannot
+- **+** Failure recovery is natural: LLM reasoning handles step failures inline, no workflow replay needed
+- **+** Eliminates plan continuation complexity: failed plans are terminal, user starts fresh
+- **+** Same safety guarantees via PolicyEngine (deny-by-default, HITL for writes)
+- **−** Runtime behavior is no longer fully deterministic (same plan may execute differently)
+- **−** PolicyEngine is a new component to build, test, and maintain
+- **-** Runtime behavior requires PolicyEngine governance for safety
+
+**Backward compatibility**: All new PlanStep fields are optional with defaults. `type` defaults to `"api"` — existing plans work unchanged. Pure deterministic plans (all type=api) skip PolicyEngine entirely.
+
+### Pure Agentic Execution (Drop n8n)
+
+**Decision**: Replace the hybrid n8n + Python execution model with pure Python/FastAPI execution via MCP tool invocations.
+
+**Rationale**:
+- **Deployment simplicity**: One runtime (Python) instead of two (Python + n8n)
+- **MCP ecosystem**: Community-maintained connectors replace n8n's proprietary node format
+- **Credential control**: AES-256-GCM vault with application-level access control replaces n8n's opaque Secrets Vault
+- **Testing**: Standard pytest for all execution paths (no n8n environment needed)
+- **NemoClaw compatible**: System can run inside NemoClaw for infrastructure-level security (OS sandboxing, network namespaces) on top of application-level security
+
+**Trade-offs**:
+- **+** Single runtime reduces operational complexity
+- **+** MCP connectors are open-source and community-maintained
+- **+** Full control over credential lifecycle
+- **+** Simpler testing and debugging
+- **-** Lose n8n's visual workflow editor (mitigated by structured logging + plan graph visualization)
+- **-** Must implement scheduling (APScheduler) and persistence ourselves
+- **-** Fewer built-in connectors initially (MCP ecosystem is growing)
+
+### Policy Attestation vs Re-Signing
+
+**Decision**: Runtime modifications (spawned steps) receive PolicyEngine attestations rather than re-signing the plan with Signer.
+
+**Rationale**:
+- **Security boundary**: Signer's Ed25519 private key should not be available inside the execution context (ExecuteOrchestrator or reasoning service)
+- **Separation of concerns**: Plan signing (Planner domain) is separate from policy enforcement (PolicyEngine domain)
+- **Audit chain**: `original_signature + policy_attestations[]` provides complete execution provenance
+
+**Trade-offs**:
+- **+** Signer private key stays in the Domain Layer (not in execution context)
+- **+** Attestations are lightweight and fast (<5ms)
+- **+** Clear audit trail linking each spawn to its policy decision
+- **−** Two types of "signatures" (Ed25519 plan signature + policy attestation) may be confusing
+- **−** Verification requires checking both the original signature AND all attestations
+
+### Encrypted Credential Vault & LLM Isolation
+
+**Decision**: Store credentials in AES-256-GCM encrypted PostgreSQL vault with strict LLM isolation boundary. Two-tier LLM execution for prompt injection defense.
 
 **Architecture**:
-- **Storage**: n8n Secrets Vault (self-hosted n8n instance, encrypted at rest)
-- **LLM**: Anthropic Claude API references credential IDs only, never actual values
-- **Plan Format**: Plans contain credential references (e.g., `"credential_id": "gcal_user_123"`)
-- **Execution**: n8n WorkflowBuilder binds credential IDs to actual secrets at runtime
-- **Security Boundary**: Planner generates plans with credential IDs → n8n resolves credentials during execution
+- **Storage**: `credential_vault` table with encrypted_value (BYTEA), iv (BYTEA), key_version (INT)
+- **Master key**: Loaded from environment variable, never in database
+- **Decryption**: Only at step execution time, in-memory only, zeroed after MCP call
+- **LLM boundary**: Neither Planner nor runtime reasoning steps can access credential values
+- **Key rotation**: `key_version` supports rolling rotation
 
 **Rationale**:
-- **Prompt injection protection**: LLM prompt injection cannot leak credentials because the LLM never sees actual credential values
-- **Credential rotation**: Credentials can be rotated in n8n Secrets Vault without changing plans (plans reference stable IDs, not ephemeral tokens)
-- **Least-privilege isolation**: Each user's integration accounts are isolated in n8n with separate credential entries
-- **Audit trail**: n8n logs credential usage (which credential ID, when, by which user) without exposing values
-- **Multi-user safety**: User A's Google credentials ≠ User B's Google credentials; credential IDs scoped by `user_id`
+- Prompt injection attacks cannot leak credentials because LLM never sees values
+- Application-level encryption gives full audit control (vs n8n's opaque vault)
+- Key rotation without downtime via version-based decryption
 
 **Example Plan Step**:
 ```json
@@ -1504,7 +1829,7 @@ usecases/<UseCase>/
   "role": "Fetcher",
   "uses": "google.calendar",
   "call": "list_free_busy",
-  "credential_ref": "gcal_user_{{user_id}}_primary",  // ID only, not actual OAuth token
+  "credential_ref": "gcal_user_{{user_id}}_primary",
   "args": {
     "calendar_id": "primary",
     "time_min": "2026-03-01T00:00:00Z"
@@ -1512,56 +1837,100 @@ usecases/<UseCase>/
 }
 ```
 
-**n8n Credential Resolution**:
-When WorkflowBuilder generates the n8n workflow JSON, it maps `credential_ref` to the actual n8n credential ID:
-```json
-{
-  "nodes": [{
-    "type": "n8n-nodes-base.googleCalendar",
-    "credentials": {
-      "googleCalendarOAuth2Api": "gcal_user_123_primary"  // n8n resolves to actual OAuth token
-    },
-    "parameters": { ... }
-  }]
-}
+**Credential Resolution**:
+When ExecuteOrchestrator dispatches a step, it decrypts the credential from the vault:
+```python
+# ExecuteOrchestrator credential resolution
+cred_id = resolve_credential_ref(step.credential_ref, user_id)
+encrypted = await vault.get(cred_id)
+plaintext = decrypt_aes_gcm(encrypted.value, encrypted.iv, master_key)
+try:
+    result = await mcp_invoke(step.uses, step.call, step.args, credentials=plaintext)
+finally:
+    plaintext = None  # Zero credential from memory
 ```
 
 **Deployment Model**:
 - **Anthropic Claude API**: Plan generation via LLMAdapter protocol (temperature=0); swappable to local providers (Ollama, vLLM) via protocol
-- **Local n8n**: Self-hosted n8n instance with Secrets Vault
+- **Encrypted vault**: AES-256-GCM in PostgreSQL, master key from environment variable
 - **No cloud dependencies for secrets**: Credentials never leave the local environment; LLM receives only credential IDs, not values
+- **Full isolation**: ExecuteOrchestrator decrypts credentials only at MCP invocation time — LLM reasoning steps never see credential values
+
+### Two-Tier LLM Execution
+
+**Decision**: Split LLM reasoning into two trust tiers declared via `trust_level` on PlanStep.
+
+**Rationale**:
+- **Tier 1 (untrusted_input)**: Processes user-provided or external data with no tool access and strict output schema — prevents prompt injection from propagating
+- **Tier 2 (trusted)**: Agent reasoning with MCP tool access, PolicyEngine-bounded — only receives clean, validated data from Tier 1 or API steps
+
+**Trade-offs**:
+- **+** Structural defense against prompt injection (data/control plane separation)
+- **+** Tier 1 sandboxing is cheap (no tools, strict schema)
+- **-** Planner must correctly classify trust levels during plan generation
+- **-** Two-step processing adds latency for data that needs both tiers
+
+### WorkflowBuilder Absorption
+
+**Decision**: Absorb WorkflowBuilder into ExecuteOrchestrator. WorkflowBuilder was responsible for converting Plan DAGs into n8n workflow JSON. With n8n removed, this intermediate step is unnecessary — ExecuteOrchestrator handles DAG traversal, parallel grouping, and MCP dispatch natively.
+
+**Rationale**:
+- WorkflowBuilder's sole purpose was n8n JSON generation
+- DAG traversal and parallel grouping are simple enough to inline in ExecuteOrchestrator
+- Eliminates an entire component (17 → 16 components)
+
+### MCP Connector Model
+
+**Decision**: Replace n8n's proprietary connector nodes with MCP (Model Context Protocol) servers for all external integrations.
+
+**Rationale**:
+- **Open protocol**: MCP is an open standard with growing community adoption
+- **Three connector sources**: Native MCP servers, auto-generated OpenAPI wrappers, aggregator services
+- **Transport flexibility**: stdio, SSE, or HTTP — configurable per connector
+- **No vendor lock-in**: Community-maintained connectors vs n8n's proprietary node format
+
+### NemoClaw Deployment Compatibility
+
+**Decision**: The system can optionally run inside NemoClaw for infrastructure-level security on top of application-level security.
+
+**Rationale**:
+- **Defense in depth**: Application-level security (PolicyEngine, credential vault, two-tier LLM) + infrastructure-level security (OS sandboxing, network namespaces)
+- **Not required**: The system is secure without NemoClaw — NemoClaw adds an additional security layer for high-security deployments
 
 ---
 
 ## 13) Asynchronous Execution Architecture
 
-**MVP execution model**: n8n handles all workflow execution. ExecutionMonitor provides reliability layer for stuck/failed workflow detection and retry triggering.
+**MVP execution model**: ExecuteOrchestrator handles all plan execution via MCP tool invocations and Anthropic API calls. Step-level failures are recovered inline by LLM reasoning steps (PolicyEngine-bounded). ExecutionMonitor provides infrastructure monitoring for stuck/hung tasks.
 
 ### ExecutionMonitor Pattern
 
-**Purpose**: Detect stuck/failed n8n workflow executions and trigger workflow-level retries with exponential backoff.
+**Purpose**: Detect stuck execution tasks caused by infrastructure failures (hung processes, server crashes, network partitions). NOT for step-level failures — those are handled by LLM reasoning steps.
 
 **Why needed**:
-- n8n executes workflows asynchronously (no blocking wait)
-- n8n may not detect stuck executions (waiting for external event that never arrives)
-- Workflow-level retry requires external trigger (n8n doesn't auto-retry workflows)
+- ExecuteOrchestrator dispatches tasks asynchronously
+- Asyncio tasks may hang indefinitely (waiting for external event that never arrives)
+- Time budget enforcement prevents resource leaks from runaway tasks
 
 **Implementation**:
 
 ```python
 import asyncio
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import List, Dict
 
 class ExecutionMonitor:
-    """Monitors n8n executions and triggers retries for stuck/failed workflows."""
+    """Monitors execution tasks for infrastructure-level failures.
 
-    def __init__(self, n8n_client, db_adapter, poll_interval_seconds: int = 30):
-        self.n8n_client = n8n_client
+    Step-level failures are handled inline by LLM reasoning steps.
+    This monitor only handles infrastructure issues: stuck processes,
+    time budget violations, and server-level failures.
+    """
+
+    def __init__(self, task_registry, db_adapter, poll_interval_seconds: int = 30):
+        self.task_registry = task_registry
         self.db = db_adapter
         self.poll_interval = poll_interval_seconds
-        self.max_attempts = 3
-        self.retry_backoff = [60, 300, 900]  # 1min, 5min, 15min (exponential)
 
     async def run(self):
         """Background polling loop."""
@@ -1574,187 +1943,124 @@ class ExecutionMonitor:
             await asyncio.sleep(self.poll_interval)
 
     async def _check_active_executions(self):
-        """Poll n8n API for active/recent executions."""
-        # 1. Query n8n for active executions
-        active_executions = await self.n8n_client.get_executions(
+        """Poll task registry for active executions and check for infrastructure issues."""
+        active_executions = await self.task_registry.get_executions(
             status="running",
             limit=100
         )
 
-        # 2. Query our execution_tracker for known executions
         tracked = await self.db.get_tracked_executions(status="running")
-        tracked_map = {t.n8n_execution_id: t for t in tracked}
+        tracked_map = {t.task_id: t for t in tracked}
 
-        # 3. Check each n8n execution
         for execution in active_executions:
-            tracker = tracked_map.get(execution.id)
+            tracker = tracked_map.get(execution.task_id)
 
             if not tracker:
-                # New execution - track it
                 await self.db.create_execution_tracker(
                     plan_id=execution.metadata["plan_id"],
-                    n8n_execution_id=execution.id,
-                    status="running",
-                    attempt_count=1
+                    task_id=execution.task_id,
+                    status="running"
                 )
                 continue
 
-            # Check for stuck execution (no progress for 5min)
+            # Stuck execution (infrastructure issue) → cancel and notify
             if self._is_stuck(execution, timeout_minutes=5):
                 await self._handle_stuck_execution(execution, tracker)
 
-            # Check for timeout (exceeded max execution time)
+            # Time budget exceeded → cancel and notify
             if self._is_over_time_budget(execution, max_minutes=60):
                 await self._handle_timeout(execution, tracker)
 
-        # 4. Query n8n for recently failed executions
-        failed_executions = await self.n8n_client.get_executions(
-            status="error",
-            limit=50
-        )
-
-        for execution in failed_executions:
-            tracker = await self.db.get_tracker_by_n8n_id(execution.id)
-            if tracker and tracker.status != "failed":
-                await self._handle_failed_execution(execution, tracker)
-
     def _is_stuck(self, execution, timeout_minutes: int) -> bool:
-        """Check if execution has made no progress for timeout period."""
-        last_update = datetime.fromisoformat(execution.stoppedAt or execution.startedAt)
+        last_update = datetime.fromisoformat(execution.last_progress_at or execution.started_at)
         age = (datetime.now(timezone.utc) - last_update).total_seconds() / 60
         return age > timeout_minutes and execution.status == "running"
 
     def _is_over_time_budget(self, execution, max_minutes: int) -> bool:
-        """Check if execution exceeded max allowed time."""
-        started_at = datetime.fromisoformat(execution.startedAt)
+        started_at = datetime.fromisoformat(execution.started_at)
         age = (datetime.now(timezone.utc) - started_at).total_seconds() / 60
         return age > max_minutes
 
     async def _handle_stuck_execution(self, execution, tracker):
-        """Mark stuck execution as stale and trigger retry."""
-        logger.warning(f"Stuck execution detected: {execution.id}")
-
-        # Cancel stuck execution in n8n
-        await self.n8n_client.cancel_execution(execution.id)
-
-        # Mark as failed in tracker
-        await self.db.update_tracker(tracker.id, status="failed")
-
-        # Trigger retry if under attempt cap
-        await self._try_retry_workflow(tracker)
+        """Cancel stuck execution — infrastructure failures are terminal."""
+        logger.warning(f"Stuck execution detected: {execution.task_id}")
+        await self.task_registry.cancel_execution(execution.task_id)
+        await self.db.update_tracker(tracker.id, status="infrastructure_failure")
+        await self._notify_user(tracker.plan_id, "Execution stuck — please start a new plan")
 
     async def _handle_timeout(self, execution, tracker):
-        """Cancel execution that exceeded time budget."""
-        logger.warning(f"Execution timeout: {execution.id} (>{tracker.time_budget_minutes}min)")
-
-        await self.n8n_client.cancel_execution(execution.id)
+        """Cancel execution that exceeded time budget — terminal."""
+        logger.warning(f"Execution timeout: {execution.task_id}")
+        await self.task_registry.cancel_execution(execution.task_id)
         await self.db.update_tracker(tracker.id, status="timeout")
-        await self._notify_user(tracker.plan_id, "Execution timed out")
-
-    async def _handle_failed_execution(self, execution, tracker):
-        """Handle workflow execution failure."""
-        logger.error(f"Execution failed: {execution.id}")
-
-        await self.db.update_tracker(tracker.id, status="failed")
-        await self._try_retry_workflow(tracker)
-
-    async def _try_retry_workflow(self, tracker):
-        """Apply retry policy with exponential backoff."""
-        if tracker.attempt_count >= self.max_attempts:
-            # Max retries exhausted - notify user
-            logger.error(f"Max retries ({self.max_attempts}) exhausted for plan {tracker.plan_id}")
-            await self.db.update_tracker(tracker.id, status="terminal_failure")
-            await self._notify_user(tracker.plan_id, "Workflow failed after max retries")
-            return
-
-        # Apply exponential backoff
-        backoff_seconds = self.retry_backoff[tracker.attempt_count - 1]
-        logger.info(f"Retrying plan {tracker.plan_id} in {backoff_seconds}s (attempt {tracker.attempt_count + 1}/{self.max_attempts})")
-
-        await asyncio.sleep(backoff_seconds)
-
-        # Trigger new n8n workflow execution
-        plan = await self.db.get_plan(tracker.plan_id)
-        new_execution = await self.n8n_client.execute_workflow(
-            workflow_id=tracker.workflow_id,
-            input_data=plan.input_data
-        )
-
-        # Update tracker
-        await self.db.update_tracker(
-            tracker.id,
-            n8n_execution_id=new_execution.id,
-            status="running",
-            attempt_count=tracker.attempt_count + 1
-        )
+        await self._notify_user(tracker.plan_id, "Execution timed out — please start a new plan")
 
     async def _notify_user(self, plan_id: str, message: str):
-        """Send notification to user about execution status."""
+        """Send notification to user about infrastructure failure."""
         # Implementation: webhook/email/Slack notification
         pass
 ```
 
 **Key features**:
 - **Polling interval**: 30 seconds (configurable)
-- **Stuck detection**: No progress for 5+ minutes
-- **Timeout enforcement**: Cancel after 60 minutes
-- **Workflow-level retry**: Exponential backoff (1min, 5min, 15min)
-- **Attempt tracking**: Max 3 retries before terminal failure
-- **User notifications**: Alert on timeout/terminal failure
+- **Stuck detection**: No progress for 5+ minutes → cancel and notify
+- **Timeout enforcement**: Cancel after 60 minutes → notify
+- **User notifications**: Alert on infrastructure failures
+- **No execution replay**: Infrastructure failures are terminal (user starts a new plan)
 
-### Parallel Step Execution (via n8n)
+### Parallel Step Execution (via asyncio.gather)
 
-Steps with no dependencies execute in parallel **within n8n workflows**. The WorkflowBuilder analyzes the plan graph and generates n8n workflow JSON with parallel branches:
+Steps with no dependencies execute in parallel via `asyncio.gather()`. ExecuteOrchestrator analyzes the plan graph and groups steps by dependency level:
 
 ```python
-class WorkflowBuilder:
-    """Converts plan graph to n8n workflow with parallel execution."""
+class ExecuteOrchestrator:
+    """Dispatches plan steps via MCP tool invocations and Anthropic API.
 
-    def build(self, plan: Plan, mode: str) -> Dict[str, Any]:
-        """Build n8n workflow from plan graph."""
+    Handles DAG traversal, parallel grouping, and step dispatch natively.
+    LLM reasoning steps execute via Anthropic API with two-tier trust model.
+    API steps execute via MCP tool invocations.
+    """
+
+    async def execute_plan(self, plan: Plan, credentials: dict) -> list[StepResult]:
+        """Execute plan by resolving DAG into execution levels."""
 
         # Group steps by dependency level
         levels = self._group_by_dependency_level(plan.graph)
+        results = {}
 
-        nodes = []
-        for level_idx, level_steps in enumerate(levels):
+        for level_steps in levels:
             if len(level_steps) > 1:
-                # Multiple steps at same level → parallel branches
-                nodes.append({
-                    "name": f"split_level_{level_idx}",
-                    "type": "SplitInBatches",
-                    "parameters": {"batchSize": 1},
-                    "typeVersion": 1
-                })
-
-                # Create parallel branches for each step
-                for step in level_steps:
-                    nodes.append(self._step_to_n8n_node(step, mode))
-
-                # Merge results
-                nodes.append({
-                    "name": f"merge_level_{level_idx}",
-                    "type": "Merge",
-                    "parameters": {},
-                    "typeVersion": 1
-                })
+                # Multiple steps at same level → parallel execution
+                level_results = await asyncio.gather(
+                    *[self._dispatch_step(step, results, credentials)
+                      for step in level_steps]
+                )
             else:
-                # Single step at this level → sequential
-                nodes.append(self._step_to_n8n_node(level_steps[0], mode))
+                # Single step → sequential execution
+                level_results = [
+                    await self._dispatch_step(level_steps[0], results, credentials)
+                ]
 
-        return {
-            "name": f"plan_{plan.plan_id}",
-            "nodes": nodes,
-            "connections": self._build_connections(nodes)
-        }
+            for step, result in zip(level_steps, level_results):
+                results[step.step] = result
 
-    def _group_by_dependency_level(self, steps: List[Step]) -> List[List[Step]]:
+        return list(results.values())
+
+    async def _dispatch_step(self, step, prior_results, credentials):
+        """Dispatch step by type: MCP tool invocation or Anthropic API call."""
+        if step.type == "api":
+            return await self._mcp_invoke(step, credentials)
+        elif step.type == "llm_reasoning":
+            return await self._anthropic_call(step, prior_results)
+        elif step.type == "policy_check":
+            return await self._policy_evaluate(step, prior_results)
+
+    def _group_by_dependency_level(self, steps: list) -> list[list]:
         """Group steps by dependency depth for parallel execution."""
         levels = []
         processed = set()
 
         while len(processed) < len(steps):
-            # Find steps whose dependencies are all processed
             current_level = [
                 s for s in steps
                 if s.step not in processed
@@ -1777,19 +2083,19 @@ Plan graph:
   Step 2: Get your calendar    [after: []]
   Step 3: Find overlap         [after: [1, 2]]
 
-Generated n8n workflow:
-  Split → [Fetch Alice || Fetch You] → Merge → Find Overlap
+Execution:
+  asyncio.gather(mcp_invoke(step_1), mcp_invoke(step_2)) → analyze_overlap(results)
 ```
 
 **Benefits**:
-- **n8n handles parallelism**: Native parallel execution with visual monitoring
-- **Dependency ordering preserved**: Level-by-level execution
-- **Fault isolation**: n8n's built-in error handling and retry logic
-- **No custom concurrency code**: Leverage n8n's mature orchestration
+- **Native Python parallelism**: `asyncio.gather()` for concurrent execution
+- **Dependency ordering preserved**: Level-by-level execution via topological sort
+- **Unified error handling**: Standard Python exception handling and retry policies
+- **Simple testing**: Standard pytest with async fixtures, no external runtime needed
 
 ### Background Task Monitoring
 
-Long-running n8n workflows are monitored via webhook callbacks:
+Long-running execution tasks are monitored via webhook callbacks:
 
 ```python
 from fastapi import BackgroundTasks
@@ -1820,7 +2126,7 @@ async def monitor_execution(plan_id: str, callback_url: str):
     poll_interval = 5  # 5 seconds
 
     for _ in range(max_wait // poll_interval):
-        status = await n8n_client.get_execution_status(plan_id)
+        status = await task_registry.get_execution_status(plan_id)
 
         if status.is_complete:
             # Notify caller
@@ -1880,7 +2186,7 @@ class PlanSchema(BaseModel):
     @validator('graph')
     def validate_roles(cls, steps: List[StepSchema]) -> List[StepSchema]:
         """Ensure role assignments are valid."""
-        valid_roles = {"Fetcher", "Analyzer", "Watcher", "Resolver", "Booker", "Notifier"}
+        valid_roles = {"Fetcher", "Analyzer", "Watcher", "Resolver", "Booker", "Notifier", "Reasoner"}
 
         for step in steps:
             if step.role not in valid_roles:
@@ -2101,7 +2407,7 @@ class PlanConstraints:
     def enforce(cls, plan: Plan):
         """Enforce all constraints, raise on violation."""
 
-        # Step count
+        # Step count (initial plan max 50; total with spawned steps max 100)
         if len(plan.graph) > cls.MAX_STEPS:
             raise ConstraintViolation(f"Plan exceeds {cls.MAX_STEPS} steps")
 
@@ -2428,10 +2734,10 @@ async def book_meeting_with_multiple_attendees(
 
 After reading this HLD, you should:
 
-1. **Understand the architecture**: Preview-first, deterministic planning, dual runtime
-2. **Know the 16 components**: Memory, Domain, Orchestration, Utilities layers
-3. **See the flow**: Intent → Plan → Preview → Approve → Execute → Learn
-4. **Understand safety**: Idempotency, compensation, resource locking, privacy tiers
+1. **Understand the architecture**: Preview-first, pure agentic execution, policy-bounded
+2. **Know the 16 components**: Memory, Domain (including PolicyEngine), Orchestration, Utilities layers
+3. **See the flow**: Intent → Plan → Preview → Approve → Execute (with LLM reasoning + PolicyEngine + MCP) → Learn
+4. **Understand safety**: PolicyEngine governance, credential vault, two-tier LLM execution, idempotency, compensation, resource locking, privacy tiers
 
 ### For Developers:
 1. Read [GLOBAL_SPEC.md](GLOBAL_SPEC.md) for universal contracts
@@ -2457,7 +2763,11 @@ After reading this HLD, you should:
 
 ---
 
-**Document Version**: HLD v4.6
-**Last Updated**: 2026-03-05
+**Document Version**: Project_HLD v6.1
+**Last Updated**: 2026-03-31
+**Changes from v6.0**: **Clarified execution model.** (1) Reworded Core Idea #2: "deterministic graphs with adaptive execution points" — graph topology never changes at runtime, only Reasoner steps introduce variability. (2) Added "Execution Model: Deterministic Graph, Adaptive Execution" section with three patterns: Pure API, Adaptive with Reasoner, Failure Recovery. (3) Added "Data Trust Boundary" section: default-untrusted rule for API outputs, trust classification table, Tier 1→Tier 2 data flow diagram, plan validator enforcement. (4) Annotated §2a meeting example as pure API plan (all type:api, template resolution, no execution-time LLM). (5) Rewrote §2b travel example with explicit Tier 1 sanitization step between API outputs and Tier 2 Reasoners, trust_level annotations on each step, injection stripping example. (6) Added §2c Failure Recovery Example: step failure → error object (system-generated, trusted) → Tier 2 Reasoner → spawned recovery step → Tier 1 sanitization → continuation. (7) Renamed "Hybrid Planning" → "Deterministic Planning with Adaptive Execution" in §5 with clearer graph-vs-execution distinction. (8) Cross-referenced default-untrusted rule in GLOBAL_SPEC.md §8.2.
+**Changes from v5.1**: **Pure Agentic Execution + MCP + Security Model.** (1) Dropped n8n — all execution via Python/FastAPI ExecuteOrchestrator with MCP tool invocations. (2) WorkflowBuilder absorbed into ExecuteOrchestrator (17→16 components). (3) Replaced n8n Secrets Vault with AES-256-GCM encrypted credential vault. (4) Added two-tier LLM execution (trust_level field) for prompt injection defense. (5) MCP connector model replaces n8n proprietary nodes. (6) Long-running tasks use APScheduler + Redis instead of n8n Wait nodes. (7) Parallelism via asyncio.gather() instead of n8n Split/Merge. (8) NemoClaw deployment compatibility for infrastructure-level security.
+**Changes from v5.0**: **VectorIndex + Hybrid Execution Split.** (1) VectorIndex un-deferred — now active with hybrid BM25 + semantic search, ONNX Runtime, pgvector (§1, §3, §10, §12). 17 Active Components. (2) Hybrid execution split: n8n handles API steps, Python/FastAPI handles LLM reasoning steps. Removed custom n8n nodes (LLM Reasoning Node, Policy Check Node). Updated Core Idea #3, Orchestration Layer (§1), WorkflowBuilder (§3), Reasoner role (§4), execution timeline (§2b), credential isolation (§5), tech stack (§7), and WorkflowBuilder code (§13). (3) New architectural decision: "Hybrid Execution Split" with rationale and trade-offs (§12). (4) Updated ContextRAG description to include optional VectorIndex hybrid search with graceful degradation.
+**Changes from v4.6**: **Hybrid Execution Model** (major version bump — changes fundamental system property). (1) Updated subtitle to "Hybrid planning · Policy-bounded execution". (2) Updated Core Idea #2: plans are deterministic strategies that adapt at runtime via LLM reasoning. (3) Added Core Idea #4: PolicyEngine is the safety moat. (4) Added PolicyEngine to Domain Layer (§1), with description and technology notes. (5) Updated Orchestration Layer (§1) with custom n8n nodes (LLM Reasoning Node, Policy Check Node). (6) Added §2b: Travel Planning Example demonstrating hybrid execution with spawned steps and policy checks. (7) Updated Planner component (§3) with hybrid plans, PolicyEngine integration, Planner vs Runtime LLM comparison. (8) Added PolicyEngine component (§3) with responsibilities, default policies, technology. (9) Updated WorkflowBuilder (§3) with three node types and sub-workflow pattern for spawned steps. (10) Added Reasoner as 7th runtime agent role (§4) with full policy metadata and spawning constraints. (11) Renamed "Deterministic Planning" → "Hybrid Planning" in §5 with runtime adaptation description. (12) Added "Policy-Bounded Execution" subsection (§5). (13) Added "LLM-Aware Recovery (Adaptive Retry)" to retry strategy (§5). (14) Updated component count to 17 (§10). (15) Added "Hybrid Execution Model" and "Policy Attestation vs Re-Signing" architectural decisions (§12). (16) Updated Reasoner role in validation code (§14). (17) Simplified retry/recovery model: LLM reasoning handles step failures inline (no workflow-level replay), ExecutionMonitor reduced to infrastructure monitoring, failed plans are terminal (user starts fresh).
 **Changes from v4.5**: (1) Added explicit Deployment Model section: self-hosted, single-tenant, multi-user. (2) Removed `tenant_id` from idempotency key structure and examples — system scopes by `user_id:integration_account_id` only. (3) Aligned with GLOBAL_SPEC v2.2.
-**Changes from v4.4**: **MVP scope clarification for multi-user single-tenant deployment.** Major architectural updates: (1) Reframed runtime roles as logical plan-step categories (§4) - all execution happens in n8n, not separate services. (2) Multi-user safe idempotency (§5) - 3-state records (IN_FLIGHT/SUCCEEDED/FAILED) with scoping by user/integration account, atomic claim pattern prevents duplicate operations on workflow retry. (3) Dual retry strategy (§5) - node-level retries (n8n config) + workflow-level retries (ExecutionMonitor with exponential backoff: 60s, 300s, 900s). (4) Added ExecutionMonitor component (§3, §8, §10, §13) - polls n8n API every 30s, detects stuck executions (5min timeout), triggers workflow retries (max 3 attempts), enforces time budgets (60min). Replaced DurableOrchestrator with ExecutionMonitor. (5) Removed workspace_id from idempotency and locking keys (no workspace concept in project). (6) Clarified n8n persistence capabilities (§8) - stores execution state but doesn't auto-retry workflows or detect stuck executions. (7) Updated §13 - replaced task queue pattern with ExecutionMonitor pattern, clarified parallel execution happens in n8n (WorkflowBuilder generates Split/Merge nodes), single Planner instance uses async/await for I/O concurrency (no threading/multiprocessing needed).
+**Changes from v4.4**: **MVP scope clarification for multi-user single-tenant deployment.** Major architectural updates: (1) Reframed runtime roles as logical plan-step categories (§4) - all execution happens via MCP tool invocations, not separate services. (2) Multi-user safe idempotency (§5) - 3-state records (IN_FLIGHT/SUCCEEDED/FAILED) with scoping by user/integration account, atomic claim pattern prevents duplicate operations on execution retry. (3) Dual retry strategy (§5) - step-level retries (RetryPolicy) + LLM-adaptive recovery (Reasoner steps). (4) Added ExecutionMonitor component (§3, §8, §10, §13) - polls task registry every 30s, detects stuck executions (5min timeout), enforces time budgets (60min). (5) Removed workspace_id from idempotency and locking keys (no workspace concept in project). (6) Updated §13 - replaced task queue pattern with ExecutionMonitor pattern, clarified parallel execution via asyncio.gather(), single Planner instance uses async/await for I/O concurrency (no threading/multiprocessing needed).

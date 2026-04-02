@@ -11,6 +11,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from .policy import PolicyAttestation
+
 
 class Signature(BaseModel):
     """
@@ -22,6 +24,9 @@ class Signature(BaseModel):
         signature: Base64-encoded signature (min 64 chars)
         pubkey_id: Public key identifier (e.g., "k1")
         plan_hash: SHA-256 hash of canonical plan (64-char hex)
+        ts: ISO 8601 timestamp of when the signature was created
+        nonce: ULID to prevent replay attacks
+        policy_attestations: Runtime attestations (initially empty, filled at runtime)
     """
 
     algo: Literal["Ed25519"] = Field(..., description="Signature algorithm")
@@ -37,4 +42,21 @@ class Signature(BaseModel):
         min_length=64,
         max_length=64,
         description="SHA-256 hash of canonical plan (64-char hex)",
+    )
+
+    ts: str = Field(
+        ...,
+        description="ISO 8601 timestamp of when the signature was created",
+    )
+
+    nonce: str = Field(
+        ...,
+        min_length=26,
+        max_length=26,
+        description="ULID nonce to prevent replay attacks",
+    )
+
+    policy_attestations: list[PolicyAttestation] = Field(
+        default_factory=list,
+        description="Runtime policy attestation records (initially empty, filled at runtime)",
     )
