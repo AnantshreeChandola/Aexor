@@ -247,3 +247,93 @@ class TestEvaluateSpawnWithCache:
         decision = await policy_service.evaluate_spawn(request)
         assert decision.allowed is True
         mock_cache_adapter.set_policy.assert_called()
+
+
+# ---------------------------------------------------------------------------
+# Learn from approval
+# ---------------------------------------------------------------------------
+
+
+class TestLearnFromApproval:
+    @pytest.mark.asyncio
+    async def test_learn_creates_policy(self, policy_service, mock_db_adapter, mock_cache_adapter):
+        """learn_from_approval creates a policy with correct id, scope, tools, roles."""
+        rule = await policy_service.learn_from_approval("Fetcher", "google.calendar")
+        assert rule.policy_id == "learned:Fetcher:google.calendar"
+        assert rule.scope == "role"
+        assert rule.allowed_tools == ["google.calendar"]
+        assert rule.allowed_roles == ["Fetcher"]
+        assert rule.require_approval is False
+        mock_db_adapter.store_policy.assert_called_once()
+        mock_cache_adapter.invalidate.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_learn_policy_name_descriptive(self, policy_service, mock_db_adapter):
+        """Learned policy name includes role and tool."""
+        rule = await policy_service.learn_from_approval("Analyzer", "slack.chat")
+        assert "Analyzer" in rule.name
+        assert "slack.chat" in rule.name
+
+    @pytest.mark.asyncio
+    async def test_learn_custom_limits(self, policy_service, mock_db_adapter):
+        """learn_from_approval respects custom max_spawned_steps and token_budget."""
+        rule = await policy_service.learn_from_approval(
+            "Fetcher", "google.calendar", max_spawned_steps=5, token_budget=4096
+        )
+        assert rule.max_spawned_steps == 5
+        assert rule.token_budget == 4096
+
+    @pytest.mark.asyncio
+    async def test_learn_upserts_on_repeat(self, policy_service, mock_db_adapter):
+        """Calling learn_from_approval twice does not error (upsert semantics)."""
+        await policy_service.learn_from_approval("Fetcher", "google.calendar")
+        await policy_service.learn_from_approval("Fetcher", "google.calendar")
+        assert mock_db_adapter.store_policy.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_learn_then_evaluate_auto_approves(
+        self, policy_service, mock_db_adapter, mock_cache_adapter
+    ):
+        """End-to-end: learn a policy, then evaluate_spawn auto-approves."""
+        from datetime import UTC, datetime
+
+        from components.PolicyEngine.domain.models import PolicyDB
+
+        # First: learn from approval
+        await policy_service.learn_from_approval("Fetcher", "google.calendar")
+
+        # Set up mock so learned policy is returned on lookup
+        learned_db = PolicyDB(
+            policy_id="learned:Fetcher:google.calendar",
+            name="Learned policy for Fetcher using google.calendar",
+            version=1,
+            scope="role",
+            allowed_tools=["google.calendar"],
+            allowed_roles=["Fetcher"],
+            max_spawned_steps=3,
+            require_approval=False,
+            data_access=[],
+            forbidden_actions=[],
+            token_budget=8192,
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+        # First get_policy call (explicit ref=None → skip), second (learned lookup) returns policy
+        mock_db_adapter.get_policy.return_value = learned_db
+
+        request = make_spawn_request(
+            policy_ref=None,
+            proposed_steps=[
+                {
+                    "step": 6,
+                    "role": "Fetcher",
+                    "uses": "google.calendar",
+                    "call": "list_events",
+                    "can_spawn": False,
+                }
+            ],
+        )
+        decision = await policy_service.evaluate_spawn(request)
+        assert decision.allowed is True
+        assert decision.requires_approval is False
+        assert decision.policy_matched is True

@@ -124,6 +124,11 @@ class PolicyDecision(BaseModel):
         description="List of violated policy clauses",
     )
 
+    policy_matched: bool = Field(
+        default=True,
+        description="Whether a stored policy was found. False when falling back to user approval.",
+    )
+
 
 class PolicyAttestation(BaseModel):
     """Runtime audit record for spawned steps (GLOBAL_SPEC §2.4.1).

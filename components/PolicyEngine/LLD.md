@@ -10,10 +10,10 @@
 
 ## 1. Purpose & Scope
 
-PolicyEngine is the **safety boundary** for all runtime LLM decisions. It evaluates whether a Reasoner step's proposed spawned steps are allowed under the governing policy rule, enforcing deny-by-default semantics.
+PolicyEngine is the **safety boundary** for all runtime LLM decisions. It evaluates whether a Reasoner step's proposed spawned steps are allowed under the governing policy rule. When no policy matches, it falls back to requiring user approval (HITL gate) and learns from approved decisions for future auto-approval.
 
 **Responsibilities:**
-- Evaluate spawn requests against stored PolicyRule constraints (deny-by-default)
+- Evaluate spawn requests against stored PolicyRule constraints (fallback to user approval when unmatched)
 - Perform atomic all-or-nothing constraint validation (tools, roles, step counts, forbidden actions, plugin membership)
 - Force `requires_approval=true` for any Booker-role spawned step (non-overridable HITL)
 - Reject recursive spawning (spawned steps cannot have `can_spawn=true`)
@@ -100,8 +100,9 @@ Domain / Service Layer
 |-----------|--------|-------|--------|----------------|
 | SharedDatabaseAdapter | `get_session()` | — | AsyncSession | DB errors → fail-closed (deny) |
 | Redis client | `get()`, `set()`, `delete()` | key, value | bytes or None | Errors → log warning, fall through to DB |
-| Consumed by: ExecuteOrchestrator | `evaluate_spawn(request)` | SpawnRequest | PolicyDecision | Deny-by-default on any error |
+| Consumed by: ExecuteOrchestrator | `evaluate_spawn(request)` | SpawnRequest | PolicyDecision | Fallback to user approval on no match |
 | Consumed by: ExecuteOrchestrator | `create_attestation(...)` | plan_id, decision, etc. | PolicyAttestation | AttestationError raised to caller |
+| Consumed by: ExecuteOrchestrator | `learn_from_approval(role, tool)` | role, tool | PolicyRule | Delegates to create_policy |
 | Consumed by: Planner | `get_policy(policy_id)` | policy_id | PolicyRule or None | None → caller decides |
 
 ---
@@ -114,18 +115,28 @@ Domain / Service Layer
 class PolicyService:
     """Core PolicyEngine service.
 
-    Evaluates spawn requests against policy rules, with deny-by-default
-    semantics. Uses cache-first lookups with DB fallback.
+    Evaluates spawn requests against policy rules, with fallback to
+    user approval when no matching policy is found. Uses cache-first
+    lookups with DB fallback.
     """
 
     async def evaluate_spawn(self, request: SpawnRequest) -> PolicyDecision:
         """Evaluate whether a step may spawn child steps.
 
-        Resolution order: explicit policy_ref → deny-by-default.
-        If no policy is found, action is denied.
+        Resolution order: explicit policy_ref → learned policy → user approval.
+        If no policy is found, falls back to requiring user approval.
 
         Returns:
             PolicyDecision with allowed/denied result and reason.
+        """
+
+    async def learn_from_approval(
+        self, role: str, tool: str, *, max_spawned_steps=3, token_budget=8192
+    ) -> PolicyRule:
+        """Create a learned policy from a user-approved spawn.
+
+        Called after user approves a gated spawn where decision.policy_matched
+        is False. Future spawns with the same role+tool auto-approve.
         """
 
     async def create_attestation(
@@ -387,7 +398,9 @@ class PolicyCacheAdapter:
 1. Log request (plan_id, spawning_step, policy_ref)
 2. Resolve policy:
    a. If policy_ref provided → get_policy(policy_ref)
-   b. If not found or not provided → return DENIED (deny-by-default)
+   b. If not found → try learned policy: get_policy("learned:{role}:{tool}") for each proposed step
+   c. If learned policy found → evaluate constraints against it (continue to step 3)
+   d. If nothing found → return ALLOWED with requires_approval=True, policy_matched=False (user approval fallback)
 3. Validate count limits:
    a. proposed_count > rule.max_spawned_steps → violation
    b. proposed_count > 10 (hard cap) → violation
@@ -462,7 +475,7 @@ ExecuteOrchestrator       PolicyService         CacheAdapter    DatabaseAdapter
         │←──────────────────────│                    │                │
 ```
 
-### 9.2 Deny Path — No Matching Policy
+### 9.2 Fallback Path — No Matching Policy → User Approval
 
 ```
 ExecuteOrchestrator       PolicyService         CacheAdapter    DatabaseAdapter
@@ -477,7 +490,24 @@ ExecuteOrchestrator       PolicyService         CacheAdapter    DatabaseAdapter
         │                       │              None                   │
         │                       │←────────────────────────────────────│
         │                       │                    │                │
-        │ PolicyDecision(false) │ "deny-by-default"  │                │
+        │                       │ [try learned policy lookup]         │
+        │                       │ get_policy("learned:{role}:{tool}") │
+        │                       ├────────────────────────────────────→│
+        │                       │              None                   │
+        │                       │←────────────────────────────────────│
+        │                       │                    │                │
+        │ PolicyDecision(true)  │ requires_approval=true              │
+        │ policy_matched=false  │ "fallback to user approval"         │
+        │←──────────────────────│                    │                │
+        │                       │                    │                │
+        │ [user approves]       │                    │                │
+        │ learn_from_approval() │                    │                │
+        ├──────────────────────→│                    │                │
+        │                       │ create_policy(learned:role:tool)    │
+        │                       ├────────────────────────────────────→│
+        │                       │              True                   │
+        │                       │←────────────────────────────────────│
+        │  PolicyRule (learned) │                    │                │
         │←──────────────────────│                    │                │
 ```
 
@@ -629,22 +659,24 @@ Domain errors are defined in `domain/models.py`. No HTTP routes exist (library c
 
 | Test File | Tests | Coverage |
 |-----------|-------|----------|
-| `test_unit.py` | 24 | Core constraint checks (deny-by-default, tools, roles, counts, forbidden actions, plugins, recursive spawn, Booker HITL) |
-| `test_service.py` | 17 | Cache-first lookups, attestation creation, CRUD, cache populate on miss |
-| `test_contract.py` | 13 | Model conformance (PolicyRule, PolicyDecision, PolicyAttestation, SpawnRequest) |
+| `test_unit.py` | 27 | Fallback-to-approval, learned policy resolution, tools, roles, counts, forbidden actions, plugins, recursive spawn, Booker HITL |
+| `test_service.py` | 22 | Cache-first lookups, attestation creation, CRUD, cache populate on miss, learn-from-approval |
+| `test_contract.py` | 15 | Model conformance (PolicyRule, PolicyDecision, PolicyAttestation, SpawnRequest) |
 | `test_observability.py` | 5 | Structured logging, PII protection |
-| **Total** | **59** | |
+| **Total** | **69** | |
 
 ---
 
 ## 14. Architectural Considerations
 
-### 14.1 Deny-by-Default
+### 14.1 Fallback-to-Approval with Learned Policies
 
-This is the **most important architectural decision**. If no policy rule matches a spawn request, the action is **always denied**. This prevents:
-- Spawning steps without explicit authorization
-- Default-allow security vulnerabilities
-- Unaudited runtime modifications to plans
+When no policy rule matches a spawn request, the action is **allowed but requires user approval** (HITL gate). This balances safety with usability:
+- Legitimate spawns that lack pre-configured policies are not hard-denied
+- The user retains control via the approval gate
+- On approval, a **learned policy** (`learned:{role}:{tool}`) is created so future similar spawns auto-approve
+- `PolicyDecision.policy_matched=False` signals to callers that the decision came from the fallback path
+- Constraint violations (e.g. forbidden tools, recursive spawning) are still hard-denied regardless of learned policies
 
 ### 14.2 Attestations as Audit Records
 

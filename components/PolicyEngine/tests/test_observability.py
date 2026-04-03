@@ -48,13 +48,15 @@ class TestEvaluateSpawnLogging:
         assert any("ALLOWED" in record.message for record in caplog.records)
 
     @pytest.mark.asyncio
-    async def test_denied_decision_logged(self, policy_service, mock_db_adapter, caplog):
-        """Denied decision logged with violations."""
+    async def test_no_policy_fallback_logged(self, policy_service, mock_db_adapter, caplog):
+        """No matching policy → 'fallback to user approval' logged."""
         mock_db_adapter.get_policy.return_value = None
         request = make_spawn_request(policy_ref="missing-policy")
         with caplog.at_level(logging.INFO, logger="components.PolicyEngine.service.policy_service"):
             await policy_service.evaluate_spawn(request)
-        assert any("deny-by-default" in record.message.lower() for record in caplog.records)
+        assert any(
+            "fallback to user approval" in record.message.lower() for record in caplog.records
+        )
 
     @pytest.mark.asyncio
     async def test_no_pii_in_logs(self, policy_service, caplog):
