@@ -103,7 +103,9 @@ class TestLearnedPolicyResolution:
         assert decision.policy_matched is True
 
     @pytest.mark.asyncio
-    async def test_learned_policy_not_found_falls_to_approval(self, policy_service, mock_db_adapter):
+    async def test_learned_policy_not_found_falls_to_approval(
+        self, policy_service, mock_db_adapter
+    ):
         """No learned policy → user approval fallback."""
         mock_db_adapter.get_policy.return_value = None
         request = make_spawn_request(

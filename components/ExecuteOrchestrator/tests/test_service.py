@@ -57,9 +57,7 @@ class TestHappyPath:
         outcome = await execute_service.execute_plan(sample_execute_request)
         assert outcome.success is True
 
-    async def test_credential_decryption_called(
-        self, execute_service, sample_plan
-    ):
+    async def test_credential_decryption_called(self, execute_service, sample_plan):
         """Credential decrypted for API step with credentials."""
         token = jwt.encode(
             {"plan_id": sample_plan.plan_id, "exp": time.time() + 900},
@@ -135,9 +133,7 @@ class TestVerification:
         assert outcome.success is False
         assert outcome.error_type == "plan_expired"
 
-    async def test_valid_token_proceeds(
-        self, execute_service, sample_execute_request
-    ):
+    async def test_valid_token_proceeds(self, execute_service, sample_execute_request):
         """Valid token: execution proceeds successfully."""
         outcome = await execute_service.execute_plan(sample_execute_request)
         assert outcome.success is True

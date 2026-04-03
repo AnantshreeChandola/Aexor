@@ -183,7 +183,8 @@ class PolicyService:
     # ------------------------------------------------------------------
 
     async def _resolve_learned_policy(
-        self, proposed_steps: list[dict],
+        self,
+        proposed_steps: list[dict],
     ) -> PolicyRule | None:
         """Try to find a learned policy matching any proposed step.
 

@@ -32,7 +32,6 @@ class PlanLibraryError(Exception):
     pass
 
 
-
 class DuplicatePlanError(PlanLibraryError):
     """Raised when attempting to store duplicate plan ID."""
 
@@ -154,7 +153,9 @@ class StorePlanRequest(BaseModel):
     """Request model for storing an executed plan."""
 
     plan: dict[str, Any] = Field(..., description="Plan JSON with plan_id, graph, meta")
-    signature: dict[str, Any] = Field(default_factory=dict, description="Legacy signature data (unused)")
+    signature: dict[str, Any] = Field(
+        default_factory=dict, description="Legacy signature data (unused)"
+    )
     outcome: dict[str, Any] = Field(..., description="Execution outcome data")
     metrics: dict[str, Any] = Field(..., description="Performance metrics data")
 

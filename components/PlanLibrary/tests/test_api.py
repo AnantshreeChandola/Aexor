@@ -216,9 +216,7 @@ class TestErrorResponseFormat:
     def test_error_response_has_required_fields(self):
         """All error responses match ErrorResponse schema."""
         mock_service = MagicMock()
-        mock_service.store_plan = AsyncMock(
-            side_effect=DuplicatePlanError(plan_id=VALID_ULID)
-        )
+        mock_service.store_plan = AsyncMock(side_effect=DuplicatePlanError(plan_id=VALID_ULID))
 
         app = _create_test_app(plan_service=mock_service)
         client = TestClient(app)
