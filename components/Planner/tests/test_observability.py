@@ -24,13 +24,11 @@ def _make_service_with_adapter(
     adapter,
     context_rag,
     registry,
-    signer,
     plan_service,
 ):
     return PlannerService(
         context_rag_service=context_rag,
         registry_service=registry,
-        signer_service=signer,
         plan_service=plan_service,
         llm_adapter=adapter,
         prompt_builder=PromptBuilder(),
@@ -102,7 +100,6 @@ class TestObservability:
         self,
         mock_context_rag_service,
         mock_registry_service,
-        mock_signer_service,
         mock_plan_service,
         caplog,
     ):
@@ -113,7 +110,6 @@ class TestObservability:
             adapter,
             mock_context_rag_service,
             mock_registry_service,
-            mock_signer_service,
             mock_plan_service,
         )
         with caplog.at_level(logging.WARNING):
@@ -125,7 +121,6 @@ class TestObservability:
     async def test_context_rag_failure_logged(
         self,
         mock_registry_service,
-        mock_signer_service,
         mock_plan_service,
         mock_llm_adapter,
         caplog,
@@ -138,7 +133,6 @@ class TestObservability:
             mock_llm_adapter,
             failing_crag,
             mock_registry_service,
-            mock_signer_service,
             mock_plan_service,
         )
         with caplog.at_level(logging.WARNING):

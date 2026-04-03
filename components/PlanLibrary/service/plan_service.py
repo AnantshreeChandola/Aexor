@@ -1,8 +1,8 @@
 """
 Plan Service - Core Business Logic for PlanLibrary
 
-Coordinates plan storage, canonicalization, signature verification,
-and embedding generation. Returns data in Evidence Item format.
+Coordinates plan storage, canonicalization, and embedding generation.
+Returns data in Evidence Item format.
 
 Reference: LLD.md, tasks.md T200
 """
@@ -17,7 +17,6 @@ from shared.database.error_handler import DatabaseIntegrityError
 from shared.schemas.evidence import EvidenceItem
 
 from ..adapters.db import DatabaseAdapter
-from ..adapters.signature_verifier import SignatureVerifier
 from ..domain.models import (
     MAX_PLAN_SIZE_BYTES,
     MAX_STEP_COUNT,
@@ -40,24 +39,21 @@ class PlanService:
     """
     Core business logic for plan storage and retrieval.
 
-    Coordinates database, signature verification, and embedding operations.
+    Coordinates database and embedding operations.
     Returns plan data in Evidence Item format for ContextRAG integration.
     """
 
     def __init__(
         self,
         db_adapter: DatabaseAdapter,
-        signature_verifier: SignatureVerifier | None = None,
     ) -> None:
         """
         Initialize plan service with adapters.
 
         Args:
             db_adapter: Database operations
-            signature_verifier: Signature verification (optional)
         """
         self.db = db_adapter
-        self.signature_verifier = signature_verifier or SignatureVerifier()
         self.evidence_service = EvidenceService()
         logger.info(
             "Plan service initialized",
@@ -77,17 +73,16 @@ class PlanService:
         Decision rules applied top-to-bottom per SPEC:
         1. Validate plan_id is valid ULID
         2. Validate required fields (plan_id, graph, meta)
-        3. Verify Ed25519 signature
-        4. Check for duplicate plan_id
-        5. Check size limits (100 steps, 1MB)
-        6. Canonicalize plan JSON
-        7. Compute SHA-256 hash
-        8. Store plan + outcome + metrics in single DB transaction
-        9. Queue async embedding generation
+        3. Check for duplicate plan_id
+        4. Check size limits (100 steps, 1MB)
+        5. Canonicalize plan JSON
+        6. Compute SHA-256 hash
+        7. Store plan + outcome + metrics in single DB transaction
+        8. Queue async embedding generation
 
         Args:
             plan: Plan data with plan_id, graph, meta
-            signature: Ed25519 signature data
+            signature: Legacy field (unused, pass empty dict)
             outcome: Execution outcome data
             metrics: Performance metrics data
 
@@ -95,7 +90,6 @@ class PlanService:
             StorePlanResponse with plan_id and stored_at
 
         Raises:
-            InvalidSignatureError: If signature verification fails
             DuplicatePlanError: If plan_id already exists
             PlanTooLargeError: If plan exceeds limits
             ValueError: If plan data is malformed
@@ -113,10 +107,7 @@ class PlanService:
         if missing:
             raise ValueError(f"Plan missing required fields: {missing}")
 
-        # Decision Rule 3: Verify signature
-        self.signature_verifier.verify_signature(plan, signature)
-
-        # Decision Rule 5: Check size limits
+        # Decision Rule 3: Check size limits
         graph = plan.get("graph", [])
         step_count = len(graph) if isinstance(graph, list) else 0
         if step_count > MAX_STEP_COUNT:

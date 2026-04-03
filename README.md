@@ -4,7 +4,7 @@
 **Architecture:** HLD v6.1 / GLOBAL_SPEC v3.0
 **Deployment:** Self-hosted, single-tenant, multi-user
 
-A preview-first personal assistant with deterministic planning and adaptive execution. The system produces immutable, signed plan DAGs (revision 0) where LLM Reasoner steps can spawn bounded new steps at runtime, creating versioned revisions with PolicyEngine attestations. All execution runs through a pure Python/FastAPI runtime with MCP tool invocations — no external workflow engines.
+A preview-first personal assistant with deterministic planning and adaptive execution. The system produces immutable plan DAGs (revision 0) where LLM Reasoner steps can spawn bounded new steps at runtime, creating versioned revisions with PolicyEngine attestations. All execution runs through a pure Python/FastAPI runtime with MCP tool invocations — no external workflow engines.
 
 ---
 
@@ -13,14 +13,14 @@ A preview-first personal assistant with deterministic planning and adaptive exec
 ```
 User Request → Understand → Plan → Preview → Approve → Execute → Learn
      ↓            ↓          ↓        ↓          ↓         ↓        ↓
-  [Message]   [Intent]   [Signed   [Show    [Confirm]  [Do It]  [Remember]
-                          DAG]      Me]
+  [Message]   [Intent]   [Plan    [Show    [Confirm]  [Do It]  [Remember]
+                          DAG]     Me]
 ```
 
 **Core flow:**
 1. **Intake** collects user intent across multiple messages (LLM parsing, Redis sessions)
 2. **ContextRAG** gathers relevant context from 4 Memory Layer sources (≤2KB budget)
-3. **Planner** generates a deterministic plan DAG (same inputs → same graph → same Ed25519 signature)
+3. **Planner** generates a deterministic plan DAG (same inputs → same graph)
 4. **PreviewOrchestrator** shows what will happen (no side effects)
 5. **ApprovalGate** waits for user confirmation (JWT token, 15min TTL)
 6. **ExecuteOrchestrator** dispatches steps — API steps via MCP, reasoning via Anthropic API
@@ -30,14 +30,14 @@ User Request → Understand → Plan → Preview → Approve → Execute → Lea
 
 ## Architecture
 
-### 4 Layers, 16 Components
+### 4 Layers, 15 Components
 
 **Layer 1 — Memory & Persistence** (all implemented)
 | Component | Purpose |
 |-----------|---------|
 | ProfileStore | Stable user preferences and consent settings |
 | History | Normalized, PII-light facts about past actions (30-day TTL) |
-| PlanLibrary | All past plans with signatures and outcomes |
+| PlanLibrary | All past plans with outcomes |
 | VectorIndex | Hybrid BM25 + semantic search (pgvector + ONNX Runtime) |
 
 **Layer 2 — Domain Services** (all implemented)
@@ -47,7 +47,6 @@ User Request → Understand → Plan → Preview → Approve → Execute → Lea
 | ContextRAG | Tiered evidence gathering from Memory Layer (≤2KB) |
 | Planner | Deterministic plan generation via Anthropic Claude API |
 | PolicyEngine | Policy rule evaluation, attestations, HITL enforcement |
-| Signer | Ed25519 plan signing and verification |
 | PluginRegistry | Tool catalog with scope verification and credential resolution |
 | PlanWriter | Outcome persistence with fact derivation |
 
@@ -67,7 +66,7 @@ User Request → Understand → Plan → Preview → Approve → Execute → Lea
 ### Key Architectural Principles
 
 1. **Preview-first safety** — never execute without showing the user first
-2. **Deterministic planning with adaptive execution** — initial plan (revision 0) is immutable and signed; Reasoner steps may spawn bounded new steps at runtime, creating new revisions with PolicyAttestations
+2. **Deterministic planning with adaptive execution** — initial plan (revision 0) is immutable; Reasoner steps may spawn bounded new steps at runtime, creating new revisions with PolicyAttestations
 3. **Pure agentic runtime** — Python ExecuteOrchestrator dispatches all steps via MCP (APIs) and Anthropic API (reasoning)
 4. **Two-tier LLM execution** — sandboxed Tier 1 (untrusted external data, no tools) + capable Tier 2 (agent reasoning, MCP tools)
 5. **Default-untrusted rule** — all external API data must pass through Tier 1 sanitization before reaching Tier 2 Reasoners
@@ -91,7 +90,6 @@ User Request → Understand → Plan → Preview → Approve → Execute → Lea
 | Cache | Redis 7 with hiredis | Sessions, idempotency, approval gates |
 | AI/LLM | **Anthropic Claude (sole paid external dependency)** | Planning + intent parsing + runtime reasoning |
 | Embeddings | ONNX Runtime (all-MiniLM-L6-v2, 384-dim) | Fully local CPU inference, zero API cost |
-| Signing | Ed25519 (cryptography + PyNaCl) | Plan integrity + PolicyEngine attestations |
 | Credentials | AES-256-GCM vault in PostgreSQL | Master key from env; LLM never sees plaintext |
 | Testing | pytest, ruff, mypy | Async support, strict type checking |
 | CI/CD | GitHub Actions | Lint, test, type-check |
@@ -117,7 +115,6 @@ Personal-agent/
 │   ├── ContextRAG/       # Evidence gathering
 │   ├── Planner/          # Plan generation + validation
 │   ├── PolicyEngine/     # Policy rules + attestations
-│   ├── Signer/           # Ed25519 signing
 │   ├── PluginRegistry/   # Tool catalog
 │   ├── PlanWriter/       # Outcome persistence
 │   ├── ProfileStore/     # User preferences
@@ -125,7 +122,7 @@ Personal-agent/
 │   ├── PlanLibrary/      # Plan storage
 │   └── VectorIndex/      # Hybrid search
 ├── shared/               # Cross-component infrastructure
-│   ├── schemas/          # Pydantic models (Intent, Plan, Signature, Evidence, Policy)
+│   ├── schemas/          # Pydantic models (Intent, Plan, Evidence, Policy)
 │   ├── database/         # SQLAlchemy models, session management
 │   ├── middleware/        # Auth middleware
 │   ├── security/         # Encryption utilities
@@ -160,7 +157,7 @@ python -m venv venv && source venv/bin/activate
 pip install -e ".[dev]"
 
 # Configure environment
-cp .env.example .env  # Add ANTHROPIC_API_KEY, database URLs, signing keys
+cp .env.example .env  # Add ANTHROPIC_API_KEY, database URLs
 
 # Run tests
 pytest components/ tests/

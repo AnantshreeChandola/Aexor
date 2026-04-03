@@ -14,7 +14,6 @@ import pytest
 
 from components.PlanLibrary.domain.models import (
     DuplicatePlanError,
-    InvalidSignatureError,
     PlanDB,
     PlanTooLargeError,
     StorePlanResponse,
@@ -85,19 +84,10 @@ def mock_db_adapter():
 
 
 @pytest.fixture
-def mock_signature_verifier():
-    """Create mock signature verifier that always passes."""
-    verifier = MagicMock()
-    verifier.verify_signature.return_value = True
-    return verifier
-
-
-@pytest.fixture
-def plan_service(mock_db_adapter, mock_signature_verifier):
+def plan_service(mock_db_adapter):
     """Create PlanService with mocked dependencies."""
     return PlanService(
         db_adapter=mock_db_adapter,
-        signature_verifier=mock_signature_verifier,
     )
 
 
@@ -155,21 +145,6 @@ class TestStorePlan:
             )
 
         assert exc_info.value.plan_id == VALID_ULID
-
-    @pytest.mark.asyncio
-    async def test_store_plan_invalid_signature(self, plan_service, mock_signature_verifier):
-        """Store plan with invalid signature -- InvalidSignatureError (US-1 scenario 4)."""
-        mock_signature_verifier.verify_signature.side_effect = InvalidSignatureError(
-            plan_id=VALID_ULID, reason="bad sig"
-        )
-
-        with pytest.raises(InvalidSignatureError):
-            await plan_service.store_plan(
-                plan=_make_plan_data(),
-                signature=_make_signature(),
-                outcome=_make_outcome(),
-                metrics=_make_metrics(),
-            )
 
     @pytest.mark.asyncio
     async def test_store_plan_too_many_steps(self, plan_service):

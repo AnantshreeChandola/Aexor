@@ -2,42 +2,128 @@
 PolicyEngine unit tests — evaluation logic.
 
 Tests the core evaluate_spawn() method against policy rules.
-~25 tests covering deny-by-default, all constraint checks, and edge cases.
+~35 tests covering fallback-to-approval, all constraint checks, learned
+policies, and edge cases.
 """
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 
+from components.PolicyEngine.domain.models import PolicyDB
 from components.PolicyEngine.tests.conftest import (
     DEFAULT_POLICY_DB,
     make_spawn_request,
 )
 
 # ---------------------------------------------------------------------------
-# Deny-by-default
+# Fallback to user approval
 # ---------------------------------------------------------------------------
 
 
-class TestDenyByDefault:
-    """No matching policy → denied."""
+class TestFallbackToApproval:
+    """No matching policy → fallback to user approval."""
 
     @pytest.mark.asyncio
-    async def test_no_policy_ref_denies(self, policy_service, mock_db_adapter):
-        """No policy_ref at all → deny-by-default."""
+    async def test_no_policy_ref_requires_approval(self, policy_service, mock_db_adapter):
+        """No policy_ref at all → allowed with requires_approval."""
+        mock_db_adapter.get_policy.return_value = None
         request = make_spawn_request(policy_ref=None)
         decision = await policy_service.evaluate_spawn(request)
-        assert decision.allowed is False
-        assert "deny-by-default" in decision.reason.lower()
+        assert decision.allowed is True
+        assert decision.requires_approval is True
+        assert decision.policy_matched is False
 
     @pytest.mark.asyncio
-    async def test_policy_ref_not_found_denies(self, policy_service, mock_db_adapter):
-        """policy_ref points to non-existent policy → deny-by-default."""
+    async def test_policy_ref_not_found_requires_approval(self, policy_service, mock_db_adapter):
+        """policy_ref points to non-existent policy → fallback to user approval."""
         mock_db_adapter.get_policy.return_value = None
         request = make_spawn_request(policy_ref="nonexistent-policy")
         decision = await policy_service.evaluate_spawn(request)
-        assert decision.allowed is False
-        assert "no matching policy" in decision.reason.lower()
+        assert decision.allowed is True
+        assert decision.requires_approval is True
+        assert decision.policy_matched is False
+        assert "fallback to user approval" in decision.reason.lower()
+
+    @pytest.mark.asyncio
+    async def test_policy_matched_true_when_found(self, policy_service):
+        """Existing policy → policy_matched=True."""
+        request = make_spawn_request()
+        decision = await policy_service.evaluate_spawn(request)
+        assert decision.allowed is True
+        assert decision.policy_matched is True
+
+
+# ---------------------------------------------------------------------------
+# Learned policy resolution
+# ---------------------------------------------------------------------------
+
+
+class TestLearnedPolicyResolution:
+    """Learned policy lookup during evaluate_spawn fallback."""
+
+    @pytest.mark.asyncio
+    async def test_learned_policy_found_auto_approves(self, policy_service, mock_db_adapter):
+        """learned:Fetcher:google.calendar exists → auto-approve."""
+        learned_db = PolicyDB(
+            policy_id="learned:Fetcher:google.calendar",
+            name="Learned policy for Fetcher using google.calendar",
+            version=1,
+            scope="role",
+            allowed_tools=["google.calendar"],
+            allowed_roles=["Fetcher"],
+            max_spawned_steps=3,
+            require_approval=False,
+            data_access=[],
+            forbidden_actions=[],
+            token_budget=8192,
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+
+        # First call (explicit ref) returns None, second call (learned) returns the learned policy
+        mock_db_adapter.get_policy.side_effect = [None, learned_db]
+        request = make_spawn_request(
+            policy_ref="missing-policy",
+            proposed_steps=[
+                {
+                    "step": 6,
+                    "role": "Fetcher",
+                    "uses": "google.calendar",
+                    "call": "list_events",
+                    "can_spawn": False,
+                }
+            ],
+        )
+        decision = await policy_service.evaluate_spawn(request)
+        assert decision.allowed is True
+        assert decision.requires_approval is False
+        assert decision.policy_matched is True
+
+    @pytest.mark.asyncio
+    async def test_learned_policy_not_found_falls_to_approval(
+        self, policy_service, mock_db_adapter
+    ):
+        """No learned policy → user approval fallback."""
+        mock_db_adapter.get_policy.return_value = None
+        request = make_spawn_request(
+            policy_ref=None,
+            proposed_steps=[
+                {
+                    "step": 6,
+                    "role": "Fetcher",
+                    "uses": "google.calendar",
+                    "call": "list_events",
+                    "can_spawn": False,
+                }
+            ],
+        )
+        decision = await policy_service.evaluate_spawn(request)
+        assert decision.allowed is True
+        assert decision.requires_approval is True
+        assert decision.policy_matched is False
 
 
 # ---------------------------------------------------------------------------

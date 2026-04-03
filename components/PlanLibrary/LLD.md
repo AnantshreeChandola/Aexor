@@ -12,7 +12,7 @@
 ### Component Purpose
 PlanLibrary is a Memory Layer component that stores executed plans with their outcomes and performance metrics, enabling system learning and optimization through plan pattern analysis and reuse. The component supports:
 
-- **Plan Storage**: Immutable storage of executed plans with signature verification
+- **Plan Storage**: Immutable storage of executed plans
 - **Outcome Tracking**: Success rates and failure pattern analysis
 - **Evidence Item Generation**: Integration with ContextRAG for plan pattern context
 - **Performance Analytics**: Execution metrics for system optimization
@@ -62,8 +62,7 @@ This component conforms to:
 │  └── EvidenceService (Evidence Item conversion)     │
 ├─────────────────────────────────────────────────────┤
 │ Adapter Layer                                       │
-│  ├── DatabaseAdapter (SQLAlchemy async)             │
-│  └── SignatureVerifier (Ed25519)                    │
+│  └── DatabaseAdapter (SQLAlchemy async)             │
 ├─────────────────────────────────────────────────────┤
 │ Data Layer                                          │
 │  └── PostgreSQL 16                                  │
@@ -93,7 +92,6 @@ async def store_plan_endpoint(
     """Store executed plan with outcome and metrics"""
     return await plan_service.store_plan(
         plan=request.plan,
-        signature=request.signature,
         outcome=request.outcome,
         metrics=request.metrics
     )
@@ -108,11 +106,10 @@ class PlanService:
     async def store_plan(
         self,
         plan: Plan,
-        signature: Signature,
         outcome: PlanOutcome,
         metrics: PlanMetrics
     ) -> StorePlanResult:
-        """Store plan with signature verification"""
+        """Store plan with outcome and metrics"""
         
     async def get_plans_by_intent(
         self,
@@ -184,7 +181,7 @@ class PlanOutcome(BaseModel):
 ### Schema References
 - **Plan Storage Schema**: `components/PlanLibrary/schemas/plan_storage.schema.json`
 - **Evidence Item Schema**: `shared/schemas/evidence.py` (imported)
-- **Signature Schema**: `shared/schemas/signature.py` (imported)
+- **Signature Schema**: `shared/schemas/signature.py` (imported, legacy -- signature_data stored as empty dict)
 
 ---
 
@@ -230,28 +227,12 @@ class DatabaseAdapter:
 sequenceDiagram
     participant PW as PlanWriter
     participant PS as PlanService
-    participant SV as SignatureVerifier
     participant DA as DatabaseAdapter
 
-    PW->>PS: store_plan(plan, signature, outcome, metrics)
-    PS->>SV: verify_signature(plan, signature)
-    SV-->>PS: signature_valid: true
+    PW->>PS: store_plan(plan, outcome, metrics)
     PS->>DA: store_plan_transaction(plan, outcome, metrics)
     DA-->>PS: storage_success: true
     PS-->>PW: StorePlanResult(success=true, plan_id, stored_at)
-```
-
-### Error Path: Signature Verification Failure
-```mermaid
-sequenceDiagram
-    participant PW as PlanWriter
-    participant PS as PlanService
-    participant SV as SignatureVerifier
-    
-    PW->>PS: store_plan(plan, invalid_signature, outcome, metrics)
-    PS->>SV: verify_signature(plan, invalid_signature)
-    SV-->>PS: signature_valid: false
-    PS-->>PW: InvalidSignatureError("Signature verification failed")
 ```
 
 ### Retry/Backoff Strategies
@@ -268,7 +249,6 @@ sequenceDiagram
 | `asyncpg` | `>=0.28.0` | High-performance PostgreSQL adapter |
 | `pydantic` | `>=2.0,<3.0` | Data validation and schema compliance |
 | `fastapi` | `>=0.104.0` | API framework with async support |
-| `cryptography` | `>=41.0.0` | Ed25519 signature verification |
 | `ulid-py` | `>=1.1.0` | ULID validation and generation |
 
 ### External APIs/Services
@@ -276,7 +256,7 @@ sequenceDiagram
 ### Internal Infrastructure Dependencies
 - **Shared Database**: Connection pooling and error handling
 - **Shared API**: Authentication and error response patterns
-- **Shared Schemas**: Evidence Item and signature formats
+- **Shared Schemas**: Evidence Item formats
 
 ### Component Dependencies
 **None** - PlanLibrary is a foundation Memory Layer component with no upstream component dependencies.
@@ -314,10 +294,7 @@ logger.info(
 ```python
 class PlanLibraryError(Exception):
     """Base exception for PlanLibrary operations"""
-    
-class InvalidSignatureError(PlanLibraryError):
-    """Raised when plan signature verification fails"""
-    
+
 class DuplicatePlanError(PlanLibraryError):
     """Raised when attempting to store duplicate plan ID"""
     
@@ -392,7 +369,6 @@ Not applicable - PlanLibrary is an internal component with no user-facing operat
 
 ### Determinism Guarantees
 - **Plan Storage**: Deterministic canonicalization ensures same inputs → same storage
-- **Signature Verification**: Cryptographic integrity guarantees
 - **Query Results**: Consistent ordering by success_rate DESC, total_executions DESC
 
 ### State Management

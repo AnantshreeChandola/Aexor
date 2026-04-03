@@ -57,7 +57,6 @@ subsequent phases can import modules without path errors.
     returning `None`
   - `sample_plan` -- Plan model matching GLOBAL_SPEC Section 2.3 with valid ULID
     `plan_id`, `graph`, `meta` (created_at, author, canonical_hash), `intent.entities`
-  - `sample_signature` -- dict matching GLOBAL_SPEC Section 2.4
   - `sample_outcome_success` -- dict with `success=True`, timestamps,
     `total_steps`, `failed_step=None`
   - `sample_outcome_failure` -- dict with `success=False`, `error_type`,
@@ -195,7 +194,7 @@ classes with no business logic and no external dependencies.
   1. **Validate inputs**: `plan` must be non-None/non-empty with `plan_id`.
      Raise `ValueError` if not.
   2. **PlanLibrary write** (PRIMARY): Call `plan_service.store_plan(plan,
-     signature, outcome, metrics)`. If it raises `DuplicatePlanError`, catch
+     outcome, metrics)`. If it raises `DuplicatePlanError`, catch
      and treat as idempotent success (FR-009). If it raises any other
      exception, wrap in `PlanLibraryWriteError` and re-raise (FR-006).
   3. **Fact derivation**: Call `derive_fact(plan, outcome)`. If it raises
@@ -229,7 +228,7 @@ classes with no business logic and no external dependencies.
 
 - **Description**: Implement `bulk_persist()` as specified in LLD Section 4.1.
   - Validates `outcomes` is not empty (raises `ValueError` if so).
-  - Each item in `outcomes` must have keys: `plan`, `signature`, `outcome`,
+  - Each item in `outcomes` must have keys: `plan`, `outcome`,
     `metrics`.
   - Iterates sequentially, calling `persist_outcome()` for each.
   - Collects individual `PersistResult` objects.
@@ -291,7 +290,7 @@ classes with no business logic and no external dependencies.
   - `TestPersistOutcomeValidation`: Empty plan raises ValueError, None
     plan raises ValueError, plan missing plan_id raises ValueError
   - Verify that `plan_service.store_plan()` receives the exact plan,
-    signature, outcome, metrics args without transformation (FR-001,
+    outcome, metrics args without transformation (FR-001,
     SPEC US1 Acceptance Scenario 3)
 - **File to modify**:
   - `components/PlanWriter/tests/test_unit.py` (add test classes)
@@ -350,7 +349,7 @@ classes with no business logic and no external dependencies.
 ### T401 -- Add get_plan_writer_service to shared/dependencies.py
 
 - **Description**: Add the DI getter function following the exact pattern of
-  `get_signer_service()` and `get_vector_index_service()`:
+  `get_vector_index_service()`:
   ```python
   def get_plan_writer_service(request: Request) -> Any:
       """Get PlanWriterService singleton from app state."""
@@ -371,12 +370,10 @@ classes with no business logic and no external dependencies.
 ### T500 -- Write observability tests (log safety)
 
 - **Description**: Verify that PlanWriter logs do not contain raw plan
-  content, embedding vectors, signature bytes, or credentials. Follow the
+  content, embedding vectors, or credentials. Follow the
   Signer `test_observability.py` pattern. Test cases:
   - `test_persist_does_not_log_plan_json`: After `persist_outcome()`, logs
     do not contain plan graph steps, action names from plan, or raw entities
-  - `test_persist_does_not_log_signature_bytes`: Logs do not contain
-    signature base64 value
   - `test_persist_does_not_log_metrics_payload`: Logs do not contain raw
     step_timings array
   - `test_persist_logs_plan_id`: Logs contain the `plan_id` string
@@ -392,8 +389,7 @@ classes with no business logic and no external dependencies.
   - `components/PlanWriter/tests/test_observability.py`
 - **Dependencies**: T300, T001
 - **Acceptance criteria**: `uv run pytest components/PlanWriter/tests/test_observability.py -v`
-  passes. No raw plan content, signatures, or credential values appear
-  in captured log output.
+  passes. No raw plan content appears in captured log output.
 
 ---
 
@@ -411,7 +407,7 @@ classes with no business logic and no external dependencies.
   - `TestUS1_PersistSuccessfulExecution`:
     - Scenario 1: PlanLibrary, History, VectorIndex all called with correct args
     - Scenario 2: Returns PersistResult with plan_id, fact_id, embedding_stored=True, status="ok"
-    - Scenario 3: PlanLibrary receives plan, signature, outcome, metrics unmodified
+    - Scenario 3: PlanLibrary receives plan, outcome, metrics unmodified
   - `TestUS2_PersistFailedExecution`:
     - Scenario 1: Failed outcome with error_type/failed_step passed to PlanLibrary, History fact has outcome=False
     - Scenario 2: Derived fact_text describes failure
@@ -527,7 +523,7 @@ No new Python packages required. PlanWriter uses only existing dependencies:
 
 | Component | Interface Used | Status |
 |-----------|---------------|--------|
-| PlanLibrary | `PlanService.store_plan(plan, signature, outcome, metrics)` -> `StorePlanResponse` | Implemented |
+| PlanLibrary | `PlanService.store_plan(plan, outcome, metrics)` -> `StorePlanResponse` | Implemented |
 | History | `FactService.store_fact(user_id, StoreFactRequest)` -> `StoreFactResponse` | Implemented |
 | VectorIndex | `VectorIndexService.store_embedding(plan_id, plan_data)` -> `None` | Implemented |
 

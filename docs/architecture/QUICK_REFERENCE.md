@@ -25,7 +25,7 @@ Runtime agents are **logical plan-step categories** (not separate services). API
 | Layer | Components | Purpose |
 |-------|-----------|---------|
 | **Memory** | ProfileStore, History, VectorIndex, PlanLibrary | Stores everything the system knows |
-| **Domain** | Intake, ContextRAG, Planner, Signer, PluginRegistry, PlanWriter, PolicyEngine | Understands requests, builds plans, enforces policies |
+| **Domain** | Intake, ContextRAG, Planner, PluginRegistry, PlanWriter, PolicyEngine | Understands requests, builds plans, enforces policies |
 | **Orchestration** | PreviewOrchestrator, ApprovalGate, ExecuteOrchestrator, ExecutionMonitor | Previews and executes plans safely |
 | **Platform** | API Gateway, Audit | Interface and observability |
 
@@ -50,7 +50,7 @@ User Request → Preview → Approval → Execute → Learn
 ## Core Architectural Principles
 
 1. **Preview-first safety**: Never execute without showing user first
-2. **Deterministic planning with adaptive execution**: Initial plan (revision 0) is a fixed, signed DAG (same inputs → same graph → same signature). At runtime, Reasoner steps may spawn new steps within PolicyEngine bounds — each spawn creates a new plan revision with a PolicyAttestation. The original graph is never mutated.
+2. **Deterministic planning with adaptive execution**: Initial plan (revision 0) is a fixed, immutable DAG (same inputs → same graph → same plan_hash). At runtime, Reasoner steps may spawn new steps within PolicyEngine bounds — each spawn creates a new plan revision with a PolicyAttestation. The original graph is never mutated.
 3. **Pure agentic runtime**: Python ExecuteOrchestrator dispatches all steps — MCP for APIs, Anthropic for reasoning
 4. **Idempotency**: Multi-user safe retry (`user:integration:plan:step:op:hash`)
 5. **Compensation**: Undo failed operations (Saga pattern)
@@ -92,10 +92,10 @@ User Request → Preview → Approval → Execute → Learn
 
 ```json
 {
-  "plan_id": "01HX...",              // Ed25519-based ID
+  "plan_id": "01HX...",              // ULID-based ID
   "user_id": "user-123",
   "intent": "schedule_meeting",      // Original user request
-  "signature": "base64:...",         // Ed25519 signature
+  "plan_hash": "sha256:...",         // Data integrity checksum
   "graph": [
     {
       "step": 1,                     // Sequential number

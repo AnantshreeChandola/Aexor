@@ -1,7 +1,7 @@
 """
 PlanWriter Observability Tests
 
-Verifies log safety: no raw plan content, embeddings, signatures,
+Verifies log safety: no raw plan content, embeddings,
 or credentials in log output. Verifies structured log events.
 
 Reference: tasks.md T500
@@ -31,7 +31,6 @@ class TestLogSafety:
         self,
         plan_writer_service,
         sample_plan,
-        sample_signature,
         sample_outcome_success,
         sample_metrics,
         sample_user_id,
@@ -41,7 +40,6 @@ class TestLogSafety:
         await plan_writer_service.persist_outcome(
             user_id=sample_user_id,
             plan=sample_plan,
-            signature=sample_signature,
             outcome=sample_outcome_success,
             metrics=sample_metrics,
         )
@@ -52,33 +50,10 @@ class TestLogSafety:
         assert graph_json not in log_text
 
     @pytest.mark.asyncio
-    async def test_persist_does_not_log_signature_bytes(
-        self,
-        plan_writer_service,
-        sample_plan,
-        sample_signature,
-        sample_outcome_success,
-        sample_metrics,
-        sample_user_id,
-        caplog_planwriter,
-    ):
-        """Logs must not contain signature base64 value."""
-        await plan_writer_service.persist_outcome(
-            user_id=sample_user_id,
-            plan=sample_plan,
-            signature=sample_signature,
-            outcome=sample_outcome_success,
-            metrics=sample_metrics,
-        )
-        log_text = caplog_planwriter.text
-        assert sample_signature.signature not in log_text
-
-    @pytest.mark.asyncio
     async def test_persist_does_not_log_metrics_payload(
         self,
         plan_writer_service,
         sample_plan,
-        sample_signature,
         sample_outcome_success,
         sample_metrics,
         sample_user_id,
@@ -88,7 +63,6 @@ class TestLogSafety:
         await plan_writer_service.persist_outcome(
             user_id=sample_user_id,
             plan=sample_plan,
-            signature=sample_signature,
             outcome=sample_outcome_success,
             metrics=sample_metrics,
         )
@@ -100,7 +74,6 @@ class TestLogSafety:
         self,
         plan_writer_service,
         sample_plan,
-        sample_signature,
         sample_outcome_success,
         sample_metrics,
         sample_user_id,
@@ -110,7 +83,6 @@ class TestLogSafety:
         await plan_writer_service.persist_outcome(
             user_id=sample_user_id,
             plan=sample_plan,
-            signature=sample_signature,
             outcome=sample_outcome_success,
             metrics=sample_metrics,
         )
@@ -124,7 +96,6 @@ class TestLogSafety:
         self,
         plan_writer_service,
         sample_plan,
-        sample_signature,
         sample_outcome_success,
         sample_metrics,
         sample_user_id,
@@ -134,7 +105,6 @@ class TestLogSafety:
         await plan_writer_service.persist_outcome(
             user_id=sample_user_id,
             plan=sample_plan,
-            signature=sample_signature,
             outcome=sample_outcome_success,
             metrics=sample_metrics,
         )
@@ -148,7 +118,6 @@ class TestLogSafety:
         mock_fact_service,
         mock_vector_index_service,
         sample_plan,
-        sample_signature,
         sample_outcome_success,
         sample_metrics,
         sample_user_id,
@@ -164,7 +133,6 @@ class TestLogSafety:
         await service.persist_outcome(
             user_id=sample_user_id,
             plan=sample_plan,
-            signature=sample_signature,
             outcome=sample_outcome_success,
             metrics=sample_metrics,
         )
@@ -184,7 +152,6 @@ class TestLogSafety:
         self,
         plan_writer_service_no_vectorindex,
         sample_plan,
-        sample_signature,
         sample_outcome_success,
         sample_metrics,
         sample_user_id,
@@ -194,7 +161,6 @@ class TestLogSafety:
         await plan_writer_service_no_vectorindex.persist_outcome(
             user_id=sample_user_id,
             plan=sample_plan,
-            signature=sample_signature,
             outcome=sample_outcome_success,
             metrics=sample_metrics,
         )
@@ -212,7 +178,6 @@ class TestLogSafety:
         mock_fact_service,
         mock_vector_index_service,
         sample_plan,
-        sample_signature,
         sample_outcome_success,
         sample_metrics,
         sample_user_id,
@@ -229,7 +194,6 @@ class TestLogSafety:
             await service.persist_outcome(
                 user_id=sample_user_id,
                 plan=sample_plan,
-                signature=sample_signature,
                 outcome=sample_outcome_success,
                 metrics=sample_metrics,
             )

@@ -35,8 +35,9 @@ _MAX_TOTAL_PLAN_STEPS = 100  # abs max steps in a plan
 class PolicyService:
     """Core PolicyEngine service.
 
-    Evaluates spawn requests against policy rules, with deny-by-default
-    semantics. Uses cache-first lookups with DB fallback.
+    Evaluates spawn requests against policy rules, with fallback to
+    user approval when no matching policy is found. Uses cache-first
+    lookups with DB fallback.
     """
 
     def __init__(
@@ -54,8 +55,8 @@ class PolicyService:
     async def evaluate_spawn(self, request: SpawnRequest) -> PolicyDecision:
         """Evaluate whether a step may spawn child steps.
 
-        Resolution order: explicit policy_ref → role-default → system-default.
-        If no policy is found, deny-by-default applies.
+        Resolution order: explicit policy_ref → learned policy → user approval fallback.
+        If no policy is found, falls back to requiring user approval.
 
         Args:
             request: The spawn evaluation request.
@@ -71,20 +72,25 @@ class PolicyService:
             request.policy_ref,
         )
 
-        # 1. Resolve policy
+        # 1. Resolve policy: explicit ref → learned policy → user approval
         rule: PolicyRule | None = None
         if request.policy_ref:
             rule = await self.get_policy(request.policy_ref)
 
         if rule is None:
+            rule = await self._resolve_learned_policy(request.proposed_steps)
+
+        if rule is None:
             logger.info(
-                "No matching policy for plan_id=%s step=%d — deny-by-default",
+                "No matching policy for plan_id=%s step=%d — fallback to user approval",
                 request.plan_id,
                 request.spawning_step,
             )
             return PolicyDecision(
-                allowed=False,
-                reason="No matching policy found — deny-by-default",
+                allowed=True,
+                requires_approval=True,
+                reason="No matching policy found — fallback to user approval",
+                policy_matched=False,
             )
 
         # 2. Evaluate proposed steps against the policy
@@ -169,7 +175,35 @@ class PolicyService:
             allowed=True,
             requires_approval=requires_approval,
             reason=f"Approved by policy '{rule.policy_id}' v{rule.version}",
+            policy_matched=True,
         )
+
+    # ------------------------------------------------------------------
+    # Learned policy resolution
+    # ------------------------------------------------------------------
+
+    async def _resolve_learned_policy(
+        self,
+        proposed_steps: list[dict],
+    ) -> PolicyRule | None:
+        """Try to find a learned policy matching any proposed step.
+
+        Iterates proposed steps and checks for ``learned:{role}:{tool}``
+        policies via the existing ``get_policy()`` cache-first path.
+
+        Returns:
+            First matching PolicyRule, or None if nothing found.
+        """
+        for step_dict in proposed_steps:
+            role = step_dict.get("role", "")
+            tool = step_dict.get("uses", "")
+            if role and tool:
+                learned_id = f"learned:{role}:{tool}"
+                rule = await self.get_policy(learned_id)
+                if rule is not None:
+                    logger.info("Resolved learned policy: %s", learned_id)
+                    return rule
+        return None
 
     # ------------------------------------------------------------------
     # Attestation management
@@ -241,6 +275,47 @@ class PolicyService:
             policy_id,
         )
         return attestation
+
+    # ------------------------------------------------------------------
+    # Learn from approval
+    # ------------------------------------------------------------------
+
+    async def learn_from_approval(
+        self,
+        role: str,
+        tool: str,
+        *,
+        max_spawned_steps: int = 3,
+        token_budget: int = 8192,
+    ) -> PolicyRule:
+        """Create a learned policy from a user-approved spawn.
+
+        Called by ExecuteOrchestrator after a user approves a spawn
+        where ``decision.policy_matched is False``. Future spawns with
+        the same role+tool combination will auto-approve.
+
+        Args:
+            role: The agent role (e.g. "Fetcher").
+            tool: The tool ID (e.g. "google.calendar").
+            max_spawned_steps: Max steps allowed (default 3).
+            token_budget: Token budget for the policy (default 8192).
+
+        Returns:
+            The stored PolicyRule.
+        """
+        rule = PolicyRule(
+            policy_id=f"learned:{role}:{tool}",
+            name=f"Learned policy for {role} using {tool}",
+            version=1,
+            scope="role",
+            allowed_tools=[tool],
+            allowed_roles=[role],
+            require_approval=False,
+            max_spawned_steps=max_spawned_steps,
+            forbidden_actions=[],
+            token_budget=token_budget,
+        )
+        return await self.create_policy(rule)
 
     # ------------------------------------------------------------------
     # Policy CRUD

@@ -83,6 +83,16 @@ class TestPolicyDecisionConformance:
         decision = PolicyDecision(allowed=True, reason="OK", requires_approval=True)
         assert decision.requires_approval is True
 
+    def test_decision_policy_matched_default(self):
+        """PolicyDecision.policy_matched defaults to True."""
+        decision = PolicyDecision(allowed=True, reason="OK")
+        assert decision.policy_matched is True
+
+    def test_decision_policy_matched_false(self):
+        """PolicyDecision.policy_matched can be set to False."""
+        decision = PolicyDecision(allowed=True, reason="Fallback", policy_matched=False)
+        assert decision.policy_matched is False
+
 
 # ---------------------------------------------------------------------------
 # PolicyAttestation model conformance (§2.4.1)

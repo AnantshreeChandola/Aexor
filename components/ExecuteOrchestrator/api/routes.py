@@ -18,7 +18,6 @@ from ..domain.models import (
     ApprovalTokenError,
     ExecuteRequest,
     PlanExpiredError,
-    SignatureVerificationError,
 )
 
 router = APIRouter(prefix="/api/v1", tags=["execute"])
@@ -26,15 +25,6 @@ router = APIRouter(prefix="/api/v1", tags=["execute"])
 
 def _handle_domain_error(error: Exception) -> JSONResponse:
     """Map domain errors to HTTP responses."""
-    if isinstance(error, SignatureVerificationError):
-        return JSONResponse(
-            status_code=status.HTTP_403_FORBIDDEN,
-            content=ErrorResponse(
-                error_code="SIGNATURE_INVALID",
-                message=str(error),
-                details={"reason": error.reason},
-            ).model_dump(),
-        )
     if isinstance(error, ApprovalTokenError):
         return JSONResponse(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -61,11 +51,10 @@ async def execute_plan(
     request: ExecuteRequest,
     service=Depends(get_execute_service),
 ):
-    """Execute a signed, approved plan."""
+    """Execute an approved plan."""
     try:
         return await service.execute_plan(request)
     except (
-        SignatureVerificationError,
         ApprovalTokenError,
         PlanExpiredError,
     ) as exc:

@@ -10,10 +10,10 @@
 
 ## 1. Purpose & Scope
 
-ExecuteOrchestrator is the **pure agentic runtime execution engine**. It receives a signed, approved plan and executes every step to completion, producing a `PlanOutcome`.
+ExecuteOrchestrator is the **pure agentic runtime execution engine**. It receives an approved plan and executes every step to completion, producing a `PlanOutcome`.
 
 **Responsibilities:**
-- Verify Ed25519 signature and approval token before execution
+- Validate approval token before execution
 - Resolve plan DAG via topological sort into parallel execution levels
 - Dispatch API steps via MCP tool invocations with decrypted credentials
 - Dispatch LLM reasoning steps via Anthropic API with two-tier trust enforcement
@@ -38,7 +38,7 @@ ExecuteOrchestrator is the **pure agentic runtime execution engine**. It receive
 
 | Document | Version | Reference |
 |----------|---------|-----------|
-| GLOBAL_SPEC.md | v3.0 | §1 Safety Model (Execute), §2.3 Plan, §2.4 Signature, §2.4.1 PolicyAttestation, §2.6 Execute Wrapper, §2.7 Approval Token, §2.8 Runtime Agent Roles, §2.9 PolicyEngine Contract, §8 Safety & Governance, §8.1 Credential Vault, §8.2 Two-Tier LLM |
+| GLOBAL_SPEC.md | v3.0 | §1 Safety Model (Execute), §2.3 Plan, §2.4.1 PolicyAttestation, §2.6 Execute Wrapper, §2.7 Approval Token, §2.8 Runtime Agent Roles, §2.9 PolicyEngine Contract, §8 Safety & Governance, §8.1 Credential Vault, §8.2 Two-Tier LLM |
 | MODULAR_ARCHITECTURE.md | v2.1 | §1 Orchestration Layer, §3 Redis key ownership (idempotency, locks, reasoning_context), §4 dependency matrix, §5 execution flow, §7 multi-gate approvals, §8 preview state caching |
 | Project_HLD.md | v6.1 | §3 ExecuteOrchestrator, §4 Runtime Agent Roles, §5 Safety (idempotency, compensation, resource locking, retry), §13 Async Execution, §14 Parallel Steps |
 | SHARED_INFRASTRUCTURE.md | v1.0.0 | §4.1 shared schemas, DI wiring pattern |
@@ -88,7 +88,7 @@ Orchestration Layer
                     │  ┌────────▼────────────┐ │
                     │  │ Safety Layer        │ │──→ Redis (idempotency, locks)
                     │  │  Idempotency        │ │──→ Credential Vault (decrypt)
-                    │  │  Resource locks     │ │──→ Signer (verify)
+                    │  │  Resource locks     │ │
                     │  │  Compensation       │ │
                     │  └────────┬────────────┘ │
                     │           │              │
@@ -102,11 +102,10 @@ Orchestration Layer
 
 | Dependency | Method | Input | Output | Error Handling |
 |-----------|--------|-------|--------|----------------|
-| Signer | `verify_signature(plan_data, sig_data)` | dict, dict | `True` or raises | `InvalidSignatureError` → reject execution |
 | PolicyEngine | `evaluate_spawn(request)` | `SpawnRequest` | `PolicyDecision` | Deny-by-default on error |
 | PluginRegistry | `get_tool(tool_id)` | str | `ToolModel` | `ToolNotFoundError` → step fails |
 | PluginRegistry | `get_operation(tool_id, op_id)` | str, str | `OperationModel` | `OperationNotFoundError` → step fails |
-| PlanWriter | `write_outcome(plan_id, signature, outcome, metrics)` | str, Signature, PlanOutcome, PlanMetrics | None | Non-fatal — log warning, don't fail execution |
+| PlanWriter | `write_outcome(plan_id, outcome, metrics)` | str, PlanOutcome, PlanMetrics | None | Non-fatal — log warning, don't fail execution |
 
 ---
 
@@ -120,10 +119,10 @@ class ExecuteService:
 
     async def execute_plan(self, request: ExecuteRequest) -> PlanOutcome:
         """
-        Execute a signed, approved plan end-to-end.
+        Execute an approved plan end-to-end.
 
         Args:
-            request: Validated execution request with plan, signature,
+            request: Validated execution request with plan,
                      approval token, user context, and preview state.
 
         Returns:
@@ -132,7 +131,6 @@ class ExecuteService:
             and policy attestations.
 
         Raises:
-            SignatureVerificationError: Ed25519 signature invalid.
             ApprovalTokenError: Token expired, invalid, or scope mismatch.
             PlanExpiredError: Plan TTL exceeded.
         """
@@ -142,7 +140,6 @@ class ExecuteService:
 
 ```python
 def create_execute_service(
-    signer_service: SignerService,
     policy_service: PolicyService,
     registry_service: RegistryService,
     plan_writer_service: PlanWriterService,
@@ -165,7 +162,7 @@ async def execute_plan(
     request: ExecuteRequest,
     service: ExecuteService = Depends(get_execute_service),
 ) -> PlanOutcome:
-    """Execute a signed, approved plan."""
+    """Execute an approved plan."""
 ```
 
 **Route**: `POST /api/v1/execute`
@@ -178,7 +175,6 @@ async def execute_plan(
 **Downstream consumers** (who ExecuteOrchestrator calls):
 - **PlanWriter**: Called after execution completes (success or failure) to persist outcome.
 - **PolicyEngine**: Called synchronously during execution when a Reasoner proposes spawning.
-- **Signer**: Called once at pre-execution to verify plan signature.
 
 ---
 
@@ -190,7 +186,6 @@ async def execute_plan(
 class ExecuteRequest(BaseModel):
     """Input contract for plan execution."""
     plan: Plan                                    # shared/schemas/plan.py
-    signature: Signature                          # shared/schemas/signature.py
     approval_token: str                           # JWT from ApprovalGate
     user_id: str                                  # UUID
     trace_id: str                                 # Distributed tracing correlation
@@ -233,12 +228,6 @@ class ExecutionContext:
 ```python
 class ExecuteError(Exception):
     """Base error for ExecuteOrchestrator."""
-
-class SignatureVerificationError(ExecuteError):
-    """Plan signature verification failed."""
-    def __init__(self, reason: str):
-        self.reason = reason
-        super().__init__(f"Signature verification failed: {reason}")
 
 class ApprovalTokenError(ExecuteError):
     """Approval token invalid or expired."""
@@ -513,7 +502,6 @@ class ExecuteService:
 
         try:
             # Phase 1: Pre-execution verification
-            await self._verify_signature(request.plan, request.signature)
             self._validate_approval_token(request.approval_token, request.plan)
             self._check_plan_ttl(request.plan)
 
@@ -541,7 +529,7 @@ class ExecuteService:
             # Phase 4: Build outcome
             outcome = self._build_outcome(ctx, start)
 
-        except (SignatureVerificationError, ApprovalTokenError, PlanExpiredError) as e:
+        except (ApprovalTokenError, PlanExpiredError) as e:
             outcome = self._build_error_outcome(e, start)
 
         finally:
@@ -803,13 +791,11 @@ async def _run_compensation(self, ctx, request):
 ### 8.1 Happy Path (Pure API Plan)
 
 ```
-Client          ExecuteService    Signer    DAGResolver   MCPClient     Redis
-  │                   │             │           │             │           │
-  │─ExecuteRequest──→│             │           │             │           │
-  │                   │─verify────→│           │             │           │
-  │                   │←──ok───────│           │             │           │
-  │                   │─resolve────────────→│             │           │
-  │                   │←──levels────────────│             │           │
+Client          ExecuteService    DAGResolver   MCPClient     Redis
+  │                   │               │             │           │
+  │─ExecuteRequest──→│               │             │           │
+  │                   │─resolve────→│             │           │
+  │                   │←──levels───│             │           │
   │                   │                       │             │           │
   │                   │── Level 0: gather(step1, step2) ──→│           │
   │                   │←── results ───────────────────────│           │
@@ -911,7 +897,6 @@ from components.ExecuteOrchestrator.adapters.resource_lock import ResourceLockAd
 from components.ExecuteOrchestrator.service.execute_service import create_execute_service
 
 app.state.execute_service = create_execute_service(
-    signer_service=app.state.signer_service,
     policy_service=app.state.policy_service,
     registry_service=app.state.registry_service,
     plan_writer_service=app.state.plan_writer_service,
@@ -935,7 +920,6 @@ def get_execute_service(request: Request) -> Any:
 | Schema | Import | Usage |
 |--------|--------|-------|
 | `Plan`, `PlanStep` | `shared.schemas.plan` | Input plan, spawned steps |
-| `Signature` | `shared.schemas.signature` | Signature verification |
 | `PlanOutcome` | `shared.schemas.outcome` | Execution result |
 | `PolicyDecision`, `PolicyAttestation` | `shared.schemas.policy` | Spawn evaluation |
 | `ReasoningConfig` | `shared.schemas.policy` | LLM step config |
@@ -951,10 +935,6 @@ from shared.api.error_handlers import APIErrorHandler, ErrorResponse
 async def execute_plan(request: ExecuteRequest, service = Depends(get_execute_service)):
     try:
         return await service.execute_plan(request)
-    except SignatureVerificationError as e:
-        return JSONResponse(status_code=403, content=ErrorResponse(
-            error_code="SIGNATURE_INVALID", message=str(e)
-        ).model_dump())
     except ApprovalTokenError as e:
         return JSONResponse(status_code=401, content=ErrorResponse(
             error_code="TOKEN_INVALID", message=str(e)
@@ -1088,9 +1068,9 @@ async def execute_plan(request: ExecuteRequest, service = Depends(get_execute_se
 **Rationale**: Simplifies state management. Plans are time-bounded (ttl_s). Long-running durable mode deferred to Phase 4 with APScheduler.
 **Status**: Proposed
 
-### ADR: PolicyAttestation over Re-Signing (EXISTING — HLD v6.1)
-**Decision**: Runtime modifications receive PolicyAttestations, not plan re-signing.
-**Rationale**: Signer's private key should not be in execution context. `original_signature + attestations[] = full provenance`.
+### ADR: PolicyAttestation for Runtime Modifications (EXISTING — HLD v6.1)
+**Decision**: Runtime modifications receive PolicyAttestations for provenance.
+**Rationale**: `attestations[] = full provenance` for any runtime graph changes.
 
 ---
 
@@ -1113,7 +1093,6 @@ async def execute_plan(request: ExecuteRequest, service = Depends(get_execute_se
 
 | Component | Interface Used |
 |-----------|---------------|
-| Signer | `verify_signature()` |
 | PolicyEngine | `evaluate_spawn()` |
 | PluginRegistry | `get_tool()`, `get_operation()` |
 | PlanWriter | `write_outcome()` |
@@ -1153,11 +1132,11 @@ async def execute_plan(request: ExecuteRequest, service = Depends(get_execute_se
 
 ## 17. Post-Generation Validation Checklist
 
-- [x] Data model fields match GLOBAL_SPEC §2 contracts (Plan, PlanStep, Signature, PlanOutcome, PolicyAttestation)
+- [x] Data model fields match GLOBAL_SPEC §2 contracts (Plan, PlanStep, PlanOutcome, PolicyAttestation)
 - [x] `user_id` present on ExecuteRequest input
 - [x] Conformance header references current versions (GLOBAL_SPEC v3.0, MODULAR_ARCHITECTURE v2.1, HLD v6.1)
 - [x] No owned PostgreSQL tables (Redis keys only, per MODULAR_ARCHITECTURE §3)
-- [x] Component dependencies match MODULAR_ARCHITECTURE §4 (Signer, ApprovalGate, PluginRegistry, PolicyEngine, PlanWriter)
+- [x] Component dependencies match MODULAR_ARCHITECTURE §4 (ApprovalGate, PluginRegistry, PolicyEngine, PlanWriter)
 - [x] Upstream consumer contract documented (Frontend → ExecuteRequest → PlanOutcome)
 - [x] Idempotency implemented for Booker steps (3-state Redis)
 - [x] N/A: No owned PostgreSQL tables (DDL not required)

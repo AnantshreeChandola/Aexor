@@ -10,14 +10,13 @@
 
 ## 1. Purpose & Scope
 
-Planner is a **deterministic, one-shot plan generator** that transforms an Intent + Evidence + tool catalog into a signed, executable Plan graph. It is a **stateless library component** consumed via dependency injection — no database tables, no HTTP routes.
+Planner is a **deterministic, one-shot plan generator** that transforms an Intent + Evidence + tool catalog into a validated, executable Plan graph. It is a **stateless library component** consumed via dependency injection — no database tables, no HTTP routes.
 
 **Responsibilities**:
-- Accept an `Intent` (GLOBAL_SPEC §2.1) and produce a `PlannerResult` containing a `Plan` (§2.3) + `Signature` (§2.4)
+- Accept an `Intent` (GLOBAL_SPEC §2.1) and produce a `PlannerResult` containing a `Plan` (§2.3)
 - Call ContextRAG to assemble evidence, PluginRegistry for tool catalog
 - Invoke Anthropic Claude API (temperature=0) via LLMAdapter protocol with structured prompt
 - Validate LLM output through 3-layer pipeline (JSON → Pydantic → business rules)
-- Sign validated plan via Signer (Ed25519)
 - Implement 4-level fallback hierarchy and per-model circuit breakers
 
 **Out of scope**:
@@ -33,7 +32,7 @@ Planner is a **deterministic, one-shot plan generator** that transforms an Inten
 
 | Document | Version | Reference |
 |----------|---------|-----------|
-| GLOBAL_SPEC.md | v2.2 | Canonical contracts §2.1 (Intent), §2.3 (Plan), §2.4 (Signature) |
+| GLOBAL_SPEC.md | v2.2 | Canonical contracts §2.1 (Intent), §2.3 (Plan) |
 | MODULAR_ARCHITECTURE.md | v1.3 | Planner dependency graph (§4), stateless service (§10) |
 | Project_HLD.md | v4.0 | §14 LLM Guardrails, §5 Deterministic Planning |
 | SHARED_INFRASTRUCTURE.md | v1.0.0 | Shared schemas (§4.1), DI wiring (implicit) |
@@ -45,7 +44,7 @@ Planner is a **deterministic, one-shot plan generator** that transforms an Inten
 
 ### 3.1 Layer Placement
 
-Planner sits in the **Domain/Service Layer** alongside ContextRAG and Signer. It has no database dependencies (stateless). It is consumed by the Orchestration Layer (PreviewOrchestrator, ExecuteOrchestrator) via DI.
+Planner sits in the **Domain/Service Layer** alongside ContextRAG. It has no database dependencies (stateless). It is consumed by the Orchestration Layer (PreviewOrchestrator, ExecuteOrchestrator) via DI.
 
 ```
 Orchestration Layer
@@ -55,9 +54,9 @@ Orchestration Layer
                     ┌──────────────┐
                     │   Planner    │  Domain/Service Layer
                     └──────┬───────┘
-            ┌──────────────┼──────────────┐
-            ▼              ▼              ▼
-      ContextRAG    PluginRegistry    Signer
+            ┌──────────────┤
+            ▼              ▼
+      ContextRAG    PluginRegistry
             │              │
             ▼              ▼
       Memory Layer    PostgreSQL
@@ -69,7 +68,7 @@ Orchestration Layer
 - **Containment**: 4-level fallback hierarchy ensures a plan is always returned (even if minimal)
 - **LLM isolation**: Circuit breakers prevent cascading failures; each model has an independent breaker
 - **No persistent state**: Planner crash loses nothing — retry is safe and side-effect-free
-- **Dependency failures**: ContextRAG never raises (returns empty ContextResult); PluginRegistry failure → empty catalog → minimal plan; Signer failure → fatal (cannot sign)
+- **Dependency failures**: ContextRAG never raises (returns empty ContextResult); PluginRegistry failure → empty catalog → minimal plan
 
 ### 3.3 Component Boundaries
 
@@ -77,7 +76,6 @@ Orchestration Layer
 |----------|-----------|----------|
 | ContextRAG | Planner → | `gather_evidence(intent) → ContextResult` |
 | PluginRegistry | Planner → | `list_catalog() → CatalogResponse`, `validate_plan_tools(version, ids) → ValidationResult`, `get_version() → int` |
-| Signer | Planner → | `sign_plan(plan_data, signer_identity) → PlanSignature` |
 | PlanLibrary | Planner → | `get_plans_by_intent(intent_type) → list[EvidenceItem]` (Level 3 fallback) |
 | Orchestration | → Planner | `generate_plan(intent) → PlannerResult` |
 
@@ -92,13 +90,13 @@ class PlannerService:
     """Deterministic plan generator with fallback hierarchy."""
 
     async def generate_plan(self, intent: Intent) -> PlannerResult:
-        """Generate a validated, signed execution plan.
+        """Generate a validated execution plan.
 
         Args:
             intent: Validated Intent model (GLOBAL_SPEC §2.1).
 
         Returns:
-            PlannerResult containing Plan, Signature, and metadata.
+            PlannerResult containing Plan and metadata.
 
         Raises:
             PlanGenerationError: If all fallback levels fail
@@ -112,7 +110,6 @@ class PlannerService:
 def create_planner_service(
     context_rag_service: ContextRAGService,
     registry_service: RegistryService,
-    signer_service: SignerService,
     plan_service: PlanService,
     llm_adapter: LLMAdapter | None = None,
 ) -> PlannerService:
@@ -123,7 +120,6 @@ def create_planner_service(
     Args:
         context_rag_service: ContextRAG for evidence assembly.
         registry_service: PluginRegistry for tool catalog.
-        signer_service: Signer for Ed25519 plan signing.
         plan_service: PlanLibrary for Level 3 template fallback.
         llm_adapter: LLM adapter (default: AnthropicAdapter from env).
 
@@ -144,7 +140,6 @@ result: PlannerResult = await planner.generate_plan(intent)
 
 # Access:
 plan: Plan = result.plan              # GLOBAL_SPEC §2.3
-signature: Signature = result.signature  # GLOBAL_SPEC §2.4
 fallback_level: int = result.fallback_level  # 1-4
 context_degraded: bool = result.context_degraded
 generation_duration_ms: int = result.generation_duration_ms
@@ -165,13 +160,11 @@ All field names match GLOBAL_SPEC §2 contracts exactly. Planner **does not own 
 ```python
 from pydantic import BaseModel, Field
 from shared.schemas.plan import Plan
-from shared.schemas.signature import Signature
 
 
 class PlannerResult(BaseModel):
     """Result of plan generation."""
     plan: Plan
-    signature: Signature
     fallback_level: int = Field(
         ..., ge=1, le=4,
         description="Which fallback level produced this plan "
@@ -428,7 +421,7 @@ class PromptBuilder:
 
 ### 6.5 Plan Hasher — `adapters/plan_hasher.py`
 
-Reuses the existing canonical JSON + SHA-256 pattern from Signer.
+Canonical JSON + SHA-256 hashing for plan integrity verification.
 
 ```python
 import hashlib
@@ -446,7 +439,7 @@ def compute_plan_hash(plan_data: dict) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 ```
 
-**Note**: This duplicates `components/Signer/adapters/canonicalizer.py` intentionally — Planner computes the hash to populate `meta.canonical_hash` before passing to Signer. Signer independently recomputes to verify. Keeping both avoids a circular dependency.
+**Note**: Planner computes the canonical hash to populate `meta.canonical_hash` for plan integrity verification. This enables downstream consumers to verify that a plan has not been tampered with.
 
 ---
 
@@ -485,23 +478,10 @@ async def generate_plan(self, intent: Intent) -> PlannerResult:
     plan_dict["meta"]["canonical_hash"] = canonical_hash
     plan = Plan.model_validate(plan_dict)
 
-    # 6. Sign plan via Signer
-    signature_obj = await self._signer.sign_plan(
-        plan.model_dump(), signer_identity="planner@system"
-    )
-    signature = Signature(
-        algo=signature_obj.algo,
-        signer=signature_obj.signer,
-        signature=signature_obj.signature,
-        pubkey_id=signature_obj.pubkey_id,
-        plan_hash=canonical_hash,
-    )
-
-    # 7. Return result
+    # 6. Return result
     duration_ms = int((time.monotonic() - start) * 1000)
     return PlannerResult(
         plan=plan,
-        signature=signature,
         fallback_level=fallback_level,
         context_degraded=context_degraded,
         generation_duration_ms=duration_ms,
@@ -643,22 +623,20 @@ def _finalize_plan(self, plan: Plan, intent: Intent) -> Plan:
 ### 8.1 Happy Path
 
 ```
-Caller                PlannerService      ContextRAG     PluginRegistry     LLM          Validator     Signer
-  │                        │                  │               │              │               │            │
-  │──generate_plan(intent)─▶                  │               │              │               │            │
-  │                        │──gather_evidence──▶              │              │               │            │
-  │                        │◀──ContextResult───│              │              │               │            │
-  │                        │──list_catalog()───────────────────▶             │               │            │
-  │                        │◀──CatalogResponse─────────────────│             │               │            │
-  │                        │──build_prompts()──│               │              │               │            │
-  │                        │──circuit.call(llm.generate)───────────────────▶│               │            │
-  │                        │◀──raw JSON────────────────────────────────────│               │            │
-  │                        │──validate(raw, intent, version, tools)─────────────────────▶│            │
-  │                        │◀──Plan────────────────────────────────────────────────────│            │
-  │                        │──finalize + hash──│               │              │               │            │
-  │                        │──sign_plan(plan_dict)───────────────────────────────────────────────────▶│
-  │                        │◀──PlanSignature────────────────────────────────────────────────────────│
-  │◀──PlannerResult────────│                  │               │              │               │            │
+Caller                PlannerService      ContextRAG     PluginRegistry     LLM          Validator
+  │                        │                  │               │              │               │
+  │──generate_plan(intent)─▶                  │               │              │               │
+  │                        │──gather_evidence──▶              │              │               │
+  │                        │◀──ContextResult───│              │              │               │
+  │                        │──list_catalog()───────────────────▶             │               │
+  │                        │◀──CatalogResponse─────────────────│             │               │
+  │                        │──build_prompts()──│               │              │               │
+  │                        │──circuit.call(llm.generate)───────────────────▶│               │
+  │                        │◀──raw JSON────────────────────────────────────│               │
+  │                        │──validate(raw, intent, version, tools)─────────────────────▶│
+  │                        │◀──Plan────────────────────────────────────────────────────│
+  │                        │──finalize + hash──│               │              │               │
+  │◀──PlannerResult────────│                  │               │              │               │
 ```
 
 ### 8.2 Fallback Path (Primary + Fallback LLM Fail)
@@ -678,7 +656,7 @@ Caller      PlannerService     ContextRAG    PluginRegistry    Primary LLM    Fa
   │              │──get_plans_by_intent(intent)──────────────────────────────────────────────────▶│
   │              │◀──[EvidenceItem(type="plan")]───────────────────────────────────────────────│
   │              │──instantiate_template()─│               │               │               │
-  │              │──sign + return──▶       │               │               │               │
+  │              │──finalize + return──▶   │               │               │               │
   │◀──PlannerResult(level=3)──│            │               │               │               │
 ```
 
@@ -704,7 +682,6 @@ t=63s   Primary succeeds again               → CLOSED            CLOSED
 | Primary LLM | Timeout / 500 / rate limit | Circuit breaker trips → Level 2 fallback model |
 | Fallback LLM | Also fails | Level 3 template from PlanLibrary |
 | PlanLibrary | No templates match | Level 4 minimal safe plan |
-| Signer | Key not configured | Fatal — `SigningKeyNotConfiguredError` propagates (startup failure) |
 
 ---
 
@@ -720,7 +697,6 @@ from components.Planner.service.planner_service import create_planner_service
 app.state.planner_service = create_planner_service(
     context_rag_service=app.state.context_rag_service,
     registry_service=app.state.registry_service,
-    signer_service=app.state.signer_service,
     plan_service=app.state.plan_service,
 )
 ```
@@ -738,12 +714,11 @@ def get_planner_service(request: Request) -> Any:
 |--------|--------|-------|
 | `Intent` | `shared.schemas.intent` | Input contract |
 | `Plan`, `PlanStep`, `PlanConstraints`, `PlanMeta` | `shared.schemas.plan` | Output contract (LLM target) |
-| `Signature` | `shared.schemas.signature` | Signature contract |
 | `EvidenceItem` | `shared.schemas.evidence` | ContextRAG output, prompt input |
 
 ### 9.3 Database & Transactions
 
-**Not applicable** — Planner is stateless, owns no tables, and makes no direct database calls. All persistence happens through downstream components (ContextRAG queries Memory Layer; Signer is in-memory).
+**Not applicable** — Planner is stateless, owns no tables, and makes no direct database calls. All persistence happens through downstream components (ContextRAG queries Memory Layer).
 
 ### 9.4 API Error Handling
 
@@ -773,7 +748,6 @@ All log entries include:
 | `validation_failed` | WARNING | layer, error_message (no plan content) |
 | `circuit_state_change` | WARNING | model, from_state, to_state |
 | `fallback_triggered` | WARNING | from_level, to_level, reason |
-| `plan_signed` | INFO | plan_hash, plan_id |
 | `generate_plan_complete` | INFO | plan_id, fallback_level, duration_ms, context_degraded |
 
 ### 10.2 No PII in Logs
@@ -819,7 +793,6 @@ All log entries include:
 |-----------|-----|-------------|
 | ContextRAG | `ContextRAGService` | `gather_evidence(intent) → ContextResult` |
 | PluginRegistry | `RegistryService` | `list_catalog() → CatalogResponse`, `validate_plan_tools(version, ids) → ValidationResult`, `get_version() → int` |
-| Signer | `SignerService` | `sign_plan(plan_data, signer_identity) → PlanSignature` |
 | PlanLibrary | `PlanService` | `get_plans_by_intent(intent_type) → list[EvidenceItem]` |
 
 **Matches MODULAR_ARCHITECTURE v1.3** §4 Planner dependency graph:
@@ -828,10 +801,9 @@ All log entries include:
 - External: Anthropic Claude API
 
 **Additional dependency** not in MODULAR_ARCHITECTURE:
-- **Signer** — required for plan signing (FR-007). Planner calls `sign_plan()` directly.
 - **PlanLibrary** — Level 3 fallback template lookup. Queries `get_plans_by_intent()` for successful past plans.
 
-> **Note**: MODULAR_ARCHITECTURE v1.3 lists only ContextRAG and PluginRegistry as Planner dependencies. Signer and PlanLibrary should be added in the next MODULAR_ARCHITECTURE update.
+> **Note**: MODULAR_ARCHITECTURE v1.3 lists only ContextRAG and PluginRegistry as Planner dependencies. PlanLibrary should be added in the next MODULAR_ARCHITECTURE update.
 
 ### 11.3 Development/Testing Dependencies
 
@@ -849,11 +821,10 @@ All log entries include:
 
 | Operation | p95 (local) | p95 (cloud) | p99 (local) | Notes |
 |-----------|-------------|-------------|-------------|-------|
-| `generate_plan()` | < 8 s | < 5 s | < 12 s | LLM-bound; includes context + LLM + validation + signing |
+| `generate_plan()` | < 8 s | < 5 s | < 12 s | LLM-bound; includes context + LLM + validation |
 | Context assembly (ContextRAG) | < 200 ms | < 150 ms | < 300 ms | Already verified |
 | Catalog fetch (PluginRegistry) | < 50 ms | < 30 ms | < 100 ms | DB query |
 | Validation pipeline | < 50 ms | < 50 ms | < 100 ms | Pure computation |
-| Plan signing (Signer) | < 10 ms | < 10 ms | < 20 ms | Ed25519 |
 | LLM call (primary) | < 6 s | < 4 s | < 10 s | Model-dependent |
 
 ### 12.2 Availability
@@ -869,7 +840,7 @@ All log entries include:
 |----------|----------------|----------|
 | Unit tests | ~30 | Validator (all 3 layers), circuit breaker (state machine), prompt builder, hasher |
 | Service tests | ~15 | Fallback hierarchy, context degradation, concurrent calls |
-| Contract tests | ~10 | Plan schema compliance, signature verification, determinism |
+| Contract tests | ~10 | Plan schema compliance, canonical hash verification, determinism |
 | Observability tests | ~5 | No PII in logs, no credentials in logs, metric names |
 
 **Total target: ~60 tests**
@@ -887,7 +858,7 @@ All log entries include:
 
 ### 13.2 Determinism Guarantees
 
-**Same inputs → same plan hash → same signature** when:
+**Same inputs → same plan hash** when:
 1. LLM model version is pinned (same model = same output at temperature=0)
 2. Evidence is sorted deterministically (ContextRAG enforces tier+confidence ordering)
 3. Tool catalog is captured at a specific `registry_version`
@@ -907,7 +878,6 @@ Planner is **fully stateless**:
 |-------------|---------|-------|
 | Planner → ContextRAG | Direct service call | Never raises |
 | Planner → PluginRegistry | Direct service call | May raise ToolNotFoundError |
-| Planner → Signer | Direct service call | sign_plan() with dict |
 | Planner → PlanLibrary | Direct service call (fallback only) | get_plans_by_intent() |
 | Orchestration → Planner | DI via `get_planner_service()` | Single method: `generate_plan(intent)` |
 
@@ -921,7 +891,7 @@ Planner is **fully stateless**:
 
 **New decisions requiring ADR**:
 1. **LLM adapter protocol**: Abstract LLM calls behind `LLMAdapter` protocol to enable future provider swaps (Ollama, vLLM). Implement `AnthropicAdapter` for MVP.
-2. **Plan hash recomputation**: Planner computes `canonical_hash` independently from Signer. Signer recomputes during signing. This duplicates the canonicalization logic but avoids circular dependency.
+2. **Plan hash computation**: Planner computes `canonical_hash` for plan integrity verification. Downstream consumers can recompute to verify the plan has not been tampered with.
 3. **Per-model circuit breakers**: Each fallback level has its own CircuitBreaker instance. A failing primary model does not affect the fallback model's breaker state.
 
 ---
@@ -945,17 +915,17 @@ Planner is **fully stateless**:
 2. **Token budget configuration**: Max token budget per model? → **Recommendation**: 8K input + 4K output for MVP, configurable via env vars.
 3. **Template instantiation**: How to fill placeholder args in Level 3 templates? → **Recommendation**: Simple string interpolation from Intent entities into template plan args.
 4. **Scope aggregation**: Per-step or plan-level? → **Recommendation**: Aggregate all scopes from tool operation definitions in catalog during plan finalization.
-5. **MODULAR_ARCHITECTURE update**: Planner depends on Signer and PlanLibrary (fallback) — not reflected in v1.3. Needs update.
+5. **MODULAR_ARCHITECTURE update**: Planner depends on PlanLibrary (fallback) — not reflected in v1.3. Needs update.
 
 ---
 
 ## 16. Post-Generation Validation Checklist
 
-- [x] Data model fields match GLOBAL_SPEC §2 contracts (Intent §2.1, Plan §2.3, Signature §2.4)
+- [x] Data model fields match GLOBAL_SPEC §2 contracts (Intent §2.1, Plan §2.3)
 - [x] `user_id` present on input (Intent.user_id) — Planner owns no entities
 - [x] Conformance header references current versions (GLOBAL_SPEC v2.2, MODULAR_ARCHITECTURE v1.3, HLD v4.0)
 - [x] No owned tables (Planner is stateless) — N/A for table ownership
-- [x] Component dependencies match MODULAR_ARCHITECTURE (+ noted Signer/PlanLibrary deviation)
+- [x] Component dependencies match MODULAR_ARCHITECTURE (+ noted PlanLibrary deviation)
 - [x] Upstream consumer contract documented (PreviewOrchestrator/ExecuteOrchestrator)
 - [x] N/A for storage idempotency (no storage APIs)
 - [x] N/A for DDL (no owned tables)
@@ -966,5 +936,4 @@ Planner is **fully stateless**:
 - [x] N/A for database adapter patterns (no database access)
 
 **Deviations documented**:
-- Signer and PlanLibrary not listed in MODULAR_ARCHITECTURE v1.3 Planner deps → flagged in §15.2 Q5
-- Canonical hash computation duplicated from Signer → documented in §6.5 and §14
+- PlanLibrary not listed in MODULAR_ARCHITECTURE v1.3 Planner deps → flagged in §15.2 Q5

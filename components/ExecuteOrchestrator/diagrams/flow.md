@@ -1,8 +1,6 @@
 ```mermaid
 flowchart TD
-    START([ExecuteRequest received]) --> VERIFY_SIG{Verify Ed25519\nsignature}
-    VERIFY_SIG -->|Invalid| REJECT_SIG[SignatureVerificationError]
-    VERIFY_SIG -->|Valid| VERIFY_TOKEN{Validate approval\ntoken JWT}
+    START([ExecuteRequest received]) --> VERIFY_TOKEN{Validate approval\ntoken JWT}
     VERIFY_TOKEN -->|Expired/Invalid| REJECT_TOKEN[ApprovalTokenError]
     VERIFY_TOKEN -->|Valid| CHECK_TTL{Plan TTL\nexpired?}
     CHECK_TTL -->|Yes| REJECT_TTL[PlanExpiredError]
@@ -120,7 +118,6 @@ flowchart TD
     end
 
     BUILD_OUTCOME --> DONE([Return PlanOutcome])
-    REJECT_SIG --> FAIL([Raise error])
-    REJECT_TOKEN --> FAIL
+    REJECT_TOKEN --> FAIL([Raise error])
     REJECT_TTL --> FAIL
 ```

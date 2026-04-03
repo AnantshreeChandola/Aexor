@@ -16,7 +16,6 @@ from shared.api.error_handlers import ErrorResponse
 from ..domain.models import (
     DuplicatePlanError,
     InvalidQueryError,
-    InvalidSignatureError,
     PlanNotFoundError,
     PlanTooLargeError,
 )
@@ -26,29 +25,6 @@ logger = logging.getLogger(__name__)
 
 class PlanLibraryErrorHandler:
     """PlanLibrary-specific error handler methods."""
-
-    @staticmethod
-    def handle_invalid_signature(error: InvalidSignatureError) -> JSONResponse:
-        """Handle InvalidSignatureError (400)."""
-        logger.warning(
-            "Invalid signature",
-            extra={
-                "plan_id": error.plan_id,
-                "reason": error.reason,
-                "component": "PlanLibrary",
-            },
-        )
-        return JSONResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            content=ErrorResponse(
-                error_code="INVALID_SIGNATURE",
-                message=str(error),
-                details={
-                    "plan_id": error.plan_id,
-                    "reason": error.reason,
-                },
-            ).model_dump(),
-        )
 
     @staticmethod
     def handle_duplicate_plan(error: DuplicatePlanError) -> JSONResponse:
@@ -135,8 +111,6 @@ class PlanLibraryErrorHandler:
         Returns:
             JSONResponse with appropriate error details
         """
-        if isinstance(error, InvalidSignatureError):
-            return self.handle_invalid_signature(error)
         if isinstance(error, DuplicatePlanError):
             return self.handle_duplicate_plan(error)
         if isinstance(error, PlanTooLargeError):

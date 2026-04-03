@@ -17,7 +17,6 @@ from fastapi.testclient import TestClient
 from components.PlanLibrary.api.routes import router
 from components.PlanLibrary.domain.models import (
     DuplicatePlanError,
-    InvalidSignatureError,
     PlanDB,
     PlanTooLargeError,
     StorePlanResponse,
@@ -90,22 +89,6 @@ class TestStorePlanEndpoint:
         data = response.json()
         assert data["status"] == "ok"
         assert data["plan_id"] == VALID_ULID
-
-    def test_store_plan_invalid_signature(self):
-        """POST /plans with invalid signature -- 400."""
-        mock_service = MagicMock()
-        mock_service.store_plan = AsyncMock(
-            side_effect=InvalidSignatureError(plan_id=VALID_ULID, reason="bad sig")
-        )
-
-        app = _create_test_app(plan_service=mock_service)
-        client = TestClient(app)
-
-        response = client.post("/plans", json=_make_store_request())
-
-        assert response.status_code == 400
-        data = response.json()
-        assert data["error_code"] == "INVALID_SIGNATURE"
 
     def test_store_plan_duplicate(self):
         """POST /plans with duplicate plan_id -- 409."""
@@ -233,9 +216,7 @@ class TestErrorResponseFormat:
     def test_error_response_has_required_fields(self):
         """All error responses match ErrorResponse schema."""
         mock_service = MagicMock()
-        mock_service.store_plan = AsyncMock(
-            side_effect=InvalidSignatureError(plan_id=VALID_ULID, reason="test")
-        )
+        mock_service.store_plan = AsyncMock(side_effect=DuplicatePlanError(plan_id=VALID_ULID))
 
         app = _create_test_app(plan_service=mock_service)
         client = TestClient(app)

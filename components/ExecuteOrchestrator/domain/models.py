@@ -16,7 +16,6 @@ from pydantic import BaseModel, Field
 
 from shared.schemas.plan import Plan, PlanStep
 from shared.schemas.policy import PolicyAttestation
-from shared.schemas.signature import Signature
 
 # ---------------------------------------------------------------------------
 # Domain models
@@ -27,7 +26,6 @@ class ExecuteRequest(BaseModel):
     """Input contract for plan execution."""
 
     plan: Plan
-    signature: Signature
     approval_token: str = Field(..., min_length=1)
     user_id: str = Field(..., min_length=1)
     trace_id: str = Field(..., min_length=1)
@@ -84,14 +82,6 @@ class ExecutionContext:
 
 class ExecuteError(Exception):
     """Base error for ExecuteOrchestrator."""
-
-
-class SignatureVerificationError(ExecuteError):
-    """Plan signature verification failed."""
-
-    def __init__(self, reason: str) -> None:
-        self.reason = reason
-        super().__init__(f"Signature verification failed: {reason}")
 
 
 class ApprovalTokenError(ExecuteError):

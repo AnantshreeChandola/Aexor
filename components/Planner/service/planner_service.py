@@ -1,7 +1,7 @@
 """
 PlannerService — deterministic plan generation orchestrator.
 
-Coordinates: ContextRAG → PluginRegistry → LLM (with fallbacks) → Validator → Hasher → Signer
+Coordinates: ContextRAG → PluginRegistry → LLM (with fallbacks) → Validator → Hasher
 
 Reference: LLD SS7
 """
@@ -44,7 +44,6 @@ class PlannerService:
         self,
         context_rag_service: Any,
         registry_service: Any,
-        signer_service: Any,
         plan_service: Any,
         llm_adapter: LLMAdapter,
         prompt_builder: PromptBuilder,
@@ -57,7 +56,6 @@ class PlannerService:
     ) -> None:
         self._context_rag = context_rag_service
         self._registry = registry_service
-        self._signer = signer_service
         self._plan_service = plan_service
         self._llm = llm_adapter
         self._prompt = prompt_builder
@@ -82,7 +80,7 @@ class PlannerService:
             ToolNotAvailableError: If none of the LLM-suggested tools exist in
                 the registry.
 
-        This is NOT a full plan generation — no ContextRAG, no signing.
+        This is NOT a full plan generation — no ContextRAG.
         """
         collected = collected_entities or {}
 
@@ -242,7 +240,7 @@ class PlannerService:
         )
 
     async def generate_plan(self, intent: Intent) -> PlannerResult:
-        """Generate a validated, signed execution plan."""
+        """Generate a validated execution plan."""
         start = time.monotonic()
 
         logger.info(
@@ -290,19 +288,6 @@ class PlannerService:
         # 5. Finalize plan (plan_id, intent, plugins, meta with hash)
         plan = self._finalize_plan(plan, intent)
 
-        # 6. Sign via Signer
-        plan_dict = plan.model_dump(mode="json")
-        sig = await self._signer.sign_plan(plan_dict)
-        from shared.schemas.signature import Signature
-
-        signature = Signature(
-            algo=sig.algo,
-            signer=sig.signer,
-            signature=sig.signature,
-            pubkey_id=sig.pubkey_id,
-            plan_hash=sig.plan_hash,
-        )
-
         duration_ms = int((time.monotonic() - start) * 1000)
 
         logger.info(
@@ -321,7 +306,6 @@ class PlannerService:
 
         return PlannerResult(
             plan=plan,
-            signature=signature,
             fallback_level=fallback_level,
             context_degraded=context_degraded,
             generation_duration_ms=duration_ms,
@@ -558,7 +542,6 @@ class PlannerService:
 def create_planner_service(
     context_rag_service: Any,
     registry_service: Any,
-    signer_service: Any,
     plan_service: Any,
     llm_adapter: LLMAdapter | None = None,
 ) -> PlannerService:
@@ -578,7 +561,6 @@ def create_planner_service(
     return PlannerService(
         context_rag_service=context_rag_service,
         registry_service=registry_service,
-        signer_service=signer_service,
         plan_service=plan_service,
         llm_adapter=llm_adapter,
         prompt_builder=prompt_builder,

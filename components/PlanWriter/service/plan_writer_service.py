@@ -18,7 +18,6 @@ from components.PlanLibrary.domain.models import DuplicatePlanError
 from shared.schemas.metrics import PlanMetrics
 from shared.schemas.outcome import PlanOutcome
 from shared.schemas.plan import Plan
-from shared.schemas.signature import Signature
 
 from ..adapters.fact_deriver import derive_fact
 from ..domain.models import (
@@ -56,7 +55,6 @@ class PlanWriterService:
         self,
         user_id: UUID,
         plan: Plan,
-        signature: Signature,
         outcome: PlanOutcome,
         metrics: PlanMetrics,
     ) -> PersistResult:
@@ -70,7 +68,6 @@ class PlanWriterService:
         Args:
             user_id: User UUID for user-scoped facts.
             plan: Typed Plan model.
-            signature: Typed Signature model.
             outcome: Typed PlanOutcome model.
             metrics: Typed PlanMetrics model.
 
@@ -84,7 +81,7 @@ class PlanWriterService:
 
         plan_id = plan.plan_id
         plan_dict = plan.model_dump()
-        signature_dict = signature.model_dump()
+        signature_dict = {}
         outcome_dict = outcome.model_dump()
         metrics_dict = metrics.model_dump()
 
@@ -149,7 +146,7 @@ class PlanWriterService:
     ) -> BulkPersistResult:
         """Persist multiple plan outcomes (backfill/replay).
 
-        Each outcome dict must contain keys: plan, signature, outcome, metrics.
+        Each outcome dict must contain keys: plan, outcome, metrics.
         Processes sequentially; collects individual PersistResults.
 
         Args:
@@ -174,14 +171,12 @@ class PlanWriterService:
         for item in outcomes:
             try:
                 plan = Plan.model_validate(item.get("plan", {}))
-                sig = Signature.model_validate(item.get("signature", {}))
                 out = PlanOutcome.model_validate(item.get("outcome", {}))
                 met = PlanMetrics.model_validate(item.get("metrics", {}))
 
                 result = await self.persist_outcome(
                     user_id=user_id,
                     plan=plan,
-                    signature=sig,
                     outcome=out,
                     metrics=met,
                 )

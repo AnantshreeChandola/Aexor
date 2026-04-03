@@ -16,7 +16,6 @@ from pydantic import ValidationError as PydanticValidationError
 from components.PlanLibrary.domain.models import (
     DuplicatePlanError,
     InvalidQueryError,
-    InvalidSignatureError,
     PlanDB,
     PlanLibraryError,
     PlanNotFoundError,
@@ -149,7 +148,6 @@ class TestErrorCodeContract:
         error_map = {
             "INVALID_PLAN_ID": ValueError,
             "MALFORMED_PLAN": ValueError,
-            "INVALID_SIGNATURE": InvalidSignatureError,
             "DUPLICATE_PLAN_ID": DuplicatePlanError,
             "PLAN_TOO_LARGE": PlanTooLargeError,
             "STORAGE_ERROR": PlanLibraryError,
@@ -158,12 +156,6 @@ class TestErrorCodeContract:
 
         for code, error_class in error_map.items():
             assert issubclass(error_class, Exception), f"Error code {code} has no error class"
-
-    def test_invalid_signature_error_attributes(self):
-        """InvalidSignatureError has required attributes for API response."""
-        error = InvalidSignatureError(plan_id=VALID_ULID, reason="test")
-        assert hasattr(error, "plan_id")
-        assert hasattr(error, "reason")
 
     def test_duplicate_plan_error_attributes(self):
         """DuplicatePlanError has required attributes for API response."""
@@ -179,7 +171,6 @@ class TestErrorCodeContract:
     def test_error_hierarchy(self):
         """All PlanLibrary errors inherit from PlanLibraryError."""
         errors = [
-            InvalidSignatureError,
             DuplicatePlanError,
             PlanTooLargeError,
             InvalidQueryError,

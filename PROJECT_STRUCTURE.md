@@ -13,7 +13,7 @@ Personal-agent/
 │   ├── templates/              # Spec templates
 │   ├── scripts/bash/           # Spec Kit bash scripts
 │   └── memory/                 # Constitution
-├── components/                 # Component implementations (16 components)
+├── components/                 # Component implementations (15 components)
 │   └── <Name>/                 # Each component is self-contained
 │       ├── LLD.md              # Low-level design
 │       ├── schemas/            # Pydantic models
@@ -37,14 +37,14 @@ Personal-agent/
 │   └── dev/                    # Development guides
 │       └── PYTHON_GUIDE.md     # Python standards
 ├── shared/                     # Cross-component utilities
-│   └── schemas/                # Shared schemas (Intent, Evidence, Plan, Signature)
+│   └── schemas/                # Shared schemas (Intent, Evidence, Plan)
 ├── tests/                      # Cross-component/system-level tests
 ├── specs/                      # Component and use case SPEC files
 │   └── <spec-id>/              # Spec workbench (contains spec.md)
 ├── .github/workflows/          # CI/CD pipelines
 ├── migrations/                 # Database migrations
 ├── .gitignore                  # Git ignore patterns
-├── COMPONENT_STATUS.md         # Implementation tracker (16 components)
+├── COMPONENT_STATUS.md         # Implementation tracker (15 components)
 ├── DEVELOPMENT_WORKFLOW.md     # Development workflow guide
 ├── PROJECT_STRUCTURE.md        # This file
 ├── README.md                   # Project overview
@@ -107,7 +107,7 @@ The `.claude/` directory contains Claude Code configuration:
 
 ### Root Level
 - **README.md** - Project overview and getting started
-- **COMPONENT_STATUS.md** - Implementation tracker for all 16 components
+- **COMPONENT_STATUS.md** - Implementation tracker for all 15 components
 - **DEVELOPMENT_WORKFLOW.md** - Complete development workflow guide
 - **PROJECT_STRUCTURE.md** - This file (directory structure reference)
 

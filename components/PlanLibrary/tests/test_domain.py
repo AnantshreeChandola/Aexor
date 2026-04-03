@@ -17,7 +17,6 @@ from components.PlanLibrary.domain.models import (
     DuplicatePlanError,
     ErrorResponse,
     InvalidQueryError,
-    InvalidSignatureError,
     PlanDB,
     PlanLibraryError,
     PlanMetricsDB,
@@ -310,18 +309,10 @@ class TestErrorClasses:
 
     def test_all_errors_inherit_from_base(self):
         """Test all error classes inherit from PlanLibraryError."""
-        assert issubclass(InvalidSignatureError, PlanLibraryError)
         assert issubclass(DuplicatePlanError, PlanLibraryError)
         assert issubclass(PlanTooLargeError, PlanLibraryError)
         assert issubclass(InvalidQueryError, PlanLibraryError)
         assert issubclass(PlanNotFoundError, PlanLibraryError)
-
-    def test_invalid_signature_error_attributes(self):
-        """Test InvalidSignatureError has required attributes."""
-        error = InvalidSignatureError(plan_id=VALID_ULID, reason="bad sig")
-        assert error.plan_id == VALID_ULID
-        assert error.reason == "bad sig"
-        assert VALID_ULID in str(error)
 
     def test_duplicate_plan_error_attributes(self):
         """Test DuplicatePlanError has required attributes."""
@@ -352,13 +343,13 @@ class TestResponseModels:
     def test_error_response(self):
         """Test ErrorResponse serialization."""
         response = ErrorResponse(
-            error_code="INVALID_SIGNATURE",
-            message="Signature verification failed",
+            error_code="DUPLICATE_PLAN_ID",
+            message="Plan with this ID already exists",
             details={"plan_id": VALID_ULID},
         )
         serialized = response.model_dump()
         assert serialized["status"] == "error"
-        assert serialized["error_code"] == "INVALID_SIGNATURE"
+        assert serialized["error_code"] == "DUPLICATE_PLAN_ID"
 
     def test_success_response(self):
         """Test SuccessResponse with tier 3."""

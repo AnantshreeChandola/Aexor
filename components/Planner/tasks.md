@@ -7,7 +7,7 @@
 
 ## Task Organization
 
-Tasks are organized by implementation phase following the LLD architecture. The Planner is a **stateless library component** (no HTTP routes, no database tables). It depends on ContextRAG, PluginRegistry, Signer, and PlanLibrary (fallback). All four dependencies are already implemented and wired in `shared/app.py`.
+Tasks are organized by implementation phase following the LLD architecture. The Planner is a **stateless library component** (no HTTP routes, no database tables). It depends on ContextRAG, PluginRegistry, and PlanLibrary (fallback). All three dependencies are already implemented and wired in `shared/app.py`.
 
 ---
 
@@ -254,15 +254,14 @@ __all__ = [
 
 **Key contents**:
 - `PlannerService` class:
-  - `__init__(self, context_rag_service, registry_service, signer_service, plan_service, llm_adapter, prompt_builder, validator, primary_breaker, fallback_breaker, primary_model, fallback_model, max_output_tokens)` -- all injected by factory
+  - `__init__(self, context_rag_service, registry_service, plan_service, llm_adapter, prompt_builder, validator, primary_breaker, fallback_breaker, primary_model, fallback_model, max_output_tokens)` -- all injected by factory
   - `async def generate_plan(self, intent: Intent) -> PlannerResult` -- main public method (LLD SS7.1 flow):
     1. Gather evidence from ContextRAG (`gather_evidence(intent)`)
     2. Get tool catalog from PluginRegistry (`list_catalog()`)
     3. Build prompts via PromptBuilder
     4. Try fallback hierarchy (`_generate_with_fallback()`)
     5. Compute canonical hash, populate `meta.canonical_hash`
-    6. Sign plan via Signer (`sign_plan()`)
-    7. Return `PlannerResult`
+    6. Return `PlannerResult`
   - `async def _generate_with_fallback(...)` -- 4-level fallback per LLD SS7.2:
     - Level 1: Primary model via primary circuit breaker
     - Level 2: Fallback model via fallback circuit breaker
@@ -272,7 +271,7 @@ __all__ = [
   - `def _finalize_plan(self, plan: Plan, intent: Intent) -> Plan` -- populate plan_id (ULID), intent, plugins[], enforce dry_run per LLD SS7.4
   - `def _instantiate_template(self, template_evidence, intent, evidence, tool_ids) -> Plan` -- fill Level 3 template from intent entities
 
-- `create_planner_service(context_rag_service, registry_service, signer_service, plan_service, llm_adapter=None) -> PlannerService` -- factory function (LLD SS4.2):
+- `create_planner_service(context_rag_service, registry_service, plan_service, llm_adapter=None) -> PlannerService` -- factory function (LLD SS4.2):
   - Reads env vars: `PLANNER_PRIMARY_MODEL` (default `claude-sonnet-4-5-20250929`), `PLANNER_FALLBACK_MODEL` (default `claude-haiku-4-5-20251001`), `PLANNER_MAX_OUTPUT_TOKENS` (default 4096)
   - Creates `AnthropicAdapter` if `llm_adapter` is None
   - Creates `PromptBuilder`, `PlanValidator(registry_service)`, two `CircuitBreaker` instances (primary and fallback)
@@ -281,7 +280,6 @@ __all__ = [
 **Imports**:
 - `shared.schemas.intent.Intent`
 - `shared.schemas.plan.Plan, PlanStep, PlanConstraints, PlanMeta`
-- `shared.schemas.signature.Signature`
 - `shared.schemas.evidence.EvidenceItem`
 - `components.Planner.domain.models.PlannerResult, PlanValidationError, CircuitOpenError, PlanGenerationError, LLMCallError`
 - `components.Planner.adapters.llm_adapter.LLMAdapter, AnthropicAdapter`
@@ -295,18 +293,17 @@ __all__ = [
 **blockedBy**: T100, T200, T201, T202, T203, T204
 
 **Acceptance criteria**:
-- FR-001: Accepts Intent, returns PlannerResult with Plan + Signature
+- FR-001: Accepts Intent, returns PlannerResult with Plan
 - FR-002: Calls `context_rag_service.gather_evidence(intent)`
 - FR-003: Calls `registry_service.list_catalog()` and captures `registry_version`
 - FR-004: Invokes LLM via adapter with temperature=0
-- FR-007: Calls `signer_service.sign_plan()` on validated plan
 - FR-008: Computes `meta.canonical_hash` as SHA-256 of canonical JSON
 - FR-009: 4-level fallback hierarchy implemented
 - FR-012: `constraints.scopes` contains all required scopes
 - FR-013: `dry_run=true` on all steps
 - FR-015: `plan_id` is a ULID (26 characters)
 - FR-016: `plugins[]` populated with unique tool IDs
-- US-1 AC-1: Valid intent returns PlannerResult with valid plan and signature
+- US-1 AC-1: Valid intent returns PlannerResult with valid plan
 - US-1 AC-2: Same inputs produce identical canonical_hash (determinism)
 - US-3 AC-1: Primary unavailable -> fallback to Sonnet
 - US-3 AC-2: Both models fail -> PlanLibrary template
@@ -329,7 +326,6 @@ from components.Planner.service.planner_service import create_planner_service
 app.state.planner_service = create_planner_service(
     context_rag_service=app.state.context_rag_service,
     registry_service=app.state.registry_service,
-    signer_service=app.state.signer_service,
     plan_service=app.state.plan_service,
 )
 ```
@@ -391,11 +387,10 @@ def get_planner_service(request: Request) -> Any:
   - `mock_degraded_context_rag_service` -- returns `ContextResult(evidence=[], degraded_sources=["profilestore", "history"])`
   - `mock_registry_service` -- AsyncMock; `list_catalog` returns `CatalogResponse` with sample tools matching SAMPLE_VALID_PLAN_JSON tool_ids; `validate_plan_tools` returns `ValidationResult(valid=True)`; `get_version` returns 1
   - `mock_empty_registry_service` -- returns empty catalog
-  - `mock_signer_service` -- AsyncMock; `sign_plan` returns a `PlanSignature` with valid fields
   - `mock_plan_service` -- AsyncMock; `get_plans_by_intent` returns list with one EvidenceItem of type="plan"
   - `planner_service` -- fully wired `PlannerService` with all mocks
 
-**Imports**: `unittest.mock.AsyncMock`, `pytest`, `shared.schemas.intent.Intent`, `shared.schemas.evidence.EvidenceItem`, `components.ContextRAG.domain.models.ContextResult`, `components.PluginRegistry.domain.models.CatalogResponse, ToolModel, OperationModel, ValidationResult`, `components.Signer.domain.models.PlanSignature`, `components.Planner.service.planner_service.PlannerService`, `components.Planner.adapters.circuit_breaker.CircuitBreaker`, `components.Planner.adapters.prompt_builder.PromptBuilder`, `components.Planner.adapters.plan_validator.PlanValidator`
+**Imports**: `unittest.mock.AsyncMock`, `pytest`, `shared.schemas.intent.Intent`, `shared.schemas.evidence.EvidenceItem`, `components.ContextRAG.domain.models.ContextResult`, `components.PluginRegistry.domain.models.CatalogResponse, ToolModel, OperationModel, ValidationResult`, `components.Planner.service.planner_service.PlannerService`, `components.Planner.adapters.circuit_breaker.CircuitBreaker`, `components.Planner.adapters.prompt_builder.PromptBuilder`, `components.Planner.adapters.plan_validator.PlanValidator`
 
 **blockedBy**: T100, T200, T201, T202, T203, T204, T300
 
@@ -528,10 +523,9 @@ Layer 3 (Business rules):
 
 **Description**: Integration-level tests for `PlannerService.generate_plan()` with mocked dependencies.
 
-**Key test cases** (~8 tests):
-- `test_generate_plan_happy_path` -- valid intent -> PlannerResult with plan, signature, fallback_level=1 (US-1 AC-1, SC-001)
+**Key test cases** (~7 tests):
+- `test_generate_plan_happy_path` -- valid intent -> PlannerResult with plan, fallback_level=1 (US-1 AC-1, SC-001)
 - `test_generate_plan_deterministic_hash` -- same inputs -> same `meta.canonical_hash` (US-1 AC-2, SC-002)
-- `test_generate_plan_signature_verifiable` -- returned signature has correct plan_hash (US-1 AC-3)
 - `test_generate_plan_plan_id_is_ulid` -- plan_id is 26 characters, alphanumeric (FR-015)
 - `test_generate_plan_plugins_populated` -- `plan.plugins` contains unique tool IDs from graph (FR-016)
 - `test_generate_plan_dry_run_enforced` -- all steps have `dry_run=True` (FR-013)
@@ -571,12 +565,11 @@ Layer 3 (Business rules):
 
 **Description**: Tests for edge cases and concurrent safety.
 
-**Key test cases** (~5 tests):
+**Key test cases** (~4 tests):
 - `test_empty_entities_still_generates_plan` -- Intent with `entities={}` (SPEC edge case)
 - `test_empty_evidence_context_degraded` -- ContextRAG returns empty evidence (SPEC edge case)
 - `test_empty_catalog_fallback_to_minimal` -- empty tool catalog -> minimal plan (SPEC edge case)
 - `test_concurrent_calls_safe` -- use `asyncio.gather` with 5 concurrent `generate_plan` calls; all return valid results (SPEC edge case: concurrent calls safe)
-- `test_signer_failure_propagates` -- Signer raises -> `PlanGenerationError` propagated (LLD SS8.4: Signer failure is fatal)
 
 **blockedBy**: T300, T400
 
@@ -592,9 +585,8 @@ Layer 3 (Business rules):
 
 **Description**: Verify output conforms to GLOBAL_SPEC canonical contracts.
 
-**Key test cases** (~6 tests):
+**Key test cases** (~5 tests):
 - `test_plan_conforms_to_global_spec_section_2_3` -- generated Plan validates against `shared.schemas.plan.Plan` model
-- `test_signature_conforms_to_global_spec_section_2_4` -- generated Signature validates against `shared.schemas.signature.Signature` model
 - `test_plan_intent_embedded` -- `plan.intent` matches original Intent
 - `test_plan_constraints_scopes_aggregated` -- `plan.constraints.scopes` contains all scopes from used tools (FR-012)
 - `test_plan_meta_has_canonical_hash` -- `plan.meta.canonical_hash` is a 64-char hex string (FR-008)
@@ -602,7 +594,7 @@ Layer 3 (Business rules):
 
 **blockedBy**: T300, T400
 
-**Acceptance criteria**: GLOBAL_SPEC v2.2 SS2.3 and SS2.4 conformance. FR-008, FR-012 cross-validated.
+**Acceptance criteria**: GLOBAL_SPEC v2.2 SS2.3 conformance. FR-008, FR-012 cross-validated.
 
 ---
 
@@ -678,7 +670,7 @@ Layer 3 (Business rules):
 | Phase 9: Verification | T900 | 1 |
 | **Total** | | **25 tasks** |
 
-**Estimated test count**: ~70 tests (30 unit + 20 service + 9 contract + 5 observability + margin)
+**Estimated test count**: ~65 tests (30 unit + 18 service + 8 contract + 5 observability + margin)
 
 ---
 
@@ -700,10 +692,9 @@ No new packages need to be installed.
 |-----------|---------|--------|
 | ContextRAG | `ContextRAGService.gather_evidence()` | Merged (PR #9 ancestry) |
 | PluginRegistry | `RegistryService.list_catalog()`, `.validate_plan_tools()`, `.get_version()` | Merged (PR #7) |
-| Signer | `SignerService.sign_plan()` | Merged (PR #8) |
 | PlanLibrary | `PlanService.get_plans_by_intent()` | Merged (early PRs) |
 
-All four dependencies are implemented, merged, and wired in `shared/app.py`.
+All three dependencies are implemented, merged, and wired in `shared/app.py`.
 
 ### Shared Infrastructure
 
@@ -711,7 +702,6 @@ All four dependencies are implemented, merged, and wired in `shared/app.py`.
 |--------|-------|
 | `shared/schemas/intent.py` | `Intent` model -- input contract |
 | `shared/schemas/plan.py` | `Plan`, `PlanStep`, `PlanConstraints`, `PlanMeta` -- output contract |
-| `shared/schemas/signature.py` | `Signature` model -- signature contract |
 | `shared/schemas/evidence.py` | `EvidenceItem` -- evidence from ContextRAG |
 | `shared/app.py` | Lifespan DI wiring (to be modified in T301) |
 | `shared/dependencies.py` | `get_planner_service()` (to be added in T302) |
@@ -724,7 +714,7 @@ All four dependencies are implemented, merged, and wired in `shared/app.py`.
 
 - **If Planner fails**: No plan generated -> Orchestration Layer cannot proceed. However, the 4-level fallback hierarchy means total failure is nearly impossible (Level 4 is deterministic with no external deps).
 - **Containment**: Circuit breakers on each LLM model, graceful degradation through fallback levels, stateless design means crash-restart is safe.
-- **Dependency isolation**: ContextRAG never raises (returns empty ContextResult). PluginRegistry failure -> empty catalog -> Level 4 minimal plan. Signer failure is the only fatal path (startup misconfiguration).
+- **Dependency isolation**: ContextRAG never raises (returns empty ContextResult). PluginRegistry failure -> empty catalog -> Level 4 minimal plan.
 
 ### Determinism (LLD SS13.2)
 

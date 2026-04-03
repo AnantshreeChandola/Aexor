@@ -28,7 +28,6 @@ from ..domain.models import (
     PlanExpiredError,
     RecoveryExhaustedError,
     ResourceLockTimeout,
-    SignatureVerificationError,
     SpawnDeniedError,
     StepExecutionError,
     StepResult,
@@ -40,10 +39,9 @@ from ..domain.models import (
 
 
 class TestExecuteRequest:
-    def test_required_fields(self, sample_plan, sample_signature):
+    def test_required_fields(self, sample_plan):
         req = ExecuteRequest(
             plan=sample_plan,
-            signature=sample_signature,
             approval_token="tok",
             user_id="u1",
             trace_id="t1",
@@ -52,10 +50,9 @@ class TestExecuteRequest:
         assert req.preview_state is None
         assert req.integration_credentials == {}
 
-    def test_with_preview_state(self, sample_plan, sample_signature):
+    def test_with_preview_state(self, sample_plan):
         req = ExecuteRequest(
             plan=sample_plan,
-            signature=sample_signature,
             approval_token="tok",
             user_id="u1",
             trace_id="t1",
@@ -63,10 +60,9 @@ class TestExecuteRequest:
         )
         assert req.preview_state["1"]["events"] == []
 
-    def test_with_credentials(self, sample_plan, sample_signature):
+    def test_with_credentials(self, sample_plan):
         req = ExecuteRequest(
             plan=sample_plan,
-            signature=sample_signature,
             approval_token="tok",
             user_id="u1",
             trace_id="t1",
@@ -130,11 +126,6 @@ class TestExecutionContext:
 
 
 class TestErrorClasses:
-    def test_signature_error(self):
-        e = SignatureVerificationError("hash_mismatch")
-        assert "hash_mismatch" in str(e)
-        assert e.reason == "hash_mismatch"
-
     def test_approval_error(self):
         e = ApprovalTokenError("expired")
         assert e.reason == "expired"

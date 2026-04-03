@@ -23,7 +23,7 @@ All code was previously deleted for a clean rewrite. The directory currently con
 ### Install Dependencies (from LLD Section 7)
 
 - [ ] [T000] Verify Python packages are available in `pyproject.toml`
-  - Confirm `sqlalchemy>=2.0`, `asyncpg>=0.29`, `pydantic>=2.0`, `fastapi>=0.109.0`, `cryptography>=41.0`, `ulid-py>=1.1.0` are listed
+  - Confirm `sqlalchemy>=2.0`, `asyncpg>=0.29`, `pydantic>=2.0`, `fastapi>=0.109.0`, `ulid-py>=1.1.0` are listed
   - All packages already present in `pyproject.toml` -- verify no version conflicts
   - Add `pytest-benchmark>=4.0.0` to `[project.optional-dependencies] dev` if missing
 
@@ -57,13 +57,12 @@ All code was previously deleted for a clean rewrite. The directory currently con
     - `PlanOutcomeDB` -- maps to `PlanOutcomeTable` (outcome_id, plan_id, success, error_type, error_details, execution_start, execution_end, total_steps, failed_step, context_data)
     - `PlanMetricsDB` -- maps to `PlanMetricsTable` (metrics_id, plan_id, preview_latency_ms, execute_latency_ms, step_timings, resource_usage)
   - Request/Response models:
-    - `StorePlanRequest` -- plan (dict), signature (dict), outcome (dict), metrics (dict)
+    - `StorePlanRequest` -- plan (dict), outcome (dict), metrics (dict)
     - `StorePlanResponse` -- status, plan_id, stored_at
     - `QueryPlansRequest` -- intent_type, success_threshold, limit, recency_days
     - `PlanPattern` -- intent_type, success_rate, avg_execution_time_ms, steps_count, pattern_summary, plan_id
   - Error classes:
     - `PlanLibraryError(Exception)` -- base exception
-    - `InvalidSignatureError(PlanLibraryError)` -- signature verification failure
     - `DuplicatePlanError(PlanLibraryError)` -- duplicate plan_id
     - `PlanTooLargeError(PlanLibraryError)` -- exceeds 1MB or 100 steps
     - `InvalidQueryError(PlanLibraryError)` -- invalid query parameters
@@ -72,7 +71,7 @@ All code was previously deleted for a clean rewrite. The directory currently con
 
 - [ ] [T101] Create JSON schemas for plan storage and query
   - File: `/components/PlanLibrary/schemas/plan_storage.schema.json`
-    - JSON Schema Draft 7 for plan storage input (plan object, signature, outcome, metrics)
+    - JSON Schema Draft 7 for plan storage input (plan object, outcome, metrics)
     - Must pass CI schema-validation job
   - File: `/components/PlanLibrary/schemas/query_request.schema.json`
     - JSON Schema Draft 7 for query parameters (intent_type, similarity_vector, filters)
@@ -98,15 +97,14 @@ All code was previously deleted for a clean rewrite. The directory currently con
 - [ ] [T200] Implement PlanService
   - File: `/components/PlanLibrary/service/plan_service.py`
   - Class: `PlanService`
-  - Constructor accepts: `db_adapter`, `signature_verifier`
+  - Constructor accepts: `db_adapter`
   - Methods:
-    - `async def store_plan(plan, signature, outcome, metrics) -> StorePlanResponse`
+    - `async def store_plan(plan, outcome, metrics) -> StorePlanResponse`
       - Decision rules from SPEC (top-to-bottom):
         1. Validate plan_id is valid ULID
         2. Validate required fields (plan_id, graph, meta)
-        3. Verify Ed25519 signature
-        4. Check for duplicate plan_id
-        5. Check size limits (100 steps, 1MB)
+        3. Check for duplicate plan_id
+        4. Check size limits (100 steps, 1MB)
         6. Canonicalize plan JSON (sorted keys, no whitespace)
         7. Compute SHA-256 hash
         8. Store plan + outcome + metrics in single DB transaction
@@ -150,11 +148,10 @@ All code was previously deleted for a clean rewrite. The directory currently con
 - [ ] [T203] Write service layer unit tests (TDD -- write tests FIRST)
   - File: `/components/PlanLibrary/tests/test_plan_service.py`
   - Tests for PlanService:
-    - Store plan with valid signature -- success (US-1 scenario 1)
+    - Store plan with valid data -- success (US-1 scenario 1)
     - Store plan with failure outcome -- records failure details (US-1 scenario 2)
     - Store plan with duplicate plan_id -- DuplicatePlanError (Decision Rule 4)
-    - Store plan with invalid signature -- InvalidSignatureError (US-1 scenario 4)
-    - Store plan exceeding size -- PlanTooLargeError (Decision Rule 5)
+    - Store plan exceeding size -- PlanTooLargeError
     - Store plan with null/empty/invalid plan_id -- InvalidPlanIdError (Decision Rule 1)
     - Store plan with missing required fields -- MalformedPlanError (Decision Rule 2)
     - Query by intent with success threshold -- returns filtered results (US-2 scenario 1)
@@ -195,17 +192,6 @@ All code was previously deleted for a clean rewrite. The directory currently con
       - Aggregate query: GROUP BY intent_type, COUNT success/total
     - `async def health_check() -> bool`
 
-- [ ] [T301] Implement SignatureVerifier (Ed25519)
-  - File: `/components/PlanLibrary/adapters/signature_verifier.py`
-  - Class: `SignatureVerifier`
-  - Uses `cryptography` library for Ed25519 verification
-  - Method: `def verify_signature(plan_canonical_json, signature_data) -> bool`
-    - Canonicalize plan JSON (sorted keys, no whitespace)
-    - Compute SHA-256 hash
-    - Verify Ed25519 signature against hash
-    - Returns True/False
-  - Reads public key from environment or configuration
-
 - [ ] [T302] Write adapter unit tests (TDD -- write tests FIRST)
   - File: `/components/PlanLibrary/tests/test_adapters.py`
   - Tests for DatabaseAdapter:
@@ -214,10 +200,6 @@ All code was previously deleted for a clean rewrite. The directory currently con
     - Get plan by ID -- found and not found
     - Query plans by intent with success threshold
     - Health check passes/fails
-  - Tests for SignatureVerifier:
-    - Valid signature accepted
-    - Invalid signature rejected
-    - Tampered plan detected
   - All adapter tests use mocks (MagicMock for database sessions, mock OpenAI responses)
 
 ---
@@ -236,7 +218,7 @@ All code was previously deleted for a clean rewrite. The directory currently con
     - `POST /plans` -- `store_plan_endpoint(request: StorePlanRequest)`
       - Thin wrapper: delegates to `PlanService.store_plan()`
       - Returns `StorePlanResponse`
-      - Error handling: InvalidSignatureError -> 400, DuplicatePlanError -> 409, PlanTooLargeError -> 413
+      - Error handling: DuplicatePlanError -> 409, PlanTooLargeError -> 413
     - `GET /plans/by-intent/{intent_type}` -- `get_plans_by_intent_endpoint(intent_type, success_threshold, limit, recency_days)`
       - Thin wrapper: delegates to `PlanService.get_plans_by_intent()`
       - Returns `List[EvidenceItem]` wrapped in SuccessResponse
@@ -254,7 +236,6 @@ All code was previously deleted for a clean rewrite. The directory currently con
 - [ ] [T401] Extend shared API error handlers for PlanLibrary errors
   - File: `/components/PlanLibrary/api/error_handlers.py`
   - Create PlanLibrary-specific error handler methods:
-    - `handle_invalid_signature(error) -> JSONResponse` (400)
     - `handle_duplicate_plan(error) -> JSONResponse` (409)
     - `handle_plan_too_large(error) -> JSONResponse` (413)
     - `handle_invalid_query(error) -> JSONResponse` (400)
@@ -264,7 +245,6 @@ All code was previously deleted for a clean rewrite. The directory currently con
   - File: `/components/PlanLibrary/tests/test_api.py`
   - Tests:
     - POST /plans with valid data -- 200 success
-    - POST /plans with invalid signature -- 400 INVALID_SIGNATURE
     - POST /plans with duplicate plan_id -- 409 DUPLICATE_PLAN_ID
     - POST /plans with oversized plan -- 413 PLAN_TOO_LARGE
     - GET /plans/by-intent/{intent_type} -- returns Evidence Items
@@ -319,11 +299,10 @@ All code was previously deleted for a clean rewrite. The directory currently con
     - Confidence score range (0.0-1.0)
     - Tier 3 data source compliance (GLOBAL_SPEC section 7)
   - TestErrorCodeContract:
-    - All error codes match SPEC FR-001 (INVALID_PLAN_ID, MALFORMED_PLAN, INVALID_SIGNATURE, DUPLICATE_PLAN_ID, PLAN_TOO_LARGE, STORAGE_ERROR, INVALID_QUERY)
+    - All error codes match SPEC FR-001 (INVALID_PLAN_ID, MALFORMED_PLAN, DUPLICATE_PLAN_ID, PLAN_TOO_LARGE, STORAGE_ERROR, INVALID_QUERY)
     - Error classes have required attributes for API error responses
   - TestInvariantCompliance:
     - Plan uniqueness (plan_id is primary key)
-    - Signature integrity (valid signatures stored, invalid rejected)
     - Outcome consistency (outcome references valid plan_id)
     - Canonical serialization (sorted keys, deterministic)
     - Immutable storage (plans never modified, append-only outcomes)
@@ -361,11 +340,11 @@ All code was previously deleted for a clean rewrite. The directory currently con
 
 ## Task Summary
 
-- **Total Tasks**: 19
+- **Total Tasks**: 18
 - **Phase 0 (Setup)**: T000-T002 (3 tasks)
 - **Phase 1 (Schemas/Domain)**: T100-T102 (3 tasks)
 - **Phase 2 (Service Layer)**: T200-T203 (4 tasks)
-- **Phase 3 (Adapters)**: T300-T302 (3 tasks)
+- **Phase 3 (Adapters)**: T300, T302 (2 tasks)
 - **Phase 4 (API)**: T400-T402 (3 tasks)
 - **Phase 5 (Safety)**: T500-T502 (3 tasks)
 - **Phase 6 (Tests/Integration)**: T600-T603 (4 tasks)
@@ -382,7 +361,6 @@ All code was previously deleted for a clean rewrite. The directory currently con
 | `asyncpg` | `>=0.29` | PostgreSQL async driver |
 | `pydantic` | `>=2.0` | Data validation |
 | `fastapi` | `>=0.109.0` | API framework |
-| `cryptography` | `>=41.0` | Ed25519 signature verification |
 | `ulid-py` | `>=1.1.0` | ULID validation |
 
 ### Development/Testing
@@ -423,7 +401,6 @@ All code was previously deleted for a clean rewrite. The directory currently con
 ### Determinism (from LLD)
 
 - **Plan Storage**: Deterministic canonicalization ensures same inputs produce same SHA-256 hash and storage format. Sorted keys, no whitespace, consistent serialization.
-- **Signature Verification**: Cryptographic integrity guarantees (Ed25519). Verification is deterministic given same plan bytes and public key.
 - **Query Results**: Consistent ordering by success_rate DESC, total_executions DESC.
 
 ### Preview/Execute Model
@@ -445,7 +422,7 @@ The recommended execution order respects dependencies between tasks:
 
 1. **Phase 0** (T000, T001, T002) -- setup, can be done in parallel
 2. **Phase 1** (T102 first for TDD, then T100, T101) -- domain foundation
-3. **Phase 3** (T302 first for TDD, then T300, T301) -- adapters before services need them
+3. **Phase 3** (T302 first for TDD, then T300) -- adapters before services need them
 4. **Phase 2** (T203 first for TDD, then T200-T202) -- services depend on adapters
 5. **Phase 4** (T402 first for TDD, then T400, T401) -- API depends on services
 6. **Phase 5** (T500-T502) -- safety enhancements on top of working code

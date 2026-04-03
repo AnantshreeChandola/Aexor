@@ -19,7 +19,6 @@ from components.PlanWriter.service.plan_writer_service import PlanWriterService
 from shared.schemas.metrics import PlanMetrics
 from shared.schemas.outcome import PlanOutcome
 from shared.schemas.plan import Plan
-from shared.schemas.signature import Signature
 
 # Valid 26-char ULID for tests
 SAMPLE_PLAN_ID = "01HXYZ1234567890ABCDEFGHJK"
@@ -101,18 +100,6 @@ def sample_plan() -> Plan:
             "version": "v2.0.0",
             "canonical_hash": f"sha256:{SAMPLE_PLAN_HASH}",
         },
-    )
-
-
-@pytest.fixture()
-def sample_signature() -> Signature:
-    """Signature model matching GLOBAL_SPEC Section 2.4."""
-    return Signature(
-        algo="Ed25519",
-        signer="planner@system",
-        signature="dGVzdHNpZ25hdHVyZQ==" + "A" * 44,
-        pubkey_id="k1",
-        plan_hash=SAMPLE_PLAN_HASH,
     )
 
 
