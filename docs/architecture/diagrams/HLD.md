@@ -14,10 +14,8 @@ flowchart LR
   IN --> REG[PluginRegistry\nMCP tool catalog]
   REG --> PLAN[Planner\nAnthropic Claude API]
   RAG --> PLAN
-  PLAN --> SIG[Signer\nEd25519]
-
   %% ── Orchestration Layer: Preview ──
-  SIG --> PREV[PreviewOrchestrator\nMCP read-only]
+  PLAN --> PREV[PreviewOrchestrator\nMCP read-only]
   PREV -->|Preview card + evidence| U
 
   %% ── Orchestration Layer: Approve ──

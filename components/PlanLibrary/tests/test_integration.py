@@ -66,23 +66,14 @@ def mock_db():
     return db
 
 
-@pytest.fixture
-def mock_sig_verifier():
-    """Create mock signature verifier."""
-    verifier = MagicMock()
-    verifier.verify_signature.return_value = True
-    return verifier
-
-
 class TestStoreThenQuery:
     """Test store plan -> query by intent flow."""
 
     @pytest.mark.asyncio
-    async def test_store_and_query_by_intent(self, mock_db, mock_sig_verifier):
+    async def test_store_and_query_by_intent(self, mock_db):
         """Store plan then query by intent returns evidence items."""
         service = PlanService(
             db_adapter=mock_db,
-            signature_verifier=mock_sig_verifier,
         )
 
         # Step 1: Store plan
@@ -118,11 +109,10 @@ class TestStoreThenAnalytics:
     """Test store multiple plans -> analytics flow."""
 
     @pytest.mark.asyncio
-    async def test_store_and_get_success_rates(self, mock_db, mock_sig_verifier):
+    async def test_store_and_get_success_rates(self, mock_db):
         """Store multiple plans then check analytics."""
         service = PlanService(
             db_adapter=mock_db,
-            signature_verifier=mock_sig_verifier,
         )
 
         # Store plans
@@ -148,11 +138,10 @@ class TestStoreFailureOutcome:
     """Test storing plans with failure outcomes."""
 
     @pytest.mark.asyncio
-    async def test_failure_outcome_filters_below_threshold(self, mock_db, mock_sig_verifier):
+    async def test_failure_outcome_filters_below_threshold(self, mock_db):
         """Plans with failure outcomes filtered by success threshold."""
         service = PlanService(
             db_adapter=mock_db,
-            signature_verifier=mock_sig_verifier,
         )
 
         # Store failed plan

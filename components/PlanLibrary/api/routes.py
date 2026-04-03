@@ -16,7 +16,6 @@ from shared.dependencies import get_analytics_service, get_plan_service
 from ..domain.models import (
     DuplicatePlanError,
     InvalidQueryError,
-    InvalidSignatureError,
     PlanNotFoundError,
     PlanTooLargeError,
     StorePlanRequest,
@@ -64,7 +63,6 @@ async def store_plan_endpoint(
         return response
 
     except (
-        InvalidSignatureError,
         DuplicatePlanError,
         PlanTooLargeError,
         ValueError,

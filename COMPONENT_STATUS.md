@@ -1,7 +1,7 @@
 # Component Implementation Status
 
 **Last Updated**: 2026-03-27
-**Total Components**: 16 (across 4 layers)
+**Total Components**: 15 (across 4 layers)
 
 Legend:
 - `✓` - Completed and verified
@@ -49,13 +49,13 @@ Legend:
 - Code: ✓
 - Tests: ✓ (92 passing)
 - Schemas: ✓
-- **Purpose**: Store all past plans with signatures and outcomes
-- **Status**: ✅ **COMPLETED** - Tier 3 data source with Evidence Item format, Ed25519 signatures, atomic transactions
+- **Purpose**: Store all past plans with outcomes
+- **Status**: ✅ **COMPLETED** - Tier 3 data source with Evidence Item format, atomic transactions
 - **PR**: [#4](https://github.com/AnantshreeChandola/Personal-agent/pull/4) - PlanLibrary implementation
 
 ---
 
-## Domain Layer (7 components)
+## Domain Layer (6 components)
 
 ### Intake
 - SPEC.md: ✓
@@ -95,16 +95,6 @@ Legend:
 - Schemas: ✓
 - **Purpose**: Evaluate policy rules for LLM reasoning steps, issue attestations, enforce HITL for critical actions
 - **Status**: Code implemented (service, adapters, cache, DB tables, DI wiring, tests). SPEC and LLD docs not yet written.
-
-### Signer
-- SPEC.md: ✓
-- LLD.md: ✓
-- Code: ✓
-- Tests: ✓ (51 passing)
-- Schemas: ✓
-- **Purpose**: Cryptographically sign plans (Ed25519)
-- **Status**: ✅ **COMPLETED** - Ed25519 sign/verify, library component (no routes), DI wiring
-- **PR**: [#8](https://github.com/AnantshreeChandola/Personal-agent/pull/8) - Signer implementation
 
 ### PluginRegistry
 - SPEC.md: ✓
@@ -179,19 +169,19 @@ Legend:
 ## Summary Statistics
 
 ### By Status
-- ✓ Completed: 10/16 (63%)
-- WIP In Progress: 0/16 (0%)
-- ✗ Not Started: 6/16 (38%)
+- ✓ Completed: 9/15 (60%)
+- WIP In Progress: 0/15 (0%)
+- ✗ Not Started: 6/15 (40%)
 
 ### By Layer
 - Memory Layer: 4/4 completed (ProfileStore ✅, PlanLibrary ✅, History ✅, VectorIndex ✅)
-- Domain Layer: 6/7 completed (Intake ✅, ContextRAG ✅, Planner ✅, Signer ✅, PluginRegistry ✅, PlanWriter ✅)
+- Domain Layer: 5/6 completed (Intake ✅, ContextRAG ✅, Planner ✅, PluginRegistry ✅, PlanWriter ✅)
 - Orchestration Layer: 0/4 started
 - Platform Layer: 0/1 started
 
 ### Critical Path (Recommended Order)
 1. **Phase 1**: Foundation ✅
-   - ~~ProfileStore~~ ✅, ~~PlanLibrary~~ ✅, ~~History~~ ✅, ~~PluginRegistry~~ ✅, ~~Signer~~ ✅, ~~VectorIndex~~ ✅, ~~PlanWriter~~ ✅
+   - ~~ProfileStore~~ ✅, ~~PlanLibrary~~ ✅, ~~History~~ ✅, ~~PluginRegistry~~ ✅, ~~VectorIndex~~ ✅, ~~PlanWriter~~ ✅
 2. **Phase 2**: Planning ✅
    - ~~Intake~~ ✅, ~~ContextRAG~~ ✅, ~~Planner~~ ✅
 3. **Phase 2.5**: Policy & Adaptive Infrastructure
@@ -214,7 +204,7 @@ Legend:
 
 ### PlanWriter (✅ Completed - Mar 2026)
 - **Outcome persistence** to PlanLibrary, History, and VectorIndex with ordered writes
-- **Shared Pydantic models**: Intent, Plan, Signature, PlanOutcome, PlanMetrics in `shared/schemas/`
+- **Shared Pydantic models**: Intent, Plan, PlanOutcome, PlanMetrics in `shared/schemas/`
 - **Typed fact derivation**: Template-based, deterministic, PII-light facts from `plan.intent.intent`
 - **Graceful degradation**: VectorIndex optional, History non-fatal, PlanLibrary fatal
 - **61 tests passing**: Unit, service, contract, and observability tests
@@ -228,13 +218,6 @@ Legend:
 - **Library component**: No HTTP routes, consumed via DI by PlanWriter/ContextRAG/Planner
 - **74 tests passing**: Unit, contract, observability tests (6 integration stubs for pgvector environments)
 - **PR**: [#9](https://github.com/AnantshreeChandola/Personal-agent/pull/9) - VectorIndex hybrid search implementation
-
-### Signer (✅ Completed - Mar 2026)
-- **Ed25519 cryptographic signing**: Sign and verify plans with deterministic canonical JSON
-- **Library component**: No HTTP routes, consumed via DI
-- **Key management**: Private/public keys loaded from environment variables
-- **51 tests passing**: Unit, contract, observability (no PII/key leakage in logs)
-- **PR**: [#8](https://github.com/AnantshreeChandola/Personal-agent/pull/8) - Signer implementation
 
 ### PluginRegistry (✅ Completed - Mar 2026)
 - **Tool catalog service**: CRUD for external tool registrations with operations
@@ -255,7 +238,6 @@ Legend:
 
 ### PlanLibrary (✅ Completed - Feb 2026)
 - **Tier 3 data source** with Evidence Item format for ContextRAG integration
-- **Ed25519 signature verification** for plan integrity
 - **Atomic transactions**: Plan + outcome + metrics stored in single DB transaction
 - **92 tests passing**: Domain, service, adapter, API, contract, and integration tests
 - **Lifespan-based DI**: Routes use `Depends()` pulling from `app.state` (no global singletons)

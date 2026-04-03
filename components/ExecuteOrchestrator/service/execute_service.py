@@ -21,7 +21,6 @@ from jose import JWTError, jwt
 from shared.schemas.metrics import PlanMetrics
 from shared.schemas.outcome import PlanOutcome
 from shared.schemas.plan import Plan, PlanStep
-from shared.schemas.signature import Signature
 
 from ..adapters.dag_resolver import DAGResolver
 from ..adapters.idempotency import IdempotencyAdapter
@@ -39,7 +38,6 @@ from ..domain.models import (
     MCPInvocationError,
     PlanExpiredError,
     RecoveryExhaustedError,
-    SignatureVerificationError,
     SpawnDeniedError,
     StepExecutionError,
     StepResult,
@@ -57,7 +55,6 @@ class ExecuteService:
 
     def __init__(
         self,
-        signer_service: Any,
         policy_service: Any,
         registry_service: Any,
         plan_writer_service: Any,
@@ -70,7 +67,6 @@ class ExecuteService:
         template_resolver: TemplateResolver,
         retry_policy: RetryPolicy,
     ) -> None:
-        self._signer = signer_service
         self._policy = policy_service
         self._registry = registry_service
         self._plan_writer = plan_writer_service
@@ -84,7 +80,7 @@ class ExecuteService:
         self._retry = retry_policy
 
     async def execute_plan(self, request: ExecuteRequest) -> PlanOutcome:
-        """Execute a signed, approved plan end-to-end."""
+        """Execute an approved plan end-to-end."""
         start = time.monotonic()
         now_iso = datetime.now(UTC).isoformat()
         ctx = ExecutionContext(
@@ -106,7 +102,6 @@ class ExecuteService:
 
         try:
             # Phase 1: Pre-execution verification
-            await self._verify_signature(request.plan, request.signature)
             self._validate_approval_token(request.approval_token, request.plan)
             self._check_plan_ttl(request.plan)
 
@@ -121,7 +116,6 @@ class ExecuteService:
             outcome = self._build_outcome(ctx, now_iso)
 
         except (
-            SignatureVerificationError,
             ApprovalTokenError,
             PlanExpiredError,
             CycleDetectedError,
@@ -152,13 +146,6 @@ class ExecuteService:
     # ------------------------------------------------------------------
     # Pre-execution verification
     # ------------------------------------------------------------------
-
-    async def _verify_signature(self, plan: Plan, signature: Signature) -> None:
-        """Verify Ed25519 plan signature via Signer service."""
-        try:
-            await self._signer.verify_signature(plan.model_dump(), signature.model_dump())
-        except Exception as exc:
-            raise SignatureVerificationError(str(exc))
 
     def _validate_approval_token(self, token: str, plan: Plan) -> None:
         """Validate JWT approval token."""
@@ -728,7 +715,6 @@ class ExecuteService:
     def _classify_error(self, error: Exception) -> str:
         """Map exception type to error_type string."""
         mapping = {
-            SignatureVerificationError: "signature_invalid",
             ApprovalTokenError: "token_expired",
             PlanExpiredError: "plan_expired",
             CycleDetectedError: "cycle_detected",
@@ -763,7 +749,6 @@ class ExecuteService:
             await self._plan_writer.persist_outcome(
                 user_id=user_uuid,
                 plan=request.plan,
-                signature=request.signature,
                 outcome=outcome,
                 metrics=metrics,
             )
@@ -778,7 +763,6 @@ class ExecuteService:
 
 
 def create_execute_service(
-    signer_service: Any,
     policy_service: Any,
     registry_service: Any,
     plan_writer_service: Any,
@@ -798,7 +782,6 @@ def create_execute_service(
     retry_policy = RetryPolicy()
 
     return ExecuteService(
-        signer_service=signer_service,
         policy_service=policy_service,
         registry_service=registry_service,
         plan_writer_service=plan_writer_service,

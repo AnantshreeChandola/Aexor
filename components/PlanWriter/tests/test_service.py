@@ -24,7 +24,6 @@ class TestPersistOutcomeHappyPath:
         self,
         plan_writer_service,
         sample_plan,
-        sample_signature,
         sample_outcome_success,
         sample_metrics,
         sample_user_id,
@@ -36,7 +35,6 @@ class TestPersistOutcomeHappyPath:
         result = await plan_writer_service.persist_outcome(
             user_id=sample_user_id,
             plan=sample_plan,
-            signature=sample_signature,
             outcome=sample_outcome_success,
             metrics=sample_metrics,
         )
@@ -49,7 +47,7 @@ class TestPersistOutcomeHappyPath:
         # Verify downstream services called with correct args
         mock_plan_service.store_plan.assert_awaited_once_with(
             sample_plan.model_dump(),
-            sample_signature.model_dump(),
+            {},
             sample_outcome_success.model_dump(),
             sample_metrics.model_dump(),
         )
@@ -65,7 +63,6 @@ class TestPersistOutcomeFailedExecution:
         self,
         plan_writer_service,
         sample_plan,
-        sample_signature,
         sample_outcome_failure,
         sample_metrics,
         sample_user_id,
@@ -74,7 +71,6 @@ class TestPersistOutcomeFailedExecution:
         result = await plan_writer_service.persist_outcome(
             user_id=sample_user_id,
             plan=sample_plan,
-            signature=sample_signature,
             outcome=sample_outcome_failure,
             metrics=sample_metrics,
         )
@@ -90,7 +86,6 @@ class TestPersistOutcomeVectorIndexNone:
         self,
         plan_writer_service_no_vectorindex,
         sample_plan,
-        sample_signature,
         sample_outcome_success,
         sample_metrics,
         sample_user_id,
@@ -99,7 +94,6 @@ class TestPersistOutcomeVectorIndexNone:
         result = await plan_writer_service_no_vectorindex.persist_outcome(
             user_id=sample_user_id,
             plan=sample_plan,
-            signature=sample_signature,
             outcome=sample_outcome_success,
             metrics=sample_metrics,
         )
@@ -117,7 +111,6 @@ class TestPersistOutcomeVectorIndexError:
         mock_fact_service,
         mock_vector_index_service,
         sample_plan,
-        sample_signature,
         sample_outcome_success,
         sample_metrics,
         sample_user_id,
@@ -134,7 +127,6 @@ class TestPersistOutcomeVectorIndexError:
         result = await service.persist_outcome(
             user_id=sample_user_id,
             plan=sample_plan,
-            signature=sample_signature,
             outcome=sample_outcome_success,
             metrics=sample_metrics,
         )
@@ -152,7 +144,6 @@ class TestPersistOutcomeHistoryFails:
         mock_fact_service,
         mock_vector_index_service,
         sample_plan,
-        sample_signature,
         sample_outcome_success,
         sample_metrics,
         sample_user_id,
@@ -167,7 +158,6 @@ class TestPersistOutcomeHistoryFails:
         result = await service.persist_outcome(
             user_id=sample_user_id,
             plan=sample_plan,
-            signature=sample_signature,
             outcome=sample_outcome_success,
             metrics=sample_metrics,
         )
@@ -186,7 +176,6 @@ class TestPersistOutcomePlanLibraryFails:
         mock_fact_service,
         mock_vector_index_service,
         sample_plan,
-        sample_signature,
         sample_outcome_success,
         sample_metrics,
         sample_user_id,
@@ -202,7 +191,6 @@ class TestPersistOutcomePlanLibraryFails:
             await service.persist_outcome(
                 user_id=sample_user_id,
                 plan=sample_plan,
-                signature=sample_signature,
                 outcome=sample_outcome_success,
                 metrics=sample_metrics,
             )
@@ -220,7 +208,6 @@ class TestPersistOutcomeDuplicatePlan:
         mock_fact_service,
         mock_vector_index_service,
         sample_plan,
-        sample_signature,
         sample_outcome_success,
         sample_metrics,
         sample_user_id,
@@ -237,7 +224,6 @@ class TestPersistOutcomeDuplicatePlan:
         result = await service.persist_outcome(
             user_id=sample_user_id,
             plan=sample_plan,
-            signature=sample_signature,
             outcome=sample_outcome_success,
             metrics=sample_metrics,
         )
@@ -256,7 +242,6 @@ class TestPersistOutcomeFactDerivationFails:
         mock_fact_service,
         mock_vector_index_service,
         sample_plan,
-        sample_signature,
         sample_outcome_success,
         sample_metrics,
         sample_user_id,
@@ -270,7 +255,6 @@ class TestPersistOutcomeFactDerivationFails:
         result = await service.persist_outcome(
             user_id=sample_user_id,
             plan=sample_plan,
-            signature=sample_signature,
             outcome=sample_outcome_success,
             metrics=sample_metrics,
         )
@@ -290,7 +274,6 @@ class TestBulkPersist:
         self,
         plan_writer_service,
         sample_plan,
-        sample_signature,
         sample_outcome_success,
         sample_metrics,
         sample_user_id,
@@ -299,7 +282,6 @@ class TestBulkPersist:
         outcomes = [
             {
                 "plan": sample_plan.model_dump(),
-                "signature": sample_signature.model_dump(),
                 "outcome": sample_outcome_success.model_dump(),
                 "metrics": sample_metrics.model_dump(),
             }
@@ -319,7 +301,6 @@ class TestBulkPersist:
         mock_fact_service,
         mock_vector_index_service,
         sample_plan,
-        sample_signature,
         sample_outcome_success,
         sample_metrics,
         sample_user_id,
@@ -351,7 +332,6 @@ class TestBulkPersist:
         outcomes = [
             {
                 "plan": sample_plan.model_dump(),
-                "signature": sample_signature.model_dump(),
                 "outcome": sample_outcome_success.model_dump(),
                 "metrics": sample_metrics.model_dump(),
             }
@@ -378,7 +358,6 @@ class TestBulkPersist:
         self,
         plan_writer_service,
         sample_plan,
-        sample_signature,
         sample_outcome_success,
         sample_metrics,
         sample_user_id,
@@ -387,7 +366,6 @@ class TestBulkPersist:
         outcomes = [
             {
                 "plan": sample_plan.model_dump(),
-                "signature": sample_signature.model_dump(),
                 "outcome": sample_outcome_success.model_dump(),
                 "metrics": sample_metrics.model_dump(),
             },

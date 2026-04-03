@@ -47,11 +47,6 @@ def get_registry_service(request: Request) -> Any:
     return request.app.state.registry_service
 
 
-def get_signer_service(request: Request) -> Any:
-    """Get SignerService singleton from app state."""
-    return request.app.state.signer_service
-
-
 def get_vector_index_service(request: Request) -> Any:
     """Get VectorIndexService singleton from app state."""
     return request.app.state.vector_index_service

@@ -19,7 +19,6 @@ from shared.schemas.policy import (
     PolicyDecision,
     ReasoningConfig,
 )
-from shared.schemas.signature import Signature
 
 from ..adapters.dag_resolver import DAGResolver
 from ..adapters.idempotency import IdempotencyAdapter
@@ -63,18 +62,6 @@ def _make_plan_constraints() -> PlanConstraints:
         ttl_s=900,
         max_retries=3,
         policy_version=1,
-    )
-
-
-def _make_signature(plan_id: str) -> Signature:
-    return Signature(
-        algo="Ed25519",
-        signer="planner@system",
-        signature="s" * 88,
-        pubkey_id="k1",
-        plan_hash="a" * 64,
-        ts=datetime.now(UTC).isoformat(),
-        nonce="N" * 26,
     )
 
 
@@ -229,11 +216,6 @@ def sample_hybrid_plan() -> Plan:
 
 
 @pytest.fixture()
-def sample_signature(sample_plan: Plan) -> Signature:
-    return _make_signature(sample_plan.plan_id)
-
-
-@pytest.fixture()
 def sample_approval_token(sample_plan: Plan) -> str:
     return _make_approval_token(sample_plan.plan_id)
 
@@ -241,12 +223,10 @@ def sample_approval_token(sample_plan: Plan) -> str:
 @pytest.fixture()
 def sample_execute_request(
     sample_plan: Plan,
-    sample_signature: Signature,
     sample_approval_token: str,
 ) -> ExecuteRequest:
     return ExecuteRequest(
         plan=sample_plan,
-        signature=sample_signature,
         approval_token=sample_approval_token,
         user_id="user-001",
         trace_id="trace-001",
@@ -258,13 +238,6 @@ def sample_execute_request(
 # ---------------------------------------------------------------------------
 # Mock service fixtures
 # ---------------------------------------------------------------------------
-
-
-@pytest.fixture()
-def mock_signer_service() -> AsyncMock:
-    svc = AsyncMock()
-    svc.verify_signature = AsyncMock(return_value=True)
-    return svc
 
 
 @pytest.fixture()
@@ -363,7 +336,6 @@ def mock_redis() -> AsyncMock:
 
 @pytest.fixture()
 def execute_service(
-    mock_signer_service: AsyncMock,
     mock_policy_service: AsyncMock,
     mock_registry_service: AsyncMock,
     mock_plan_writer_service: AsyncMock,
@@ -374,7 +346,6 @@ def execute_service(
 ) -> ExecuteService:
     """Fully wired ExecuteService with all mocked dependencies."""
     return ExecuteService(
-        signer_service=mock_signer_service,
         policy_service=mock_policy_service,
         registry_service=mock_registry_service,
         plan_writer_service=mock_plan_writer_service,

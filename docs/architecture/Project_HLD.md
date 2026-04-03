@@ -19,7 +19,7 @@ User Request → Preview → Approval → Execute → Learn
 
 ### Core Idea
 1. **Never do anything without showing the user first** (Preview-first safety)
-2. **Plans are deterministic graphs with adaptive execution points** — The Planner produces a fixed DAG of steps (same inputs → same graph → same signature). The **initial plan (revision 0)** is immutable and cryptographically signed. At runtime, Reasoner steps can spawn new steps within PolicyEngine bounds — each spawn event increments `plan_revision` and is recorded as a PolicyAttestation. The original graph is never mutated; spawned steps extend it into a new revision. API steps execute exactly as specified. Only Reasoner steps introduce runtime variability.
+2. **Plans are deterministic, immutable graphs with adaptive execution points** — The Planner produces a fixed DAG of steps (same inputs → same graph). The **initial plan (revision 0)** is immutable, identified by a SHA-256 plan_hash for data integrity. At runtime, Reasoner steps can spawn new steps within PolicyEngine bounds — each spawn event increments `plan_revision` and is recorded as a PolicyAttestation. The original graph is never mutated; spawned steps extend it into a new revision. API steps execute exactly as specified. Only Reasoner steps introduce runtime variability.
 3. **Pure agentic execution** — all steps execute via Python/FastAPI ExecuteOrchestrator:
    - **API steps**: Dispatched via MCP tool invocations (community-maintained connector ecosystem)
    - **LLM reasoning steps**: Anthropic API with two-tier trust model (sandboxed Tier 1 for untrusted data, capable Tier 2 for agent reasoning)
@@ -45,7 +45,7 @@ The system supports three execution patterns. The plan graph is ALWAYS fully spe
 - Example: "Book meeting with Alice" (§2a below)
 
 #### B) Adaptive Plans with Reasoner (has `type: "llm_reasoning"` steps)
-- The initial plan (revision 0) is immutable and signed. Reasoner steps are explicit decision points in the DAG.
+- The initial plan (revision 0) is immutable. Reasoner steps are explicit decision points in the DAG.
 - Reasoner steps see previous outputs via `context_from` and make judgments
 - Reasoners can spawn new steps (Fetcher, Analyzer) within PolicyEngine bounds — each spawn creates a new plan revision with a PolicyAttestation
 - **All data flowing from API steps → Reasoner goes through Tier 1 sanitization first** (see Data Trust Boundary below)
@@ -112,7 +112,7 @@ The system has **4 layers** that work together:
 **What it does**: Understands your request, builds a plan, and enforces policies
 - **Intake**: Figures out what you want across multiple messages
 - **ContextRAG**: Assembles relevant context from Memory Layer via structured queries + optional VectorIndex hybrid search (≤2KB budget, consent tier enforcement, graceful degradation)
-- **Planner**: Creates a step-by-step plan (deterministic, signed) — may include LLM reasoning steps for open-ended tasks
+- **Planner**: Creates a step-by-step plan (deterministic, immutable) — may include LLM reasoning steps for open-ended tasks
 - **PolicyEngine**: Governs all runtime LLM decisions — evaluates policy rules, issues attestations for spawned steps, enforces HITL for critical actions. Technology: PostgreSQL (policy rules) + Redis (cached policies, <5ms evaluation)
 - **PluginRegistry**: Knows what tools are available (Google Calendar, Slack, etc.)
 
@@ -155,7 +155,7 @@ ContextRAG: Gathers context
 Intent + Evidence → Ready for planning
 ```
 
-### Step 2: Planning (Planner + Signer)
+### Step 2: Planning (Planner)
 ```
 Planner receives:
   - Intent: "schedule_meeting with Alice next week"
@@ -172,15 +172,13 @@ Creates Plan (all steps type: "api" — no Reasoner, no trust tier needed):
   Step 6 (Notifier, api): Send confirmation        [after 5]
     args: { content: "Meeting booked: {{step_5.result.event_id}}" }  ← template resolution
 
-Signer: Signs plan with Ed25519
-  → Plan hash: "sha256:abc123..."
-  → Signature: "base64:xyz..."
+Plan hash: "sha256:abc123..." (data integrity checksum)
 ```
 
 ### Step 3: Preview (PreviewOrchestrator)
 ```
 PreviewOrchestrator:
-  ✓ Verifies plan signature
+  ✓ Verifies plan hash (data integrity)
   ✓ Runs steps 1-3 in READ-ONLY mode
 
 MCP tool invocations execute:
@@ -216,7 +214,7 @@ Returns token: "jwt:eyJ..."
 ### Step 5: Execute (ExecuteOrchestrator)
 ```
 ExecuteOrchestrator:
-  ✓ Verifies signature
+  ✓ Verifies plan hash (data integrity)
   ✓ Verifies approval token
   ✓ Retrieves cached preview state (no need to re-fetch calendars!)
 
@@ -241,7 +239,7 @@ Executes step 6:
 ```
 PlanWriter:
   - Saves to Plan Library:
-    - Plan + signature + outcome (success)
+    - Plan + outcome (success)
     - Embedding for future similarity search
 
   - Saves to History:
@@ -260,7 +258,7 @@ Audit:
 
 **User Request**: "Find me the best flights to Tokyo next month and summarize options"
 
-> **Adaptive plan with Reasoner** — The initial plan (revision 0) is immutable and signed. Reasoner steps are explicit decision points that may spawn new steps at runtime, creating new plan revisions. All external API data passes through Tier 1 sanitization before reaching Tier 2 Reasoners.
+> **Adaptive plan with Reasoner** — The initial plan (revision 0) is immutable, identified by plan_hash. Reasoner steps are explicit decision points that may spawn new steps at runtime, creating new plan revisions. All external API data passes through Tier 1 sanitization before reaching Tier 2 Reasoners.
 
 This example demonstrates **adaptive execution** — the plan includes LLM reasoning steps that can spawn new steps at runtime, with the Data Trust Boundary enforced via explicit Tier 1 sanitization.
 
@@ -387,7 +385,7 @@ t=900ms:  Step 6 (Notifier, api) sends summary via MCP tool invocation (Slack)
 - Step 5 is a **Tier 2 Reasoner** (summarizes, cannot spawn)
 - **Trust boundary enforced**: API output never reaches Tier 2 directly — always through Tier 1 first
 - Spawned step results also go through Tier 1 sanitization before Tier 2 consumes them
-- The **original plan signature** remains valid; the spawned step has a **PolicyAttestation** for audit
+- The **original plan_hash** remains valid; the spawned step has a **PolicyAttestation** for audit
 
 ### What If the LLM Tries Something Forbidden?
 
@@ -454,7 +452,7 @@ t=800ms:  Step 6 (Notifier) sends summary via Slack
 
 ## 3) Component Details
 
-Below are the 16 core components organized by layer. Each will have its own `SPEC.md` and `LLD.md` during implementation.
+Below are the 15 core components organized by layer. Each will have its own `SPEC.md` and `LLD.md` during implementation.
 
 ### Memory Layer (4 components)
 
@@ -483,7 +481,7 @@ Below are the 16 core components organized by layer. Each will have its own `SPE
 **Technology**: PostgreSQL with pgvector extension (HNSW index, 384-dim), tsvector (BM25 keyword search), ONNX Runtime (all-MiniLM-L6-v2, ~10ms local inference)
 
 #### PlanLibrary
-**What it does**: Stores all past plans with signatures and outcomes
+**What it does**: Stores all past plans and outcomes
 **Example data**:
 - Plan: "schedule_meeting" → Success (event_id: gcal_123)
 - Plan: "book_flight" → Failed (card declined)
@@ -493,7 +491,7 @@ Below are the 16 core components organized by layer. Each will have its own `SPE
 
 ---
 
-### Domain Layer (6 components)
+### Domain Layer (5 components)
 
 #### Intake
 **What it does**: Understands what you want across multiple messages
@@ -539,15 +537,6 @@ Intake: [ready! triggers planning]
 - **LLMAdapter protocol**: Anthropic Claude API for MVP; protocol abstraction allows future provider swaps (Ollama, vLLM)
 
 **Planner LLM vs Runtime LLM**: The Planner generates the initial plan (temperature=0, deterministic). Runtime LLM reasoning steps (temperature=0.1-0.7) execute during plan execution and adapt within PolicyEngine bounds. Both have ZERO credential access.
-
-#### Signer
-**What it does**: Cryptographically signs plans to prevent tampering
-**Process**:
-1. Canonicalize plan JSON (sort keys, remove whitespace)
-2. Hash with SHA-256
-3. Sign with Ed25519 private key
-
-**Verification**: PreviewOrchestrator and ExecuteOrchestrator verify signature before execution
 
 #### PluginRegistry
 **What it does**: Source of truth for available tools and their credential requirements
@@ -595,7 +584,7 @@ Intake: [ready! triggers planning]
 
 **Key responsibilities**:
 1. **Rule evaluation**: Checks proposed actions against policy rules (step-level → role-level → system-level)
-2. **Attestation**: Issues signed PolicyAttestation records for approved runtime modifications
+2. **Attestation**: Issues PolicyAttestation records for approved runtime modifications
 3. **HITL enforcement**: Automatically injects `gate_id` for spawned Booker steps (non-overridable)
 4. **Deny-by-default**: Rejects any action without a matching policy rule
 
@@ -628,7 +617,7 @@ Intake: [ready! triggers planning]
 #### PreviewOrchestrator
 **What it does**: Shows you what will happen (no side effects!)
 **Process**:
-1. Verifies plan signature
+1. Verifies plan hash (data integrity)
 2. Dispatches read-only MCP tool invocations for previewable steps
 3. Returns Preview wrapper with results
 
@@ -662,7 +651,7 @@ Intake: [ready! triggers planning]
 #### ExecuteOrchestrator
 **What it does**: Does the actual work (writes to external systems). Absorbs WorkflowBuilder's DAG traversal and parallel grouping responsibilities.
 **Process**:
-1. Verifies signature + approval token
+1. Verifies plan hash + approval token
 2. **Retrieves cached preview state** (skip repeated steps!)
 3. Resolves plan DAG into execution levels (topological sort)
 4. Dispatches steps by type:
@@ -950,11 +939,11 @@ Execution:
 ### Deterministic Planning with Adaptive Execution
 
 **Key distinction**:
-- **"Deterministic"** refers to the **initial plan (revision 0)** — same inputs always produce the same DAG topology (same steps, same dependencies, same roles). Revision 0 is immutable and cryptographically signed.
+- **"Deterministic"** refers to the **initial plan (revision 0)** — same inputs always produce the same DAG topology (same steps, same dependencies, same roles). Revision 0 is immutable, identified by a SHA-256 plan_hash.
 - **"Adaptive"** refers to what happens at runtime — Reasoner steps observe step outputs, make judgments, and may spawn new steps within PolicyEngine bounds. Each spawn event creates a **new plan revision** (revision 1, 2, ...) with a PolicyAttestation. The original graph is never mutated; new steps extend it.
-- These are not contradictory: the initial plan is deterministic and signed, runtime extensions are versioned and audited.
+- These are not contradictory: the initial plan is deterministic and integrity-checked, runtime extensions are versioned and audited.
 
-**Guarantee**: Same inputs always produce the same **initial plan graph** (revision 0). The plan signature covers revision 0; runtime spawned steps increment `plan_revision` and get PolicyAttestations (§2.4.1).
+**Guarantee**: Same inputs always produce the same **initial plan graph** (revision 0). The plan_hash covers revision 0; runtime spawned steps increment `plan_revision` and get PolicyAttestations (§2.4.1).
 
 **Inputs** (frozen tuple):
 - Intent (finalized user request)
@@ -966,18 +955,17 @@ Execution:
 **Process**:
 1. Planner calls Anthropic Claude API with temperature=0 (via LLMAdapter protocol)
 2. Canonicalize plan JSON (sort keys, deterministic serialization)
-3. Sign with Ed25519 (cryptographic signature)
-4. Hash: SHA-256 of canonical plan bytes
+3. Hash: SHA-256 of canonical plan bytes (plan_hash for data integrity)
 
 **At runtime** (for plans with `type: "llm_reasoning"` steps):
 5. LLM reasoning steps execute with per-step ReasoningConfig (temperature 0.1–0.7)
 6. Spawned steps are evaluated by PolicyEngine before execution
-7. Each spawn event creates a PolicyAttestation (supplements, doesn't replace, the original signature)
+7. Each spawn event creates a PolicyAttestation as an audit record
 8. `plan_revision` increments on each spawn event
 
 **Benefits**:
 - Same request tomorrow = same initial plan graph
-- Tamper detection (signature verification + policy attestation chain)
+- Tamper detection (plan_hash verification + policy attestation chain)
 - Auditability (reproducible initial plans + audited runtime adaptations)
 - Adaptive execution for open-ended tasks (ranking, summarizing, deciding what data to fetch)
 - Clear separation: plan graph is reviewable upfront, Reasoner behavior is policy-bounded at runtime
@@ -990,7 +978,7 @@ Execution:
 2. **Role enforcement**: Spawned Booker steps always require HITL (non-overridable)
 3. **Scope inheritance**: Spawned steps can only use tools in the plan's `plugins` array
 4. **No recursive spawning**: Spawned steps cannot spawn further steps
-5. **Attestation chain**: Every spawn event produces a PolicyAttestation linking to the policy rule, decision, and new steps — forming a complete audit trail alongside the original signature
+5. **Attestation chain**: Every spawn event produces a PolicyAttestation linking to the policy rule, decision, and new steps — forming a complete audit trail alongside the original plan_hash
 
 **Credential isolation**: Runtime LLM reasoning steps (Python service) have the same ZERO credential access as the Planner LLM. Credentials are decrypted from the encrypted vault (AES-256-GCM in PostgreSQL) by ExecuteOrchestrator at execution time for API steps only, held in-memory briefly, zeroed after MCP call, and never exposed to any LLM.
 
@@ -1700,9 +1688,9 @@ usecases/<UseCase>/
 └── fixtures/           # Test data
 ```
 
-**16 Active Components**:
+**15 Active Components**:
 1. ProfileStore, History, PlanLibrary, VectorIndex (Memory Layer)
-2. Intake, ContextRAG, Planner, Signer, PluginRegistry, PlanWriter, **PolicyEngine** (Domain Layer)
+2. Intake, ContextRAG, Planner, PluginRegistry, PlanWriter, **PolicyEngine** (Domain Layer)
 3. PreviewOrchestrator, ApprovalGate, ExecuteOrchestrator, ExecutionMonitor (Orchestration Layer)
 4. Audit (Utilities)
 
@@ -1790,22 +1778,6 @@ usecases/<UseCase>/
 - **-** Must implement scheduling (APScheduler) and persistence ourselves
 - **-** Fewer built-in connectors initially (MCP ecosystem is growing)
 
-### Policy Attestation vs Re-Signing
-
-**Decision**: Runtime modifications (spawned steps) receive PolicyEngine attestations rather than re-signing the plan with Signer.
-
-**Rationale**:
-- **Security boundary**: Signer's Ed25519 private key should not be available inside the execution context (ExecuteOrchestrator or reasoning service)
-- **Separation of concerns**: Plan signing (Planner domain) is separate from policy enforcement (PolicyEngine domain)
-- **Audit chain**: `original_signature + policy_attestations[]` provides complete execution provenance
-
-**Trade-offs**:
-- **+** Signer private key stays in the Domain Layer (not in execution context)
-- **+** Attestations are lightweight and fast (<5ms)
-- **+** Clear audit trail linking each spawn to its policy decision
-- **−** Two types of "signatures" (Ed25519 plan signature + policy attestation) may be confusing
-- **−** Verification requires checking both the original signature AND all attestations
-
 ### Encrypted Credential Vault & LLM Isolation
 
 **Decision**: Store credentials in AES-256-GCM encrypted PostgreSQL vault with strict LLM isolation boundary. Two-tier LLM execution for prompt injection defense.
@@ -1877,7 +1849,7 @@ finally:
 **Rationale**:
 - WorkflowBuilder's sole purpose was n8n JSON generation
 - DAG traversal and parallel grouping are simple enough to inline in ExecuteOrchestrator
-- Eliminates an entire component (17 → 16 components)
+- Eliminates an entire component (17 → 15 components, with Signer also removed)
 
 ### MCP Connector Model
 

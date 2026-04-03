@@ -44,13 +44,6 @@ class TestGeneratePlanHappyPath:
         assert r1.plan.meta.canonical_hash == r2.plan.meta.canonical_hash
 
     @pytest.mark.asyncio
-    async def test_generate_plan_signature_present(self, planner_service, sample_intent):
-        result = await planner_service.generate_plan(sample_intent)
-        assert result.signature.algo == "Ed25519"
-        assert result.signature.signer == "planner@system"
-        assert len(result.signature.plan_hash) == 64
-
-    @pytest.mark.asyncio
     async def test_generate_plan_plan_id_is_ulid(self, planner_service, sample_intent):
         result = await planner_service.generate_plan(sample_intent)
         assert len(result.plan.plan_id) == 26
@@ -74,14 +67,12 @@ class TestGeneratePlanHappyPath:
         self,
         mock_degraded_context_rag_service,
         mock_registry_service,
-        mock_signer_service,
         mock_plan_service,
         mock_llm_adapter,
     ):
         svc = PlannerService(
             context_rag_service=mock_degraded_context_rag_service,
             registry_service=mock_registry_service,
-            signer_service=mock_signer_service,
             plan_service=mock_plan_service,
             llm_adapter=mock_llm_adapter,
             prompt_builder=PromptBuilder(),
@@ -116,13 +107,11 @@ class TestFallbackHierarchy:
         llm_adapter,
         context_rag,
         registry,
-        signer,
         plan_service,
     ):
         return PlannerService(
             context_rag_service=context_rag,
             registry_service=registry,
-            signer_service=signer,
             plan_service=plan_service,
             llm_adapter=llm_adapter,
             prompt_builder=PromptBuilder(),
@@ -139,7 +128,6 @@ class TestFallbackHierarchy:
         self,
         mock_context_rag_service,
         mock_registry_service,
-        mock_signer_service,
         mock_plan_service,
     ):
         """Primary fails, fallback succeeds -> level 2."""
@@ -159,7 +147,6 @@ class TestFallbackHierarchy:
             adapter,
             mock_context_rag_service,
             mock_registry_service,
-            mock_signer_service,
             mock_plan_service,
         )
         result = await svc.generate_plan(SAMPLE_INTENT)
@@ -171,7 +158,6 @@ class TestFallbackHierarchy:
         mock_failing_llm_adapter,
         mock_context_rag_service,
         mock_registry_service,
-        mock_signer_service,
         mock_plan_service,
     ):
         """Both LLMs fail -> PlanLibrary template -> level 3."""
@@ -179,7 +165,6 @@ class TestFallbackHierarchy:
             mock_failing_llm_adapter,
             mock_context_rag_service,
             mock_registry_service,
-            mock_signer_service,
             mock_plan_service,
         )
         result = await svc.generate_plan(SAMPLE_INTENT)
@@ -191,7 +176,6 @@ class TestFallbackHierarchy:
         mock_failing_llm_adapter,
         mock_context_rag_service,
         mock_registry_service,
-        mock_signer_service,
         mock_empty_plan_service,
     ):
         """Both LLMs fail + no templates -> level 4 minimal plan."""
@@ -199,7 +183,6 @@ class TestFallbackHierarchy:
             mock_failing_llm_adapter,
             mock_context_rag_service,
             mock_registry_service,
-            mock_signer_service,
             mock_empty_plan_service,
         )
         result = await svc.generate_plan(SAMPLE_INTENT)
@@ -211,7 +194,6 @@ class TestFallbackHierarchy:
         self,
         mock_context_rag_service,
         mock_registry_service,
-        mock_signer_service,
         mock_plan_service,
         mock_llm_adapter,
     ):
@@ -220,7 +202,6 @@ class TestFallbackHierarchy:
             mock_llm_adapter,
             mock_context_rag_service,
             mock_registry_service,
-            mock_signer_service,
             mock_plan_service,
         )
         result = await svc.generate_plan(SAMPLE_INTENT)
@@ -232,7 +213,6 @@ class TestFallbackHierarchy:
         mock_failing_llm_adapter,
         mock_context_rag_service,
         mock_registry_service,
-        mock_signer_service,
         mock_empty_plan_service,
     ):
         """Minimal plan has 1 Fetcher step with system.echo and dry_run=True."""
@@ -240,7 +220,6 @@ class TestFallbackHierarchy:
             mock_failing_llm_adapter,
             mock_context_rag_service,
             mock_registry_service,
-            mock_signer_service,
             mock_empty_plan_service,
         )
         result = await svc.generate_plan(SAMPLE_INTENT)
@@ -256,7 +235,6 @@ class TestFallbackHierarchy:
         self,
         mock_context_rag_service,
         mock_registry_service,
-        mock_signer_service,
         mock_plan_service,
     ):
         """LLM returns invalid plan -> falls to next level."""
@@ -268,7 +246,6 @@ class TestFallbackHierarchy:
             adapter,
             mock_context_rag_service,
             mock_registry_service,
-            mock_signer_service,
             mock_plan_service,
         )
         result = await svc.generate_plan(SAMPLE_INTENT)
@@ -303,14 +280,12 @@ class TestEdgeCases:
         self,
         mock_degraded_context_rag_service,
         mock_registry_service,
-        mock_signer_service,
         mock_plan_service,
         mock_llm_adapter,
     ):
         svc = PlannerService(
             context_rag_service=mock_degraded_context_rag_service,
             registry_service=mock_registry_service,
-            signer_service=mock_signer_service,
             plan_service=mock_plan_service,
             llm_adapter=mock_llm_adapter,
             prompt_builder=PromptBuilder(),
@@ -329,7 +304,6 @@ class TestEdgeCases:
         self,
         mock_context_rag_service,
         mock_empty_registry_service,
-        mock_signer_service,
         mock_empty_plan_service,
         mock_failing_llm_adapter,
     ):
@@ -337,7 +311,6 @@ class TestEdgeCases:
         svc = PlannerService(
             context_rag_service=mock_context_rag_service,
             registry_service=mock_empty_registry_service,
-            signer_service=mock_signer_service,
             plan_service=mock_empty_plan_service,
             llm_adapter=mock_failing_llm_adapter,
             prompt_builder=PromptBuilder(),
@@ -360,32 +333,3 @@ class TestEdgeCases:
         assert len(results) == 5
         for r in results:
             assert isinstance(r, PlannerResult)
-
-    @pytest.mark.asyncio
-    async def test_signer_failure_propagates(
-        self,
-        mock_context_rag_service,
-        mock_registry_service,
-        mock_plan_service,
-        mock_llm_adapter,
-    ):
-        """Signer failure is fatal and propagates."""
-        signer = AsyncMock()
-        signer.sign_plan = AsyncMock(side_effect=RuntimeError("key not configured"))
-
-        svc = PlannerService(
-            context_rag_service=mock_context_rag_service,
-            registry_service=mock_registry_service,
-            signer_service=signer,
-            plan_service=mock_plan_service,
-            llm_adapter=mock_llm_adapter,
-            prompt_builder=PromptBuilder(),
-            validator=PlanValidator(registry_service=mock_registry_service),
-            primary_breaker=CircuitBreaker(model_name="p"),
-            fallback_breaker=CircuitBreaker(model_name="f"),
-            primary_model="test-primary",
-            fallback_model="test-fallback",
-            max_output_tokens=4096,
-        )
-        with pytest.raises(RuntimeError, match="key not configured"):
-            await svc.generate_plan(SAMPLE_INTENT)

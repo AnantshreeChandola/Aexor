@@ -1,7 +1,7 @@
 """
 Planner contract tests — GLOBAL_SPEC envelope conformance.
 
-Covers: Plan §2.3, Signature §2.4, HITL gate_id, canonical_hash.
+Covers: Plan §2.3, HITL gate_id, canonical_hash.
 """
 
 from __future__ import annotations
@@ -11,7 +11,6 @@ from datetime import UTC
 import pytest
 
 from shared.schemas.plan import Plan
-from shared.schemas.signature import Signature
 
 from .conftest import SAMPLE_INTENT
 
@@ -32,17 +31,6 @@ class TestGlobalSpecConformance:
         plan_dict = result.plan.model_dump(mode="json")
         validated = Plan.model_validate(plan_dict)
         assert validated.plan_id == result.plan.plan_id
-
-    @pytest.mark.asyncio
-    async def test_signature_conforms_to_global_spec_section_2_4(
-        self,
-        planner_service,
-        sample_intent,
-    ):
-        result = await planner_service.generate_plan(sample_intent)
-        sig_dict = result.signature.model_dump(mode="json")
-        validated = Signature.model_validate(sig_dict)
-        assert validated.algo == "Ed25519"
 
     @pytest.mark.asyncio
     async def test_plan_intent_embedded(self, planner_service, sample_intent):
@@ -91,7 +79,6 @@ class TestHITLGateInsertion:
         self,
         mock_context_rag_service,
         mock_registry_service,
-        mock_signer_service,
         mock_plan_service,
     ):
         """Plan with only Fetcher/Analyzer steps doesn't require gate_id."""
@@ -151,7 +138,6 @@ class TestHITLGateInsertion:
         svc = PlannerService(
             context_rag_service=mock_context_rag_service,
             registry_service=mock_registry_service,
-            signer_service=mock_signer_service,
             plan_service=mock_plan_service,
             llm_adapter=adapter,
             prompt_builder=PromptBuilder(),

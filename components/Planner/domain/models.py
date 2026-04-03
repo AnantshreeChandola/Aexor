@@ -12,7 +12,6 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from shared.schemas.plan import Plan
-from shared.schemas.signature import Signature
 
 
 class EntityRequirement(BaseModel):
@@ -48,7 +47,6 @@ class PlannerResult(BaseModel):
     """Result of plan generation."""
 
     plan: Plan
-    signature: Signature
     fallback_level: int = Field(
         ...,
         ge=1,

@@ -44,8 +44,7 @@ Each component's database dependencies, component dependencies, and external ser
     │                  │  │                  │
     │ • DB: None       │  │ • DB: Redis      │
     │ • Deps:          │  │   (idempotency)  │
-    │   - Signer       │  │ • Deps:          │
-    │   - PluginReg    │  │   - Signer       │
+    │   - PluginReg    │  │ • Deps:          │
     │ • Ext: MCP       │  │   - ApprovalGate │
     └──────────────────┘  │   - PluginReg    │
                           │   - PolicyEngine │
@@ -68,22 +67,22 @@ Each component's database dependencies, component dependencies, and external ser
 
 ┌─────────────────────────────────────────────────────────────────┐
 │                   DOMAIN / SERVICE LAYER                        │
-│  Business logic, planning, context, signatures                  │
+│  Business logic, planning, context, policies                    │
 └─────────────────────────────────────────────────────────────────┘
                               ▼
-    ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
-    │ ContextRAG       │  │ Planner          │  │ Signer           │
-    │ (context         │  │                  │  │                  │
-    │ • DB: None       │  │ • Deps:          │  │ • Deps: None     │
-    │   (queries only) │  │   - ContextRAG   │  │ • Ext:           │
-    │ • Deps:          │  │   - PluginReg    │  │   cryptography   │
-    │   - ProfileStore │  │   - Signer       │  │   (Ed25519)      │
-    │   - History      │  │   - PlanLibrary  │  └──────────────────┘
-    │   - PlanLibrary  │  │     (fallback)   │
-    │   - VectorIndex  │  │   - PolicyEngine │  ┌──────────────────┐
-    │     (optional)   │  │ • Ext:           │  │ PolicyEngine     │
-    │ • Ext: None      │  │   Anthropic API  │  │                  │
-    │                  │  └──────────────────┘  │ • DB: PostgreSQL │
+    ┌──────────────────┐  ┌──────────────────┐
+    │ ContextRAG       │  │ Planner          │
+    │ (context         │  │                  │
+    │ • DB: None       │  │ • Deps:          │
+    │   (queries only) │  │   - ContextRAG   │
+    │ • Deps:          │  │   - PluginReg    │
+    │   - ProfileStore │  │   - PlanLibrary  │
+    │   - History      │  │     (fallback)   │
+    │   - PlanLibrary  │  │   - PolicyEngine │
+    │   - VectorIndex  │  │ • Ext:           │  ┌──────────────────┐
+    │     (optional)   │  │   Anthropic API  │  │ PolicyEngine     │
+    │ • Ext: None      │  └──────────────────┘  │                  │
+    │                  │                        │ • DB: PostgreSQL │
     └──────────────────┘                        │   (policies,     │
                           ┌──────────────────┐  │    policy_       │
                           │ PluginRegistry   │  │    attestations) │
@@ -132,7 +131,6 @@ Each component's database dependencies, component dependencies, and external ser
     │ • DB:            │
     │   - PostgreSQL:  │
     │     plans,       │
-    │     signatures,  │
     │     outcomes     │
     │ • Deps: None     │
     │ • Ext: None      │
@@ -183,8 +181,7 @@ class MemoryLayer:
 | `preferences` | `public` | ProfileStore | Key-value preferences |
 | `consent_flags` | `public` | ProfileStore | Tier access permissions |
 | `history` | `public` | History | Normalized outcome facts |
-| `plans` | `public` | PlanLibrary | Signed plan records |
-| `plan_signatures` | `public` | PlanLibrary | Ed25519 signatures |
+| `plans` | `public` | PlanLibrary | Plan records |
 | `plan_outcomes` | `public` | PlanLibrary | Execution results |
 | `plan_embeddings` | `public` | VectorIndex | Hybrid search: 384-dim embeddings + tsvector for plans |
 | `tools` | `public` | PluginRegistry | Registered external integrations |
@@ -194,7 +191,7 @@ class MemoryLayer:
 | `audit_events` | `public` | Audit | System audit trail |
 | `sessions` | `public` | Intake | (Optional - if not Redis) |
 | `policies` | `public` | PolicyEngine | Policy rules governing LLM reasoning steps |
-| `policy_attestations` | `public` | PolicyEngine | Signed attestation records for runtime step spawning |
+| `policy_attestations` | `public` | PolicyEngine | Attestation records for runtime step spawning |
 | `credential_vault` | `public` | PluginRegistry | AES-256-GCM encrypted credentials (vault IDs, encrypted values, key versions) |
 | `plan_revisions` | `public` | PlanLibrary | Audit trail of each spawn event (timestamp, spawning step, new steps, policy decision) |
 
@@ -265,7 +262,7 @@ VectorIndex
 ```
 PlanLibrary
 ├── Database Dependencies
-│   ├── PostgreSQL: plans, plan_signatures, plan_outcomes
+│   ├── PostgreSQL: plans, plan_outcomes
 │   └── Redis: plan_cache:{plan_id}
 ├── Component Dependencies
 │   └── (none - foundation component)
@@ -310,22 +307,10 @@ Planner
 ├── Component Dependencies
 │   ├── → ContextRAG (Evidence input)
 │   ├── → PluginRegistry (tool catalog)
-│   ├── → Signer (plan signing after generation)
 │   ├── → PlanLibrary (fallback template retrieval)
 │   └── → PolicyEngine (policy_version snapshot, policy_ref assignment)
 └── External Dependencies
     └── Anthropic Claude API (plan generation, temperature=0)
-```
-
-#### Signer
-```
-Signer
-├── Database Dependencies
-│   └── (none - key storage in env/secrets)
-├── Component Dependencies
-│   └── (none - security primitive)
-└── External Dependencies
-    └── cryptography library (Ed25519)
 ```
 
 #### PluginRegistry
@@ -387,7 +372,6 @@ PreviewOrchestrator
 ├── Database Dependencies
 │   └── (none - executes read-only steps)
 ├── Component Dependencies
-│   ├── → Signer (signature verification)
 │   └── → PluginRegistry (MCP server resolution for preview steps)
 └── External Dependencies
     └── MCP (read-only tool invocations)
@@ -412,7 +396,6 @@ ExecuteOrchestrator (absorbs WorkflowBuilder responsibilities in v2.0)
 │   ├── Redis: lock:{resource}.{entity}.{op}
 │   └── Redis: reasoning_context:{plan_id}:{step}
 ├── Component Dependencies
-│   ├── → Signer (signature verification)
 │   ├── → ApprovalGate (token validation + multi-gate HITL)
 │   ├── → PluginRegistry (MCP server resolution, credential vault IDs)
 │   ├── → PolicyEngine (runtime policy evaluation for spawned steps)
@@ -475,20 +458,20 @@ Purpose: Background polling service (runs every 30s) for infrastructure-level fa
 │  └─────┬──────┘      │                                          │
 │        │ Evidence[]  │                                          │
 │        ▼             │                                          │
-│  ┌────────┐         │                              ┌──────────┐│
-│  │Planner │         │                              │  Signer  ││
-│  └───┬────┘         │                              └────┬─────┘│
-│      │ Plan         │                                   │      │
-│      ▼              │                                   │      │
-│     ┌───────────────┴────────┐                          │      │
-│     │Queries Memory Layer    │                     Signature   │
-│     │- ProfileStore (prefs)  │                          │      │
-│     │- History (facts)       │                          │      │
-│     │- PlanLibrary (plans)   │                          │      │
-│     └───────────┬────────────┘                          │      │
-└─────────────────┼───────────────────────────────────────┼──────┘
-                  │                                       │
-                  ▼                                       ▼
+│  ┌────────┐         │                                         │
+│  │Planner │         │                                         │
+│  └───┬────┘         │                                         │
+│      │ Plan         │                                         │
+│      ▼              │                                         │
+│     ┌───────────────┴────────┐                                │
+│     │Queries Memory Layer    │                                │
+│     │- ProfileStore (prefs)  │                                │
+│     │- History (facts)       │                                │
+│     │- PlanLibrary (plans)   │                                │
+│     └───────────┬────────────┘                                │
+└─────────────────┼─────────────────────────────────────────────┘
+                  │
+                  ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │ MEMORY LAYER                                                    │
 │  ┌──────────────┐  ┌─────────┐  ┌────────────┐  ┌───────────┐ │
@@ -504,7 +487,7 @@ Purpose: Background polling service (runs every 30s) for infrastructure-level fa
 │  └────────────┘  └────────────┘                                │
 └─────────────────────────────────────────────────────────────────┘
 
-                  Signed Plan
+                  Plan (with plan_hash)
                       │
                       ▼
 ┌─────────────────────────────────────────────────────────────────┐
@@ -629,14 +612,13 @@ When a plan contains mixed step types, the Python ExecuteOrchestrator dispatches
 
 ---
 
-### Group 2: Security & Configuration
+### Group 2: Configuration & Observability
 **Can build in parallel:**
-- Signer (cryptography primitive)
 - PluginRegistry (tool catalog — PostgreSQL + Redis cache)
 - Audit (logging infrastructure)
 
 **Timeline:** Sprint 1 (concurrent with Memory Module)
-**Agents:** 3 parallel agents
+**Agents:** 2 parallel agents
 
 ---
 
@@ -662,7 +644,7 @@ When a plan contains mixed step types, the Python ExecuteOrchestrator dispatches
 
 ### Group 4: Orchestration Foundation
 **Sequential dependencies:**
-1. PreviewOrchestrator (depends on Signer + PluginRegistry)
+1. PreviewOrchestrator (depends on PluginRegistry)
 2. ApprovalGate (depends on Preview output)
 
 **Timeline:** Sprint 4 (2 weeks)
@@ -1062,7 +1044,6 @@ CREATE INDEX idx_credential_vault_user_id ON credential_vault (user_id);
 ```sql
 -- PlanLibrary
 CREATE TABLE plans (...);
-CREATE TABLE plan_signatures (...);
 CREATE TABLE plan_outcomes (...);
 ```
 
@@ -1131,7 +1112,7 @@ CREATE TABLE audit_events (...);
    - Enables independent scaling/optimization
 
 2. **Stateless Service Layer**
-   - Planner, ContextRAG, Signer have no persistent state
+   - Planner, ContextRAG have no persistent state
    - Simplifies testing and horizontal scaling
 
 3. **Redis for Ephemeral State**
@@ -1157,7 +1138,7 @@ CREATE TABLE audit_events (...);
    - All steps execute via Python ExecuteOrchestrator with MCP tool invocations (no n8n)
    - Two-tier LLM execution: sandboxed Tier 1 (untrusted data) + capable Tier 2 (agent reasoning)
    - AES-256-GCM encrypted credential vault in PostgreSQL (LLM never sees values)
-   - WorkflowBuilder absorbed into ExecuteOrchestrator (17→16 components)
+   - WorkflowBuilder absorbed into ExecuteOrchestrator; Signer removed (17→15 components)
    - Spawned API steps dispatched via MCP tool invocations by ExecuteOrchestrator
 
 8. **Deterministic Graph, Adaptive Execution** (HLD v6.1)
@@ -1172,7 +1153,7 @@ CREATE TABLE audit_events (...);
 
 1. **Implement Memory Module** (ProfileStore, History, PlanLibrary, VectorIndex)
 2. **Set up database schemas** and migrations
-3. **Build Security & Config** (Signer, PluginRegistry, Audit)
+3. **Build Config & Observability** (PluginRegistry, Audit)
 4. **Implement Planning Layer** (Intake → ContextRAG → Planner)
 5. **Build Orchestration** (Preview → Approval → Execute)
 6. **Integrate end-to-end** with use case tests

@@ -23,22 +23,20 @@ from ..domain.models import ExecuteRequest
 
 
 class TestExecuteRequestSchema:
-    def test_required_fields(self, sample_plan, sample_signature):
-        """ExecuteRequest requires plan, signature, approval_token."""
+    def test_required_fields(self, sample_plan):
+        """ExecuteRequest requires plan, approval_token."""
         req = ExecuteRequest(
             plan=sample_plan,
-            signature=sample_signature,
             approval_token="tok",
             user_id="u1",
             trace_id="t1",
         )
         assert req.plan.plan_id == sample_plan.plan_id
 
-    def test_optional_fields_default(self, sample_plan, sample_signature):
+    def test_optional_fields_default(self, sample_plan):
         """Optional fields default correctly."""
         req = ExecuteRequest(
             plan=sample_plan,
-            signature=sample_signature,
             approval_token="tok",
             user_id="u1",
             trace_id="t1",
@@ -46,12 +44,11 @@ class TestExecuteRequestSchema:
         assert req.preview_state is None
         assert req.integration_credentials == {}
 
-    def test_invalid_plan_rejected(self, sample_signature):
+    def test_invalid_plan_rejected(self):
         """ExecuteRequest with invalid plan raises ValidationError."""
         with pytest.raises(ValidationError):
             ExecuteRequest(
                 plan={"plan_id": "short"},  # Invalid -- too short
-                signature=sample_signature,
                 approval_token="tok",
                 user_id="u1",
                 trace_id="t1",
@@ -99,7 +96,6 @@ class TestPlanOutcomeSchema:
         )
         request = ExecuteRequest(
             plan=sample_hybrid_plan,
-            signature=sample_execute_request.signature,
             approval_token=token,
             user_id="user-001",
             trace_id="trace-002",
@@ -110,10 +106,11 @@ class TestPlanOutcomeSchema:
 
     async def test_outcome_error_types_match_spec(self, execute_service, sample_execute_request):
         """PlanOutcome error_type values match SPEC edge cases."""
-        execute_service._signer.verify_signature = AsyncMock(side_effect=Exception("bad"))
+        # Force an error by expiring the plan
+        sample_execute_request.plan.meta.created_at = "2020-01-01T00:00:00+00:00"
+        sample_execute_request.plan.constraints.ttl_s = 1
         outcome = await execute_service.execute_plan(sample_execute_request)
         assert outcome.error_type in {
-            "signature_invalid",
             "token_expired",
             "plan_expired",
             "cycle_detected",

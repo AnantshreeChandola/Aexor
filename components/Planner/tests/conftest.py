@@ -296,17 +296,6 @@ def _make_validation_result(valid=True, issues=None):
     return result
 
 
-def _make_plan_signature():
-    """Create a mock PlanSignature-like object."""
-    sig = MagicMock()
-    sig.algo = "Ed25519"
-    sig.signer = "planner@system"
-    sig.signature = "b" * 88  # Base64-encoded Ed25519 sig
-    sig.pubkey_id = "k1"
-    sig.plan_hash = "c" * 64
-    return sig
-
-
 @pytest.fixture()
 def sample_intent() -> Intent:
     return SAMPLE_INTENT
@@ -399,14 +388,6 @@ def mock_empty_registry_service():
 
 
 @pytest.fixture()
-def mock_signer_service():
-    """Signer that returns a valid PlanSignature."""
-    svc = AsyncMock()
-    svc.sign_plan = AsyncMock(return_value=_make_plan_signature())
-    return svc
-
-
-@pytest.fixture()
 def mock_plan_service():
     """PlanLibrary that returns template evidence items."""
     svc = AsyncMock()
@@ -463,14 +444,12 @@ def planner_service(
     mock_llm_adapter,
     mock_context_rag_service,
     mock_registry_service,
-    mock_signer_service,
     mock_plan_service,
 ):
     """Fully wired PlannerService with all mocks."""
     return PlannerService(
         context_rag_service=mock_context_rag_service,
         registry_service=mock_registry_service,
-        signer_service=mock_signer_service,
         plan_service=mock_plan_service,
         llm_adapter=mock_llm_adapter,
         prompt_builder=PromptBuilder(),

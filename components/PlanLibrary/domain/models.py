@@ -32,14 +32,6 @@ class PlanLibraryError(Exception):
     pass
 
 
-class InvalidSignatureError(PlanLibraryError):
-    """Raised when plan signature verification fails."""
-
-    def __init__(self, plan_id: str = "", reason: str = "Signature verification failed"):
-        self.plan_id = plan_id
-        self.reason = reason
-        super().__init__(f"Invalid signature for plan {plan_id}: {reason}")
-
 
 class DuplicatePlanError(PlanLibraryError):
     """Raised when attempting to store duplicate plan ID."""
@@ -162,7 +154,7 @@ class StorePlanRequest(BaseModel):
     """Request model for storing an executed plan."""
 
     plan: dict[str, Any] = Field(..., description="Plan JSON with plan_id, graph, meta")
-    signature: dict[str, Any] = Field(..., description="Ed25519 signature data")
+    signature: dict[str, Any] = Field(default_factory=dict, description="Legacy signature data (unused)")
     outcome: dict[str, Any] = Field(..., description="Execution outcome data")
     metrics: dict[str, Any] = Field(..., description="Performance metrics data")
 

@@ -31,13 +31,11 @@ Tasks are organized by implementation phase, following the LLD architecture (dom
 
 - [ ] [T002] Verify internal component dependencies are accessible
   - Confirm imports work for:
-    - `components.Signer.service.signer_service.SignerService` -- `verify_signature(plan_data: dict, signature_data: dict) -> bool`
     - `components.PolicyEngine.service.policy_service.PolicyService` -- `evaluate_spawn(request: SpawnRequest) -> PolicyDecision`
     - `components.PolicyEngine.domain.models.SpawnRequest` -- fields: `plan_id`, `plan_revision`, `spawning_step`, `proposed_steps`, `current_step_count`, `plan_plugins`, `policy_ref`
     - `components.PluginRegistry.service.registry_service.RegistryService` -- `get_tool(tool_id)`, `get_operation(tool_id, op_id)`
-    - `components.PlanWriter.service.plan_writer_service.PlanWriterService` -- `persist_outcome(user_id, plan, signature, outcome, metrics)`
+    - `components.PlanWriter.service.plan_writer_service.PlanWriterService` -- `persist_outcome(user_id, plan, outcome, metrics)`
     - `shared.schemas.plan.Plan`, `shared.schemas.plan.PlanStep`
-    - `shared.schemas.signature.Signature`
     - `shared.schemas.outcome.PlanOutcome`
     - `shared.schemas.policy.PolicyDecision`, `shared.schemas.policy.PolicyAttestation`, `shared.schemas.policy.ReasoningConfig`
     - `shared.schemas.metrics.PlanMetrics`
@@ -56,7 +54,6 @@ Tasks are organized by implementation phase, following the LLD architecture (dom
   - File: `/Users/anantshreechandola/Desktop/Personal-agent/components/ExecuteOrchestrator/domain/models.py`
   - Implement `ExecuteRequest(BaseModel)`:
     - `plan: Plan` (from `shared.schemas.plan`)
-    - `signature: Signature` (from `shared.schemas.signature`)
     - `approval_token: str` (JWT from ApprovalGate)
     - `user_id: str` (UUID)
     - `trace_id: str` (distributed tracing correlation)
@@ -91,7 +88,6 @@ Tasks are organized by implementation phase, following the LLD architecture (dom
   - File: `/Users/anantshreechandola/Desktop/Personal-agent/components/ExecuteOrchestrator/domain/models.py` (same file as T100)
   - Implement error hierarchy per LLD Section 5.2:
     - `ExecuteError(Exception)` -- base
-    - `SignatureVerificationError(ExecuteError)` -- `reason: str`
     - `ApprovalTokenError(ExecuteError)` -- `reason: str`
     - `PlanExpiredError(ExecuteError)` -- `plan_id: str`, `ttl_s: int`
     - `StepExecutionError(ExecuteError)` -- `step: int`, `reason: str`, `retries: int`
@@ -344,7 +340,6 @@ Tasks are organized by implementation phase, following the LLD architecture (dom
 - [ ] [T300] Implement `ExecuteService` class with `__init__` and factory function
   - File: `/Users/anantshreechandola/Desktop/Personal-agent/components/ExecuteOrchestrator/service/execute_service.py`
   - Class `ExecuteService` with constructor taking all adapter dependencies:
-    - `signer_service: Any` (SignerService)
     - `policy_service: Any` (PolicyService)
     - `registry_service: Any` (RegistryService)
     - `plan_writer_service: Any` (PlanWriterService)
@@ -356,15 +351,12 @@ Tasks are organized by implementation phase, following the LLD architecture (dom
     - `dag_resolver: DAGResolver`
     - `template_resolver: TemplateResolver`
     - `retry_policy: RetryPolicy`
-  - Factory function `create_execute_service(signer_service, policy_service, registry_service, plan_writer_service, mcp_client, llm_client, credential_vault, redis_client) -> ExecuteService`
+  - Factory function `create_execute_service(policy_service, registry_service, plan_writer_service, mcp_client, llm_client, credential_vault, redis_client) -> ExecuteService`
     - Creates internal adapters (IdempotencyAdapter, ResourceLockAdapter, DAGResolver, TemplateResolver, RetryPolicy) from redis_client
     - Returns configured ExecuteService
 
 - [ ] [T301] Implement pre-execution verification methods
   - File: `/Users/anantshreechandola/Desktop/Personal-agent/components/ExecuteOrchestrator/service/execute_service.py` (same file)
-  - `async _verify_signature(plan: Plan, signature: Signature) -> None`
-    - Calls `signer_service.verify_signature(plan.model_dump(), signature.model_dump())`
-    - Catches `InvalidSignatureError` from Signer, wraps as `SignatureVerificationError`
   - `_validate_approval_token(token: str, plan: Plan) -> None`
     - Decode JWT, validate expiry (15min TTL), validate plan_hash matches, validate scopes
     - Raises `ApprovalTokenError` on failure
@@ -379,7 +371,7 @@ Tasks are organized by implementation phase, following the LLD architecture (dom
 - [ ] [T302] Implement `execute_plan()` core flow
   - File: `/Users/anantshreechandola/Desktop/Personal-agent/components/ExecuteOrchestrator/service/execute_service.py` (same file)
   - Per LLD Section 7.1:
-    - Phase 1: Pre-execution verification (_verify_signature, _validate_approval_token, _check_plan_ttl)
+    - Phase 1: Pre-execution verification (_validate_approval_token, _check_plan_ttl)
     - Phase 2: DAG resolution via _dag_resolver.resolve()
     - Phase 3: Level-by-level execution with asyncio.gather() for parallel steps
     - Phase 4: Build PlanOutcome via _build_outcome()
@@ -529,16 +521,15 @@ Tasks are organized by implementation phase, following the LLD architecture (dom
   - Test resource lock acquisition/release for Booker step
   - Test credential decryption called for API step with credentials
   - Test credential NOT decrypted for step without credential mapping
-  - Mock all adapters (MCP, Redis, DB, Signer)
+  - Mock all adapters (MCP, Redis, DB)
   - Target: ~7 tests
 
-- [ ] [T401] Write service flow tests (signature/token/TTL verification)
+- [ ] [T401] Write service flow tests (token/TTL verification)
   - File: `/Users/anantshreechandola/Desktop/Personal-agent/components/ExecuteOrchestrator/tests/test_service.py` (append)
-  - Test invalid signature: PlanOutcome with error_type="signature_invalid"
   - Test expired approval token: PlanOutcome with error_type="token_expired"
   - Test expired plan TTL: PlanOutcome with error_type="plan_expired"
-  - Test valid signature + valid token: execution proceeds
-  - Target: ~4 tests
+  - Test valid token: execution proceeds
+  - Target: ~3 tests
 
 - [ ] [T402] Write service flow tests (failure + recovery)
   - File: `/Users/anantshreechandola/Desktop/Personal-agent/components/ExecuteOrchestrator/tests/test_service.py` (append)
@@ -577,7 +568,6 @@ Tasks are organized by implementation phase, following the LLD architecture (dom
     - Output: `PlanOutcome`
     - Dependency: `service = Depends(get_execute_service)`
     - Error handling per LLD Section 9.3:
-      - `SignatureVerificationError` -> 403, `SIGNATURE_INVALID`
       - `ApprovalTokenError` -> 401, `TOKEN_INVALID`
       - `PlanExpiredError` -> 410, `PLAN_EXPIRED`
       - Generic -> `APIErrorHandler.handle_generic_error()`
@@ -588,12 +578,11 @@ Tasks are organized by implementation phase, following the LLD architecture (dom
   - File: `/Users/anantshreechandola/Desktop/Personal-agent/components/ExecuteOrchestrator/tests/test_unit.py` (append)
   - Test POST /api/v1/execute with valid request returns PlanOutcome
   - Test POST with invalid body returns 422 validation error
-  - Test 403 on SignatureVerificationError
   - Test 401 on ApprovalTokenError
   - Test 410 on PlanExpiredError
   - Test 500 on unexpected error
   - Use `httpx.AsyncClient` with TestClient or ASGI transport
-  - Target: ~6 tests
+  - Target: ~5 tests
 
 ---
 
@@ -613,7 +602,6 @@ Tasks are organized by implementation phase, following the LLD architecture (dom
   - Wire up `app.state.execute_service`:
     ```python
     app.state.execute_service = create_execute_service(
-        signer_service=app.state.signer_service,
         policy_service=app.state.policy_service,
         registry_service=app.state.registry_service,
         plan_writer_service=app.state.plan_writer_service,
@@ -647,7 +635,6 @@ Tasks are organized by implementation phase, following the LLD architecture (dom
 - [ ] [T700] Create shared test fixtures and conftest
   - File: `/Users/anantshreechandola/Desktop/Personal-agent/components/ExecuteOrchestrator/tests/conftest.py`
   - Fixtures:
-    - `mock_signer_service`: Mocked SignerService with verify_signature returning True
     - `mock_policy_service`: Mocked PolicyService with evaluate_spawn returning approved PolicyDecision
     - `mock_registry_service`: Mocked RegistryService with get_tool/get_operation returning test data
     - `mock_plan_writer_service`: Mocked PlanWriterService with persist_outcome as no-op
@@ -657,7 +644,6 @@ Tasks are organized by implementation phase, following the LLD architecture (dom
     - `mock_redis`: fakeredis.aioredis.FakeRedis instance
     - `sample_plan`: Valid 4-step pure API Plan (2 Fetchers parallel, 1 Analyzer, 1 Booker)
     - `sample_hybrid_plan`: Valid 6-step hybrid plan with Reasoner step
-    - `sample_signature`: Valid Signature matching sample_plan
     - `sample_execute_request`: Complete ExecuteRequest with all fields
     - `execute_service`: Fully wired ExecuteService with all mocked dependencies
     - `sample_approval_token`: Valid JWT token (signed with test secret)
@@ -808,13 +794,11 @@ Note: LLD Section 12 targets ~95 tests. Actual count exceeds target due to granu
 - `PyJWT>=2.8.0` -- Approval token validation (check compatibility with existing `python-jose[cryptography]`)
 
 **Internal** (from LLD.md Section 15):
-- `Signer.service.signer_service.SignerService` -- `verify_signature(plan_data, signature_data)`
 - `PolicyEngine.service.policy_service.PolicyService` -- `evaluate_spawn(SpawnRequest)`
 - `PolicyEngine.domain.models.SpawnRequest` -- spawn evaluation input
 - `PluginRegistry.service.registry_service.RegistryService` -- `get_tool()`, `get_operation()`
 - `PlanWriter.service.plan_writer_service.PlanWriterService` -- `persist_outcome()`
 - `shared.schemas.plan.Plan`, `PlanStep`, `PlanConstraints`, `PlanMeta`
-- `shared.schemas.signature.Signature`
 - `shared.schemas.outcome.PlanOutcome`
 - `shared.schemas.metrics.PlanMetrics`
 - `shared.schemas.policy.PolicyDecision`, `PolicyAttestation`, `ReasoningConfig`, `PolicyRule`

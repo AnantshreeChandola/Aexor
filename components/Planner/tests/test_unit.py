@@ -59,14 +59,6 @@ class TestPlanHasher:
         d = {"key": "value", "num": 42}
         assert compute_plan_hash(d) == compute_plan_hash(d)
 
-    def test_compute_hash_matches_signer_canonicalizer(self):
-        from components.Signer.adapters.canonicalizer import (
-            compute_plan_hash as signer_hash,
-        )
-
-        d = {"plan_id": "test", "graph": [{"step": 1}]}
-        assert compute_plan_hash(d) == signer_hash(d)
-
 
 # ===========================
 # T501: Circuit Breaker Tests

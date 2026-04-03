@@ -29,7 +29,7 @@ class TestHappyPath:
         assert outcome.success is True
         assert outcome.total_steps == 4
 
-    async def test_preview_only_step_skipped(self, execute_service, sample_plan, sample_signature):
+    async def test_preview_only_step_skipped(self, execute_service, sample_plan):
         """preview_only step is skipped and cached result used."""
         sample_plan.graph[0].execute_mode = "preview_only"
         token = jwt.encode(
@@ -39,7 +39,6 @@ class TestHappyPath:
         )
         request = ExecuteRequest(
             plan=sample_plan,
-            signature=sample_signature,
             approval_token=token,
             user_id="user-001",
             trace_id="trace-001",
@@ -59,7 +58,7 @@ class TestHappyPath:
         assert outcome.success is True
 
     async def test_credential_decryption_called(
-        self, execute_service, sample_plan, sample_signature
+        self, execute_service, sample_plan
     ):
         """Credential decrypted for API step with credentials."""
         token = jwt.encode(
@@ -69,7 +68,6 @@ class TestHappyPath:
         )
         request = ExecuteRequest(
             plan=sample_plan,
-            signature=sample_signature,
             approval_token=token,
             user_id="user-001",
             trace_id="trace-001",
@@ -100,14 +98,7 @@ class TestHappyPath:
 
 
 class TestVerification:
-    async def test_invalid_signature(self, execute_service, sample_execute_request):
-        """Invalid signature produces error_type=signature_invalid."""
-        execute_service._signer.verify_signature = AsyncMock(side_effect=Exception("bad sig"))
-        outcome = await execute_service.execute_plan(sample_execute_request)
-        assert outcome.success is False
-        assert outcome.error_type == "signature_invalid"
-
-    async def test_expired_approval_token(self, execute_service, sample_plan, sample_signature):
+    async def test_expired_approval_token(self, execute_service, sample_plan):
         """Expired token produces error_type=token_expired."""
         expired_token = jwt.encode(
             {"plan_id": sample_plan.plan_id, "exp": time.time() - 100},
@@ -116,7 +107,6 @@ class TestVerification:
         )
         request = ExecuteRequest(
             plan=sample_plan,
-            signature=sample_signature,
             approval_token=expired_token,
             user_id="user-001",
             trace_id="trace-001",
@@ -125,7 +115,7 @@ class TestVerification:
         assert outcome.success is False
         assert outcome.error_type == "token_expired"
 
-    async def test_plan_ttl_expired(self, execute_service, sample_plan, sample_signature):
+    async def test_plan_ttl_expired(self, execute_service, sample_plan):
         """Expired plan TTL produces error_type=plan_expired."""
         sample_plan.meta.created_at = "2020-01-01T00:00:00+00:00"
         sample_plan.constraints.ttl_s = 60
@@ -137,7 +127,6 @@ class TestVerification:
         )
         request = ExecuteRequest(
             plan=sample_plan,
-            signature=sample_signature,
             approval_token=token,
             user_id="user-001",
             trace_id="trace-001",
@@ -146,10 +135,10 @@ class TestVerification:
         assert outcome.success is False
         assert outcome.error_type == "plan_expired"
 
-    async def test_valid_signature_and_token_proceeds(
+    async def test_valid_token_proceeds(
         self, execute_service, sample_execute_request
     ):
-        """Valid signature + token: execution proceeds successfully."""
+        """Valid token: execution proceeds successfully."""
         outcome = await execute_service.execute_plan(sample_execute_request)
         assert outcome.success is True
 

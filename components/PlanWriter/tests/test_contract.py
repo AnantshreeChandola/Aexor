@@ -30,7 +30,6 @@ class TestUS1_PersistSuccessfulExecution:
         self,
         plan_writer_service,
         sample_plan,
-        sample_signature,
         sample_outcome_success,
         sample_metrics,
         sample_user_id,
@@ -42,7 +41,6 @@ class TestUS1_PersistSuccessfulExecution:
         await plan_writer_service.persist_outcome(
             user_id=sample_user_id,
             plan=sample_plan,
-            signature=sample_signature,
             outcome=sample_outcome_success,
             metrics=sample_metrics,
         )
@@ -55,7 +53,6 @@ class TestUS1_PersistSuccessfulExecution:
         self,
         plan_writer_service,
         sample_plan,
-        sample_signature,
         sample_outcome_success,
         sample_metrics,
         sample_user_id,
@@ -64,7 +61,6 @@ class TestUS1_PersistSuccessfulExecution:
         result = await plan_writer_service.persist_outcome(
             user_id=sample_user_id,
             plan=sample_plan,
-            signature=sample_signature,
             outcome=sample_outcome_success,
             metrics=sample_metrics,
         )
@@ -79,23 +75,21 @@ class TestUS1_PersistSuccessfulExecution:
         self,
         plan_writer_service,
         sample_plan,
-        sample_signature,
         sample_outcome_success,
         sample_metrics,
         sample_user_id,
         mock_plan_service,
     ):
-        """PlanLibrary receives plan, signature, outcome, metrics as dicts."""
+        """PlanLibrary receives plan, outcome, metrics as dicts."""
         await plan_writer_service.persist_outcome(
             user_id=sample_user_id,
             plan=sample_plan,
-            signature=sample_signature,
             outcome=sample_outcome_success,
             metrics=sample_metrics,
         )
         mock_plan_service.store_plan.assert_awaited_once_with(
             sample_plan.model_dump(),
-            sample_signature.model_dump(),
+            {},
             sample_outcome_success.model_dump(),
             sample_metrics.model_dump(),
         )
@@ -105,7 +99,6 @@ class TestUS1_PersistSuccessfulExecution:
         self,
         plan_writer_service,
         sample_plan,
-        sample_signature,
         sample_outcome_success,
         sample_metrics,
         sample_user_id,
@@ -114,7 +107,6 @@ class TestUS1_PersistSuccessfulExecution:
         result = await plan_writer_service.persist_outcome(
             user_id=sample_user_id,
             plan=sample_plan,
-            signature=sample_signature,
             outcome=sample_outcome_success,
             metrics=sample_metrics,
         )
@@ -143,7 +135,6 @@ class TestUS2_PersistFailedExecution:
         self,
         plan_writer_service,
         sample_plan,
-        sample_signature,
         sample_outcome_failure,
         sample_metrics,
         sample_user_id,
@@ -154,7 +145,6 @@ class TestUS2_PersistFailedExecution:
         await plan_writer_service.persist_outcome(
             user_id=sample_user_id,
             plan=sample_plan,
-            signature=sample_signature,
             outcome=sample_outcome_failure,
             metrics=sample_metrics,
         )
@@ -172,7 +162,6 @@ class TestUS2_PersistFailedExecution:
         self,
         plan_writer_service,
         sample_plan,
-        sample_signature,
         sample_outcome_failure,
         sample_metrics,
         sample_user_id,
@@ -182,7 +171,6 @@ class TestUS2_PersistFailedExecution:
         await plan_writer_service.persist_outcome(
             user_id=sample_user_id,
             plan=sample_plan,
-            signature=sample_signature,
             outcome=sample_outcome_failure,
             metrics=sample_metrics,
         )
@@ -203,7 +191,6 @@ class TestUS3_GracefulDegradation:
         self,
         plan_writer_service_no_vectorindex,
         sample_plan,
-        sample_signature,
         sample_outcome_success,
         sample_metrics,
         sample_user_id,
@@ -216,7 +203,6 @@ class TestUS3_GracefulDegradation:
             result = await plan_writer_service_no_vectorindex.persist_outcome(
                 user_id=sample_user_id,
                 plan=sample_plan,
-                signature=sample_signature,
                 outcome=sample_outcome_success,
                 metrics=sample_metrics,
             )
@@ -233,7 +219,6 @@ class TestUS3_GracefulDegradation:
         mock_fact_service,
         mock_vector_index_service,
         sample_plan,
-        sample_signature,
         sample_outcome_success,
         sample_metrics,
         sample_user_id,
@@ -248,7 +233,6 @@ class TestUS3_GracefulDegradation:
         result = await service.persist_outcome(
             user_id=sample_user_id,
             plan=sample_plan,
-            signature=sample_signature,
             outcome=sample_outcome_success,
             metrics=sample_metrics,
         )
@@ -268,7 +252,6 @@ class TestUS4_DeriveFactsFromExecution:
         self,
         plan_writer_service,
         sample_plan,
-        sample_signature,
         sample_outcome_success,
         sample_metrics,
         sample_user_id,
@@ -278,7 +261,6 @@ class TestUS4_DeriveFactsFromExecution:
         await plan_writer_service.persist_outcome(
             user_id=sample_user_id,
             plan=sample_plan,
-            signature=sample_signature,
             outcome=sample_outcome_success,
             metrics=sample_metrics,
         )
@@ -294,7 +276,6 @@ class TestUS4_DeriveFactsFromExecution:
         self,
         plan_writer_service,
         sample_plan,
-        sample_signature,
         sample_outcome_success,
         sample_metrics,
         sample_user_id,
@@ -304,7 +285,6 @@ class TestUS4_DeriveFactsFromExecution:
         await plan_writer_service.persist_outcome(
             user_id=sample_user_id,
             plan=sample_plan,
-            signature=sample_signature,
             outcome=sample_outcome_success,
             metrics=sample_metrics,
         )
@@ -320,7 +300,6 @@ class TestUS4_DeriveFactsFromExecution:
         mock_plan_service,
         mock_fact_service,
         mock_vector_index_service,
-        sample_signature,
         sample_outcome_success,
         sample_metrics,
         sample_user_id,
@@ -360,7 +339,6 @@ class TestUS4_DeriveFactsFromExecution:
         await service.persist_outcome(
             user_id=sample_user_id,
             plan=plan,
-            signature=sample_signature,
             outcome=sample_outcome_success,
             metrics=sample_metrics,
         )
@@ -381,7 +359,6 @@ class TestUS5_BulkPersist:
         self,
         plan_writer_service,
         sample_plan,
-        sample_signature,
         sample_outcome_success,
         sample_metrics,
         sample_user_id,
@@ -390,7 +367,6 @@ class TestUS5_BulkPersist:
         outcomes = [
             {
                 "plan": sample_plan.model_dump(),
-                "signature": sample_signature.model_dump(),
                 "outcome": sample_outcome_success.model_dump(),
                 "metrics": sample_metrics.model_dump(),
             }
@@ -430,7 +406,6 @@ class TestEdgeCases:
         mock_fact_service,
         mock_vector_index_service,
         sample_plan,
-        sample_signature,
         sample_outcome_success,
         sample_metrics,
         sample_user_id,
@@ -446,7 +421,6 @@ class TestEdgeCases:
             await service.persist_outcome(
                 user_id=sample_user_id,
                 plan=sample_plan,
-                signature=sample_signature,
                 outcome=sample_outcome_success,
                 metrics=sample_metrics,
             )
@@ -460,7 +434,6 @@ class TestEdgeCases:
         mock_fact_service,
         mock_vector_index_service,
         sample_plan,
-        sample_signature,
         sample_outcome_success,
         sample_metrics,
         sample_user_id,
@@ -475,7 +448,6 @@ class TestEdgeCases:
         result = await service.persist_outcome(
             user_id=sample_user_id,
             plan=sample_plan,
-            signature=sample_signature,
             outcome=sample_outcome_success,
             metrics=sample_metrics,
         )
@@ -490,7 +462,6 @@ class TestEdgeCases:
         mock_fact_service,
         mock_vector_index_service,
         sample_plan,
-        sample_signature,
         sample_outcome_success,
         sample_metrics,
         sample_user_id,
@@ -507,7 +478,6 @@ class TestEdgeCases:
         result = await service.persist_outcome(
             user_id=sample_user_id,
             plan=sample_plan,
-            signature=sample_signature,
             outcome=sample_outcome_success,
             metrics=sample_metrics,
         )

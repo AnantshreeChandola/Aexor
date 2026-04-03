@@ -373,7 +373,6 @@ shared/schemas/
 ├── intent.py           # Intent model (GLOBAL_SPEC §2.1)
 ├── evidence.py         # Evidence Item model (GLOBAL_SPEC §2.2)
 ├── plan.py             # Plan model (GLOBAL_SPEC §2.3)
-├── signature.py        # Plan Signature model (GLOBAL_SPEC §2.4)
 ├── preview.py          # Preview Wrapper (GLOBAL_SPEC §2.5)
 ├── execute.py          # Execute Wrapper (GLOBAL_SPEC §2.6)
 └── approval.py         # Approval Token (GLOBAL_SPEC §2.7)

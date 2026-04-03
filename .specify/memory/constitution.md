@@ -39,20 +39,22 @@ All data contracts MUST have JSON schemas:
 
 Breaking schema changes require version bump and migration plan.
 
-### V. Deterministic Planning
-Plans are pure functions of frozen inputs:
+### V. Deterministic Planning with Adaptive Execution
+Initial plans are pure functions of frozen inputs:
 - Intent vN (finalized)
 - Evidence vK (typed, budget-limited)
 - Registry vR (connector catalog snapshot)
-- Policy vC (GLOBAL_SPEC version)
+- Policy vP (PolicyEngine rules version)
 
-Same inputs → same canonical plan bytes → same hash/signature (Ed25519).
+Same inputs → same canonical plan bytes → same plan hash.
+
+At runtime, LLM reasoning steps may adapt within PolicyEngine bounds. Critical actions (writes, deletes, payments) always require human approval. Runtime modifications receive PolicyEngine attestations.
 
 ### VI. Observability & Privacy
 - **Structured logging**: Correlated by `plan_id`, `step`, `role`
 - **No secrets/PII in logs**: Derived facts only, explicit consent
 - **Metrics**: p95 latencies (Preview <800ms, Execute <2s)
-- **Audit trail**: All plan executions logged with signatures
+- **Audit trail**: All plan executions logged with attestations
 
 ### VII. Fault Isolation & Blast Radius
 Components must contain failures:
@@ -103,8 +105,8 @@ Every PR MUST:
 - **SQLAlchemy 2.0** with asyncpg
 - **PostgreSQL 16** with pgvector extension
 - **Redis 7** for caching and coordination
-- **n8n** (self-hosted) for short workflows (<15min)
-- **Temporal** (Python SDK) for long-running workflows
+- **MCP protocol** for external tool invocations (community-maintained connectors)
+- **AES-256-GCM credential vault** in PostgreSQL (master key from env, LLM never sees plaintext)
 
 ### Forbidden
 - **No LangChain**: Direct API calls for simplicity and control
@@ -139,10 +141,10 @@ Every PR MUST:
 ## Conformance to GLOBAL_SPEC
 
 All components MUST conform to [GLOBAL_SPEC.md v2](../../docs/architecture/GLOBAL_SPEC.md):
-- Use canonical contracts (Intent, Evidence, Plan, Signature, Preview/Execute wrappers)
+- Use canonical contracts (Intent, Evidence, Plan, Preview/Execute wrappers)
 - Respect safety model (Preview vs Execute vs Durable)
 - Meet NFRs (p95 latencies, availability targets)
-- Support runtime agent roles (Fetcher, Analyzer, Watcher, Resolver, Booker, Notifier)
+- Support runtime agent roles (Fetcher, Analyzer, Watcher, Resolver, Booker, Notifier, Reasoner)
 
 Deviations require explicit declaration in component SPEC.md with rationale.
 

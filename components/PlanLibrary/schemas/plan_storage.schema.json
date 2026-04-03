@@ -3,7 +3,7 @@
   "title": "Plan Storage Request",
   "description": "Schema for PlanLibrary plan storage input",
   "type": "object",
-  "required": ["plan", "signature", "outcome", "metrics"],
+  "required": ["plan", "outcome", "metrics"],
   "properties": {
     "plan": {
       "type": "object",
@@ -40,21 +40,9 @@
     },
     "signature": {
       "type": "object",
-      "required": ["algorithm", "public_key", "signature_hex"],
-      "properties": {
-        "algorithm": {
-          "type": "string",
-          "enum": ["ed25519"]
-        },
-        "public_key": {
-          "type": "string",
-          "description": "Hex-encoded Ed25519 public key"
-        },
-        "signature_hex": {
-          "type": "string",
-          "description": "Hex-encoded Ed25519 signature"
-        }
-      }
+      "description": "Legacy field, stored as empty object. Signature verification has been removed.",
+      "default": {},
+      "properties": {}
     },
     "outcome": {
       "type": "object",

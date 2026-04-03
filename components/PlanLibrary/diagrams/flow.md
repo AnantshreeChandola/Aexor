@@ -8,9 +8,7 @@ This document contains the flow diagrams for PlanLibrary component operations.
 graph TD
     A[PlanWriter calls store_plan] --> B{Validate Plan ID}
     B -->|Invalid| C[Return Invalid Plan ID Error]
-    B -->|Valid| D[Verify Ed25519 Signature]
-    D -->|Invalid| E[Return Signature Error]
-    D -->|Valid| F[Begin Database Transaction]
+    B -->|Valid| F[Begin Database Transaction]
     F --> G[Store Plan Record]
     G --> H[Store Plan Outcome]
     H --> I[Store Plan Metrics]
@@ -32,8 +30,8 @@ graph TD
     classDef process fill:#f3e5f5
     classDef storage fill:#e8f5e8
     
-    class A,D,F,G,H,I,J,L success
-    class C,E,R error
+    class A,F,G,H,I,J,L success
+    class C,R error
     class M,N,P process
     class O,K storage
 ```
@@ -198,13 +196,10 @@ graph TD
 sequenceDiagram
     participant PW as PlanWriter
     participant PL as PlanLibrary
-    participant SV as SignatureVerifier
     participant DB as PostgreSQL
 
     Note over PW: Plan execution completed
-    PW->>+PL: POST /plans (plan, signature, outcome, metrics)
-    PL->>+SV: verify_plan_signature(plan, signature)
-    SV-->>-PL: signature_valid: true
+    PW->>+PL: POST /plans (plan, outcome, metrics)
 
     PL->>+DB: BEGIN TRANSACTION
     PL->>DB: INSERT INTO plans

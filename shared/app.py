@@ -28,7 +28,6 @@ async def lifespan(app: FastAPI):
     """
     # Lazy imports to avoid circular dependencies at module level
     from components.PlanLibrary.adapters.db import DatabaseAdapter as PlanDBAdapter
-    from components.PlanLibrary.adapters.signature_verifier import SignatureVerifier
     from components.PlanLibrary.service.analytics_service import AnalyticsService
     from components.PlanLibrary.service.plan_service import PlanService
     from components.ProfileStore.adapters.db import DatabaseAdapter as ProfileDBAdapter
@@ -47,7 +46,6 @@ async def lifespan(app: FastAPI):
     plan_db = PlanDBAdapter()
     app.state.plan_service = PlanService(
         db_adapter=plan_db,
-        signature_verifier=SignatureVerifier(),
     )
     app.state.analytics_service = AnalyticsService(db_adapter=plan_db)
 
@@ -64,11 +62,6 @@ async def lifespan(app: FastAPI):
 
     registry_db = RegistryDatabaseAdapter()
     app.state.registry_service = RegistryService(db_adapter=registry_db)
-
-    # Signer service (library — no DB, no routes)
-    from components.Signer.service.signer_service import create_signer_service
-
-    app.state.signer_service = create_signer_service()
 
     # History services
     from components.History.adapters.db import DatabaseAdapter as HistoryDBAdapter
@@ -139,7 +132,6 @@ async def lifespan(app: FastAPI):
         app.state.planner_service = create_planner_service(
             context_rag_service=app.state.context_rag_service,
             registry_service=app.state.registry_service,
-            signer_service=app.state.signer_service,
             plan_service=app.state.plan_service,
         )
     except Exception as exc:
@@ -203,7 +195,6 @@ async def lifespan(app: FastAPI):
         )
 
         app.state.execute_service = create_execute_service(
-            signer_service=app.state.signer_service,
             policy_service=app.state.policy_service,
             registry_service=app.state.registry_service,
             plan_writer_service=app.state.plan_writer_service,
