@@ -18,12 +18,18 @@ Read first:
 ### Step Validation
 For each step in `graph`:
 - [ ] `step` (sequential number: 1, 2, 3, ...)
+- [ ] `type` (api/llm_reasoning/policy_check — defaults to "api")
 - [ ] `mode` (autonomous/interactive/supervised)
-- [ ] `role` (one of 6: Fetcher, Analyzer, Watcher, Resolver, Booker, Notifier)
+- [ ] `role` (one of 7: Fetcher, Analyzer, Watcher, Resolver, Booker, Notifier, Reasoner)
 - [ ] `uses` (connector name, e.g., "google.calendar")
 - [ ] `call` (method name)
 - [ ] `args` (object with parameters)
 - [ ] `after` (dependency array, e.g., [1, 2])
+- [ ] `context_from` (optional — steps whose output is passed as context)
+- [ ] `can_spawn` (optional — whether step can create new steps at runtime)
+- [ ] `max_spawned_steps` (optional — max new steps, default 3, max 10)
+- [ ] `policy_ref` (optional — policy rule governing this step)
+- [ ] `reasoning_config` (optional — LLM config for reasoning steps)
 
 ### Preview-First Safety
 - [ ] First step OR preview steps have `"execute_mode": "preview_only"` and `"dry_run": true`
@@ -75,8 +81,8 @@ For each step in `graph`:
 **Missing dependencies**: Step X depends on step Y data but `after` is empty
 **Fix**: Add `"after": [Y]`
 
-**Invalid role**: Role name doesn't match the 6 runtime roles
-**Fix**: Use Fetcher, Analyzer, Watcher, Resolver, Booker, or Notifier
+**Invalid role**: Role name doesn't match the 7 runtime roles
+**Fix**: Use Fetcher, Analyzer, Watcher, Resolver, Booker, Notifier, or Reasoner
 
 **No preview step**: Plan executes without preview
 **Fix**: Add preview step with `"execute_mode": "preview_only"`

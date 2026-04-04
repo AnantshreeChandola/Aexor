@@ -19,7 +19,7 @@ User Request → Preview → Approval → Execute → Learn
 
 ### Core Idea
 1. **Never do anything without showing the user first** (Preview-first safety)
-2. **Plans are deterministic, immutable graphs with adaptive execution points** — The Planner produces a fixed DAG of steps (same inputs → same graph). The **initial plan (revision 0)** is immutable, identified by a SHA-256 plan_hash for data integrity. At runtime, Reasoner steps can spawn new steps within PolicyEngine bounds — each spawn event increments `plan_revision` and is recorded as a PolicyAttestation. The original graph is never mutated; spawned steps extend it into a new revision. API steps execute exactly as specified. Only Reasoner steps introduce runtime variability.
+2. **Plans are deterministic, immutable graphs with adaptive execution points** — The Planner produces a fixed DAG of steps (same inputs → same graph). The **initial plan (revision 0)** is immutable. At runtime, Reasoner steps can spawn new steps within PolicyEngine bounds — each spawn event increments `plan_revision` and is recorded as a PolicyAttestation. The original graph is never mutated; spawned steps extend it into a new revision. API steps execute exactly as specified. Only Reasoner steps introduce runtime variability.
 3. **Pure agentic execution** — all steps execute via Python/FastAPI ExecuteOrchestrator:
    - **API steps**: Dispatched via MCP tool invocations (community-maintained connector ecosystem)
    - **LLM reasoning steps**: Anthropic API with two-tier trust model (sandboxed Tier 1 for untrusted data, capable Tier 2 for agent reasoning)
@@ -172,13 +172,11 @@ Creates Plan (all steps type: "api" — no Reasoner, no trust tier needed):
   Step 6 (Notifier, api): Send confirmation        [after 5]
     args: { content: "Meeting booked: {{step_5.result.event_id}}" }  ← template resolution
 
-Plan hash: "sha256:abc123..." (data integrity checksum)
 ```
 
 ### Step 3: Preview (PreviewOrchestrator)
 ```
 PreviewOrchestrator:
-  ✓ Verifies plan hash (data integrity)
   ✓ Runs steps 1-3 in READ-ONLY mode
 
 MCP tool invocations execute:
@@ -199,7 +197,6 @@ User selects: Option 1
 User clicks "Approve Option 1"
   ↓
 ApprovalGate:
-  - Validates plan_hash matches
   - Creates approval token (JWT, 15min TTL)
   - Caches preview state:
     {
@@ -214,7 +211,6 @@ Returns token: "jwt:eyJ..."
 ### Step 5: Execute (ExecuteOrchestrator)
 ```
 ExecuteOrchestrator:
-  ✓ Verifies plan hash (data integrity)
   ✓ Verifies approval token
   ✓ Retrieves cached preview state (no need to re-fetch calendars!)
 
@@ -258,7 +254,7 @@ Audit:
 
 **User Request**: "Find me the best flights to Tokyo next month and summarize options"
 
-> **Adaptive plan with Reasoner** — The initial plan (revision 0) is immutable, identified by plan_hash. Reasoner steps are explicit decision points that may spawn new steps at runtime, creating new plan revisions. All external API data passes through Tier 1 sanitization before reaching Tier 2 Reasoners.
+> **Adaptive plan with Reasoner** — The initial plan (revision 0) is immutable. Reasoner steps are explicit decision points that may spawn new steps at runtime, creating new plan revisions. All external API data passes through Tier 1 sanitization before reaching Tier 2 Reasoners.
 
 This example demonstrates **adaptive execution** — the plan includes LLM reasoning steps that can spawn new steps at runtime, with the Data Trust Boundary enforced via explicit Tier 1 sanitization.
 
@@ -385,7 +381,7 @@ t=900ms:  Step 6 (Notifier, api) sends summary via MCP tool invocation (Slack)
 - Step 5 is a **Tier 2 Reasoner** (summarizes, cannot spawn)
 - **Trust boundary enforced**: API output never reaches Tier 2 directly — always through Tier 1 first
 - Spawned step results also go through Tier 1 sanitization before Tier 2 consumes them
-- The **original plan_hash** remains valid; the spawned step has a **PolicyAttestation** for audit
+- The spawned step has a **PolicyAttestation** for audit
 
 ### What If the LLM Tries Something Forbidden?
 
@@ -617,8 +613,7 @@ Intake: [ready! triggers planning]
 #### PreviewOrchestrator
 **What it does**: Shows you what will happen (no side effects!)
 **Process**:
-1. Verifies plan hash (data integrity)
-2. Dispatches read-only MCP tool invocations for previewable steps
+1. Dispatches read-only MCP tool invocations for previewable steps
 3. Returns Preview wrapper with results
 
 **Safety**: Only runs operations marked `previewable: true` in Registry
@@ -628,7 +623,7 @@ Intake: [ready! triggers planning]
 **Process**:
 1. Shows preview results to user
 2. On approve: Creates JWT token (15min TTL)
-3. Binds token to: {plan_hash, gate_id, user_id, scopes}
+3. Binds token to: {plan_id, gate_id, user_id, scopes}
 4. **Caches preview state** (user selections, search results)
 
 **Multi-gate support**: Shopping flow can have gate-A (choose item), gate-B (review cart), gate-C (confirm purchase)
@@ -638,7 +633,7 @@ Intake: [ready! triggers planning]
 # Token includes cached preview results
 {
   "token": "jwt:eyJ...",
-  "plan_hash": "sha256:abc...",
+  "plan_id": "01JXYZ...",
   "preview_state": {
     "selected_product": "sweater-1",
     "search_results": [...],
@@ -651,7 +646,7 @@ Intake: [ready! triggers planning]
 #### ExecuteOrchestrator
 **What it does**: Does the actual work (writes to external systems). Absorbs WorkflowBuilder's DAG traversal and parallel grouping responsibilities.
 **Process**:
-1. Verifies plan hash + approval token
+1. Verifies approval token
 2. **Retrieves cached preview state** (skip repeated steps!)
 3. Resolves plan DAG into execution levels (topological sort)
 4. Dispatches steps by type:
@@ -939,11 +934,11 @@ Execution:
 ### Deterministic Planning with Adaptive Execution
 
 **Key distinction**:
-- **"Deterministic"** refers to the **initial plan (revision 0)** — same inputs always produce the same DAG topology (same steps, same dependencies, same roles). Revision 0 is immutable, identified by a SHA-256 plan_hash.
+- **"Deterministic"** refers to the **initial plan (revision 0)** — same inputs always produce the same DAG topology (same steps, same dependencies, same roles). Revision 0 is immutable.
 - **"Adaptive"** refers to what happens at runtime — Reasoner steps observe step outputs, make judgments, and may spawn new steps within PolicyEngine bounds. Each spawn event creates a **new plan revision** (revision 1, 2, ...) with a PolicyAttestation. The original graph is never mutated; new steps extend it.
 - These are not contradictory: the initial plan is deterministic and integrity-checked, runtime extensions are versioned and audited.
 
-**Guarantee**: Same inputs always produce the same **initial plan graph** (revision 0). The plan_hash covers revision 0; runtime spawned steps increment `plan_revision` and get PolicyAttestations (§2.4.1).
+**Guarantee**: Same inputs always produce the same **initial plan graph** (revision 0). Runtime spawned steps increment `plan_revision` and get PolicyAttestations (§2.4).
 
 **Inputs** (frozen tuple):
 - Intent (finalized user request)
@@ -955,7 +950,6 @@ Execution:
 **Process**:
 1. Planner calls Anthropic Claude API with temperature=0 (via LLMAdapter protocol)
 2. Canonicalize plan JSON (sort keys, deterministic serialization)
-3. Hash: SHA-256 of canonical plan bytes (plan_hash for data integrity)
 
 **At runtime** (for plans with `type: "llm_reasoning"` steps):
 5. LLM reasoning steps execute with per-step ReasoningConfig (temperature 0.1–0.7)
@@ -965,7 +959,7 @@ Execution:
 
 **Benefits**:
 - Same request tomorrow = same initial plan graph
-- Tamper detection (plan_hash verification + policy attestation chain)
+- Audit trail (policy attestation chain for all runtime decisions)
 - Auditability (reproducible initial plans + audited runtime adaptations)
 - Adaptive execution for open-ended tasks (ranking, summarizing, deciding what data to fetch)
 - Clear separation: plan graph is reviewable upfront, Reasoner behavior is policy-bounded at runtime
@@ -978,7 +972,7 @@ Execution:
 2. **Role enforcement**: Spawned Booker steps always require HITL (non-overridable)
 3. **Scope inheritance**: Spawned steps can only use tools in the plan's `plugins` array
 4. **No recursive spawning**: Spawned steps cannot spawn further steps
-5. **Attestation chain**: Every spawn event produces a PolicyAttestation linking to the policy rule, decision, and new steps — forming a complete audit trail alongside the original plan_hash
+5. **Attestation chain**: Every spawn event produces a PolicyAttestation linking to the policy rule, decision, and new steps — forming a complete audit trail
 
 **Credential isolation**: Runtime LLM reasoning steps (Python service) have the same ZERO credential access as the Planner LLM. Credentials are decrypted from the encrypted vault (AES-256-GCM in PostgreSQL) by ExecuteOrchestrator at execution time for API steps only, held in-memory briefly, zeroed after MCP call, and never exposed to any LLM.
 
@@ -1387,7 +1381,7 @@ Plan step 4 (Booker): Complete purchase  [gate_id: "gate-C"]
 # ExecuteOrchestrator checks gate tokens
 if step.gate_id:
     token = get_approval_token(step.gate_id)
-    if not token or token.plan_hash != plan_hash:
+    if not token or token.plan_id != plan_id:
         raise Unauthorized("Missing approval for gate")
 ```
 

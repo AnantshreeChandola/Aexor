@@ -80,3 +80,8 @@ def get_policy_service(request: Request) -> Any:
 def get_execute_service(request: Request) -> Any:
     """Get ExecuteService singleton from app state."""
     return request.app.state.execute_service
+
+
+def get_preview_service(request: Request) -> Any:
+    """Get PreviewService singleton from app state."""
+    return request.app.state.preview_service

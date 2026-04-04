@@ -96,13 +96,13 @@ Constraints:
 
 Key architectural principles to enforce:
 1. **Preview-first safety**: Never execute without showing user first
-2. **Deterministic planning**: Same inputs → same plan → same signature
-3. **Dual runtime**: n8n (< 15min) vs Temporal (hours/days)
+2. **Deterministic planning with adaptive execution**: Fixed plan DAG (same inputs → same graph → same signature), LLM Reasoner steps adapt at runtime within PolicyEngine bounds
+3. **Pure agentic runtime**: Python ExecuteOrchestrator dispatches all steps via MCP tool invocations
 4. **Idempotency**: Safe retry for all write operations
 5. **Compensation**: Undo failed operations where possible
 6. **Fine-grained locking**: Prevent conflicts without blocking parallelism
 7. **Privacy tiers**: Context access controlled by consent level
-8. **No LLM iteration**: One-shot planning, not agentic loops
+8. **PolicyEngine**: All LLM runtime decisions bounded by policy rules; critical actions require HITL
 
 When to recommend ADR:
 - Breaking changes to component APIs
