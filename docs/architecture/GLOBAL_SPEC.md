@@ -64,9 +64,9 @@ The **initial plan** is a pure function of a frozen tuple:
 - Policy vC (GLOBAL_SPEC version)
 - PolicyVersion vP (PolicyEngine rules version snapshot)
 
-Same tuple ⇒ same canonical plan bytes ⇒ same plan_hash.
+Same tuple ⇒ same canonical plan bytes ⇒ same plan graph.
 
-**Deterministic graph, adaptive execution**: The Planner produces a fixed DAG of steps (same inputs → same graph). The **initial plan (revision 0)** is immutable, identified by a SHA-256 plan_hash for data integrity. At runtime, Reasoner steps observe previous step outputs via `context_from`, make judgments, and may spawn new steps within PolicyEngine bounds — each spawn event increments `plan_revision` and creates a new plan revision. The original graph is never mutated; spawned steps extend it. Runtime revisions receive **PolicyEngine attestations** (§2.4.1) as audit records. See Project_HLD §2a–§2c for concrete examples.
+**Deterministic graph, adaptive execution**: The Planner produces a fixed DAG of steps (same inputs → same graph). The **initial plan (revision 0)** is immutable. At runtime, Reasoner steps observe previous step outputs via `context_from`, make judgments, and may spawn new steps within PolicyEngine bounds — each spawn event increments `plan_revision` and creates a new plan revision. The original graph is never mutated; spawned steps extend it. Runtime revisions receive **PolicyEngine attestations** (§2.4.1) as audit records. See Project_HLD §2a–§2c for concrete examples.
 
 ### 2.1 Intent (input)
 ~~~json
@@ -184,17 +184,7 @@ When a reasoning step (`can_spawn=true`) generates new steps at runtime:
 6. **Deny-by-default**: If no PolicyEngine rule matches the spawned step, the action is denied
 7. **Audit trail**: Each spawn event increments `plan_revision` and creates a PolicyAttestation (§2.4.1)
 
-### 2.4 Plan Hash (Data Integrity)
-
-The plan_hash is a SHA-256 checksum of the canonical plan bytes (sorted keys, deterministic serialization). It serves as a data integrity check to detect plan tampering between planning and execution.
-
-~~~json
-{
-  "plan_hash": "<sha256>"
-}
-~~~
-
-#### 2.4.1 Policy Attestation
+### 2.4 Policy Attestation
 
 When LLM reasoning steps spawn new steps at runtime, the PolicyEngine issues an attestation as an audit record for the runtime modification.
 
@@ -214,7 +204,7 @@ When LLM reasoning steps spawn new steps at runtime, the PolicyEngine issues an 
 }
 ~~~
 
-**Audit chain**: `plan_hash + policy_attestations[] = full execution provenance`.
+**Audit chain**: `plan_id + policy_attestations[] = full execution provenance`.
 
 ### 2.5 Preview Wrapper
 ~~~json
@@ -239,7 +229,7 @@ When LLM reasoning steps spawn new steps at runtime, the PolicyEngine issues an 
 ~~~json
 {
   "token": "<jwt|ulid>",
-  "plan_hash": "<sha256>",
+  "plan_id": "<ulid>",
   "user_id": "<uuid>",
   "exp": "<iso>",
   "scopes": ["shopping.write"]
@@ -379,7 +369,6 @@ Policies are evaluated in order of specificity:
 ---
 
 ## 8) Safety & Governance
-- **Plan hash verification** required at Preview/Execute (data integrity check).
 - **Approval tokens** required for writes (per gate).
 - **Idempotency** enforced via datastore.
 - **Compensation** supported when declared in Registry.

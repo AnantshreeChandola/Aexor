@@ -487,7 +487,7 @@ Purpose: Background polling service (runs every 30s) for infrastructure-level fa
 │  └────────────┘  └────────────┘                                │
 └─────────────────────────────────────────────────────────────────┘
 
-                  Plan (with plan_hash)
+                  Plan
                       │
                       ▼
 ┌─────────────────────────────────────────────────────────────────┐
@@ -832,7 +832,7 @@ class GateHandler:
 # ApprovalGate issues gate-specific tokens
 class ApprovalToken:
     token: str           # JWT with short TTL (15 min)
-    plan_hash: str       # Binds to specific plan
+    plan_id: str         # Binds to specific plan
     user_id: str
     gate_id: str         # "gate-A", "gate-B", "gate-C"
     plan_id: str

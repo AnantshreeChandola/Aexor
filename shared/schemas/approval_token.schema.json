@@ -4,7 +4,7 @@
   "title": "Approval Token",
   "description": "User approval token for plan execution (GLOBAL_SPEC v2 §2.7)",
   "type": "object",
-  "required": ["token", "plan_hash", "user_id", "exp", "scopes"],
+  "required": ["token", "plan_id", "user_id", "exp", "scopes"],
   "properties": {
     "token": {
       "type": "string",
@@ -13,11 +13,11 @@
       "minLength": 20,
       "examples": ["eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM..."]
     },
-    "plan_hash": {
+    "plan_id": {
       "type": "string",
-      "pattern": "^sha256:[a-f0-9]{64}$",
-      "description": "SHA-256 hash of the approved plan (with 'sha256:' prefix)",
-      "examples": ["sha256:abc123..."]
+      "pattern": "^[0-9A-Z]{26}$",
+      "description": "ULID of the approved plan",
+      "examples": ["01JXYZ1234567890ABCDEFGHIJ"]
     },
     "user_id": {
       "type": "string",

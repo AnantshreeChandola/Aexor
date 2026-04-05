@@ -207,6 +207,22 @@ async def lifespan(app: FastAPI):
         logger.warning("ExecuteOrchestrator init failed: %s", exc)
         app.state.execute_service = None
 
+    # PreviewOrchestrator service (library -- no routes, graceful degradation)
+    try:
+        from components.ExecuteOrchestrator.adapters.mcp_client import MCPClientAdapter
+        from components.PreviewOrchestrator.service.preview_service import (
+            create_preview_service,
+        )
+
+        app.state.preview_service = create_preview_service(
+            mcp_client=MCPClientAdapter(registry_service=app.state.registry_service),
+            registry_service=app.state.registry_service,
+            redis_client=intake_redis,
+        )
+    except Exception as exc:
+        logger.warning("PreviewOrchestrator init failed: %s", exc)
+        app.state.preview_service = None
+
     logger.info("All services initialized")
 
     yield

@@ -50,7 +50,7 @@ User Request → Preview → Approval → Execute → Learn
 ## Core Architectural Principles
 
 1. **Preview-first safety**: Never execute without showing user first
-2. **Deterministic planning with adaptive execution**: Initial plan (revision 0) is a fixed, immutable DAG (same inputs → same graph → same plan_hash). At runtime, Reasoner steps may spawn new steps within PolicyEngine bounds — each spawn creates a new plan revision with a PolicyAttestation. The original graph is never mutated.
+2. **Deterministic planning with adaptive execution**: Initial plan (revision 0) is a fixed, immutable DAG (same inputs → same graph). At runtime, Reasoner steps may spawn new steps within PolicyEngine bounds — each spawn creates a new plan revision with a PolicyAttestation. The original graph is never mutated.
 3. **Pure agentic runtime**: Python ExecuteOrchestrator dispatches all steps — MCP for APIs, Anthropic for reasoning
 4. **Idempotency**: Multi-user safe retry (`user:integration:plan:step:op:hash`)
 5. **Compensation**: Undo failed operations (Saga pattern)
@@ -95,7 +95,6 @@ User Request → Preview → Approval → Execute → Learn
   "plan_id": "01HX...",              // ULID-based ID
   "user_id": "user-123",
   "intent": "schedule_meeting",      // Original user request
-  "plan_hash": "sha256:...",         // Data integrity checksum
   "graph": [
     {
       "step": 1,                     // Sequential number
