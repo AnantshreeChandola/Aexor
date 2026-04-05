@@ -85,3 +85,8 @@ def get_execute_service(request: Request) -> Any:
 def get_preview_service(request: Request) -> Any:
     """Get PreviewService singleton from app state."""
     return request.app.state.preview_service
+
+
+def get_approval_service(request: Request) -> Any:
+    """Get ApprovalService singleton from app state."""
+    return request.app.state.approval_service
