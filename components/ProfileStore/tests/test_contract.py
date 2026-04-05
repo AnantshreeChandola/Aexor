@@ -8,6 +8,7 @@ Reference: LLD.md §8.5
 """
 
 import asyncio
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -117,12 +118,17 @@ class TestConsentEnforcement:
         """Create service with mocked dependencies for consent testing."""
         # Mock adapters
         db_adapter = MagicMock()
+        db_adapter.get_preference = AsyncMock(return_value=None)
+        db_adapter.get_all_preferences = AsyncMock(return_value=[])
+        db_adapter.health_check = AsyncMock(return_value=True)
+
         schema_registry = MagicMock(spec=SchemaRegistryAdapter)
         encryption_adapter = MagicMock()
 
         # Setup basic schema mock
         schema_registry.get_schema.return_value = {"type": "string", "default": "test"}
         schema_registry.get_default_value.return_value = "default_value"
+        schema_registry.list_preference_keys.return_value = []
 
         # Create service
         service = PreferenceService(
@@ -325,7 +331,8 @@ class TestSchemaRegistryContract:
                 assert schema["type"] == "integer"
                 assert "minimum" in schema
                 assert "maximum" in schema
-                assert schema["default"] == 30
+                # Default is not in get_json_schema(); use get_default_value()
+                assert registry.get_default_value("meeting_duration_min") == 30
                 break
 
     def test_sensitive_preference_detection(self):
@@ -392,7 +399,7 @@ class TestIdempotencyContract:
             key="test_key",
             value="test_value",
             sensitive=False,
-            updated_at=None,
+            updated_at=datetime.utcnow(),
             deleted_at=None,
         )
         db_adapter.upsert_preference = AsyncMock(return_value=preference_result)

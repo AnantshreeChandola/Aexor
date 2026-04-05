@@ -36,8 +36,8 @@ class TestGetAuthContext:
         """Test auth context extraction with missing user_id."""
         # Arrange
         request = Mock(spec=Request)
-        request.state = Mock()
-        # user_id attribute missing
+        # Use spec=[] so hasattr returns False for user_id
+        request.state = Mock(spec=[])
 
         # Act & Assert
         with pytest.raises(HTTPException) as exc_info:
@@ -51,9 +51,11 @@ class TestGetAuthContext:
         # Arrange
         user_id = uuid4()
         request = Mock(spec=Request)
+        # Use spec= to restrict state attributes so hasattr returns False for email
+        request.state = Mock(spec=["user_id", "context_tier"])
         request.state.user_id = user_id
         request.state.context_tier = 2
-        # email attribute missing
+        # email attribute missing — spec prevents auto-creation
 
         # Act & Assert
         with pytest.raises(HTTPException) as exc_info:
