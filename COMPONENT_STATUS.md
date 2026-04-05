@@ -1,7 +1,7 @@
 # Component Implementation Status
 
-**Last Updated**: 2026-03-27
-**Total Components**: 15 (across 4 layers)
+**Last Updated**: 2026-04-05
+**Total Components**: 15 (14 active + Signer removed; Reasoner is a runtime role in ExecuteOrchestrator)
 
 Legend:
 - `✓` - Completed and verified
@@ -94,7 +94,8 @@ Legend:
 - Tests: ✓
 - Schemas: ✓
 - **Purpose**: Evaluate policy rules for LLM reasoning steps, issue attestations, enforce HITL for critical actions
-- **Status**: Code implemented (service, adapters, cache, DB tables, DI wiring, tests). SPEC and LLD docs not yet written.
+- **Status**: ✅ **COMPLETED** - Deny-default policy evaluation, attestation issuance, HITL enforcement. SPEC/LLD docs not yet written.
+- **PR**: [#17](https://github.com/AnantshreeChandola/Personal-agent/pull/17) - PolicyEngine implementation
 
 ### PluginRegistry
 - SPEC.md: ✓
@@ -123,34 +124,42 @@ Legend:
 ### PreviewOrchestrator
 - SPEC.md: ✗
 - LLD.md: ✗
-- Code: ✗
-- Tests: ✗
-- Schemas: ✗
+- Code: ✓
+- Tests: ✓ (75 passing)
+- Schemas: ✓
 - **Purpose**: Show what will happen (no side effects, read-only)
+- **Status**: ✅ **COMPLETED** - Read-only preview, dry-run MCP, Redis cache
+- **PR**: [#18](https://github.com/AnantshreeChandola/Personal-agent/pull/18) - PreviewOrchestrator implementation
 
 ### ApprovalGate
 - SPEC.md: ✗
 - LLD.md: ✗
-- Code: ✗
-- Tests: ✗
-- Schemas: ✗
+- Code: ✓
+- Tests: ✓ (104 passing)
+- Schemas: ✓
 - **Purpose**: Wait for user confirmation, issue approval tokens
+- **Status**: ✅ **COMPLETED** - HITL JWT tokens, Redis gate state, single-use, multi-gate, preview binding
+- **PR**: [#19](https://github.com/AnantshreeChandola/Personal-agent/pull/19) - ApprovalGate implementation
 
 ### ExecuteOrchestrator
 - SPEC.md: ✗
-- LLD.md: ✗
-- Code: ✗
-- Tests: ✗
-- Schemas: ✗
-- **Purpose**: Do actual work with idempotency and compensation (absorbs WorkflowBuilder's DAG traversal and MCP dispatch)
+- LLD.md: ✓
+- Code: ✓
+- Tests: ✓
+- Schemas: ✓
+- **Purpose**: Do actual work with idempotency and compensation (absorbs WorkflowBuilder's DAG traversal and MCP dispatch). Also hosts the **Reasoner** runtime role (AnthropicReasoningAdapter, two-tier trust, `_execute_reasoning_step`)
+- **Status**: ✅ **COMPLETED** - Pure agentic DAG execution, MCP tool invocations, LLM reasoning steps, spawn handling
+- **PR**: [#16](https://github.com/AnantshreeChandola/Personal-agent/pull/16) - ExecuteOrchestrator implementation
 
 ### ExecutionMonitor
-- SPEC.md: ✗
-- LLD.md: ✗
-- Code: ✗
-- Tests: ✗
-- Schemas: ✗
+- SPEC.md: ✓
+- LLD.md: ✓
+- Code: ✓
+- Tests: ✓ (85 passing)
+- Schemas: ✓
 - **Purpose**: Detect stuck executions and enforce timeout policies (infrastructure watchdog)
+- **Status**: ✅ **COMPLETED** - Background polling watchdog, TrackerService write API, MonitorService detection, non-fatal integration with ExecuteOrchestrator
+- **PR**: Pending
 
 ---
 
@@ -169,14 +178,16 @@ Legend:
 ## Summary Statistics
 
 ### By Status
-- ✓ Completed: 9/15 (60%)
+- ✓ Completed: 14/15 (93%) — 14 of 14 active components (excluding removed Signer)
 - WIP In Progress: 0/15 (0%)
-- ✗ Not Started: 6/15 (40%)
+- ✗ Not Started: 1/15 (7%) — Audit
+- Removed: Signer (cryptographic signing provides no value in single-container deployment)
+- Not a component: Reasoner (runtime agent role built into ExecuteOrchestrator)
 
 ### By Layer
 - Memory Layer: 4/4 completed (ProfileStore ✅, PlanLibrary ✅, History ✅, VectorIndex ✅)
-- Domain Layer: 5/6 completed (Intake ✅, ContextRAG ✅, Planner ✅, PluginRegistry ✅, PlanWriter ✅)
-- Orchestration Layer: 0/4 started
+- Domain Layer: 6/6 completed (Intake ✅, ContextRAG ✅, Planner ✅, PolicyEngine ✅, PluginRegistry ✅, PlanWriter ✅)
+- Orchestration Layer: 4/4 completed (PreviewOrchestrator ✅, ApprovalGate ✅, ExecuteOrchestrator ✅, ExecutionMonitor ✅)
 - Platform Layer: 0/1 started
 
 ### Critical Path (Recommended Order)
@@ -184,12 +195,12 @@ Legend:
    - ~~ProfileStore~~ ✅, ~~PlanLibrary~~ ✅, ~~History~~ ✅, ~~PluginRegistry~~ ✅, ~~VectorIndex~~ ✅, ~~PlanWriter~~ ✅
 2. **Phase 2**: Planning ✅
    - ~~Intake~~ ✅, ~~ContextRAG~~ ✅, ~~Planner~~ ✅
-3. **Phase 2.5**: Policy & Adaptive Infrastructure
-   - PolicyEngine
-4. **Phase 3**: Orchestration
-   - PreviewOrchestrator, ApprovalGate, ExecuteOrchestrator
+3. **Phase 2.5**: Policy & Adaptive Infrastructure ✅
+   - ~~PolicyEngine~~ ✅
+4. **Phase 3**: Orchestration ✅
+   - ~~PreviewOrchestrator~~ ✅, ~~ApprovalGate~~ ✅, ~~ExecuteOrchestrator~~ ✅ (includes Reasoner role)
 5. **Phase 4**: Advanced
-   - ExecutionMonitor, Audit
+   - ~~ExecutionMonitor~~ ✅, Audit
 
 ---
 
@@ -201,6 +212,39 @@ Legend:
 - See `docs/architecture/Project_HLD.md` for detailed component descriptions
 
 ## Recent Achievements
+
+### Reasoner — Not a Separate Component (confirmed Apr 2026)
+- **Reasoner is a runtime agent role**, not a standalone component (per HLD §4, GLOBAL_SPEC §2.8)
+- Fully implemented inside **ExecuteOrchestrator** via `AnthropicReasoningAdapter` + `_execute_reasoning_step()`
+- Two-tier trust enforcement: Tier 1 (sandboxed, no tools) + Tier 2 (agent reasoning, MCP tools)
+- Spawn request parsing from Anthropic tool_use blocks
+- No `components/Reasoner/` directory exists — by design
+
+### ApprovalGate (✅ Completed - Mar 2026)
+- **HITL JWT tokens**: Single-use approval tokens with Redis-backed gate state
+- **Multi-gate support**: Multiple approval gates per plan execution
+- **Preview binding**: Approval tokens bound to preview results
+- **104 tests passing**: Unit, service, adapter, API, contract tests
+- **PR**: [#19](https://github.com/AnantshreeChandola/Personal-agent/pull/19) - ApprovalGate implementation
+
+### PreviewOrchestrator (✅ Completed - Mar 2026)
+- **Read-only preview**: No side effects, dry-run MCP tool invocations
+- **Redis cache**: Preview results cached for approval binding
+- **75 tests passing**: Unit, service, adapter, API, contract tests
+- **PR**: [#18](https://github.com/AnantshreeChandola/Personal-agent/pull/18) - PreviewOrchestrator implementation
+
+### ExecuteOrchestrator (✅ Completed - Mar 2026)
+- **Pure agentic DAG execution**: asyncio.gather() for parallel steps
+- **MCP tool invocations**: Replace n8n connector nodes
+- **LLM reasoning steps**: AnthropicReasoningAdapter with two-tier trust (hosts Reasoner role)
+- **Spawn handling**: Routes spawn requests through PolicyEngine + ApprovalGate
+- **PR**: [#16](https://github.com/AnantshreeChandola/Personal-agent/pull/16) - ExecuteOrchestrator implementation
+
+### PolicyEngine (✅ Completed - Mar 2026)
+- **Deny-default evaluation**: Policy rules for LLM reasoning steps
+- **Attestation issuance**: Audit-log style attestations (not crypto-backed)
+- **HITL enforcement**: Critical actions require human approval
+- **PR**: [#17](https://github.com/AnantshreeChandola/Personal-agent/pull/17) - PolicyEngine implementation
 
 ### PlanWriter (✅ Completed - Mar 2026)
 - **Outcome persistence** to PlanLibrary, History, and VectorIndex with ordered writes

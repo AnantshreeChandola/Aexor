@@ -66,8 +66,10 @@ class ExecuteService:
         dag_resolver: DAGResolver,
         template_resolver: TemplateResolver,
         retry_policy: RetryPolicy,
+        tracker: Any | None = None,
     ) -> None:
         self._policy = policy_service
+        self._tracker = tracker
         self._registry = registry_service
         self._plan_writer = plan_writer_service
         self._mcp = mcp_client
@@ -100,6 +102,15 @@ class ExecuteService:
             },
         )
 
+        # Tracker: register execution (non-fatal)
+        if self._tracker is not None:
+            await self._tracker.register(
+                plan_id=request.plan.plan_id,
+                user_id=request.user_id,
+                trace_id=request.trace_id,
+                total_steps=len(request.plan.graph),
+            )
+
         try:
             # Phase 1: Pre-execution verification
             self._validate_approval_token(request.approval_token, request.plan)
@@ -109,8 +120,16 @@ class ExecuteService:
             levels = self._dag_resolver.resolve(request.plan.graph)
 
             # Phase 3: Level-by-level execution
+            completed_count = 0
             for level in levels:
                 await self._execute_level(level, ctx, request)
+                completed_count += len(level)
+                # Tracker: report progress (non-fatal)
+                if self._tracker is not None:
+                    await self._tracker.report_progress(
+                        plan_id=request.plan.plan_id,
+                        completed_steps=completed_count,
+                    )
 
             # Phase 4: Build success outcome
             outcome = self._build_outcome(ctx, now_iso)
@@ -128,6 +147,17 @@ class ExecuteService:
 
         # Phase 5: Persist outcome (non-fatal)
         await self._persist_outcome(request, outcome, start)
+
+        # Tracker: mark completion (non-fatal)
+        if self._tracker is not None:
+            error_type = outcome.error_type if not outcome.success else None
+            error_details = outcome.error_details if not outcome.success else None
+            await self._tracker.complete(
+                plan_id=request.plan.plan_id,
+                success=outcome.success,
+                error_type=error_type,
+                error_details=error_details,
+            )
 
         duration_ms = int((time.monotonic() - start) * 1000)
         logger.info(
@@ -770,6 +800,7 @@ def create_execute_service(
     llm_client: LLMClient,
     credential_vault: Any,
     redis_client: Any,
+    tracker: Any | None = None,
 ) -> ExecuteService:
     """Create ExecuteService with all dependencies.
 
@@ -793,4 +824,5 @@ def create_execute_service(
         dag_resolver=dag_resolver,
         template_resolver=template_resolver,
         retry_policy=retry_policy,
+        tracker=tracker,
     )

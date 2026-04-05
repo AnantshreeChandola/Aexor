@@ -15,7 +15,7 @@
     },
     "value": {
       "description": "Preference value - type determined by metadata.type",
-      "oneOf": [
+      "anyOf": [
         {"type": "string"},
         {"type": "number"},
         {"type": "integer"},

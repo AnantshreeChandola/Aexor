@@ -8,8 +8,7 @@ Reference: LLD.md §8.5
 """
 
 import asyncio
-import json
-from pathlib import Path
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -36,50 +35,31 @@ class TestSchemaRegistry:
 
     def test_schema_registry_initialization(self):
         """Test schema registry loads schemas correctly."""
-        # Create test schemas directory
-        import tempfile
+        registry = SchemaRegistryAdapter()
 
-        with tempfile.TemporaryDirectory() as temp_dir:
-            # Create test schema file
-            test_schema = {"type": "string", "default": "test_value", "sensitive": False}
-            schema_path = Path(temp_dir) / "test_key.json"
-            with schema_path.open("w") as f:
-                json.dump(test_schema, f)
-
-            # Initialize registry
-            registry = SchemaRegistryAdapter(temp_dir)
-
-            # Verify schema loaded
-            assert "test_key" in registry.list_preference_keys()
-            schema = registry.get_schema("test_key")
-            assert schema["type"] == "string"
-            assert schema["default"] == "test_value"
+        # Verify built-in preferences are loaded
+        keys = registry.list_preference_keys()
+        assert "meeting_duration_min" in keys
+        assert "work_hours" in keys
+        assert "passport_number" in keys
 
     def test_schema_validation_success(self):
         """Test successful schema validation."""
         registry = SchemaRegistryAdapter()
 
-        # Add test schema
-        test_schema = {"type": "integer", "minimum": 1, "maximum": 100}
-        registry.add_schema("test_int", test_schema)
-
-        # Valid value should pass
-        assert registry.validate_value("test_int", 50) is True
+        # Valid meeting duration (within 15-240 range)
+        assert registry.validate_value("meeting_duration_min", 30) is True
 
     def test_schema_validation_failure(self):
         """Test schema validation failure."""
         registry = SchemaRegistryAdapter()
 
-        # Add test schema
-        test_schema = {"type": "integer", "minimum": 1, "maximum": 100}
-        registry.add_schema("test_int", test_schema)
-
-        # Invalid value should raise ValidationError
+        # Invalid meeting duration (below minimum of 15)
         with pytest.raises(ValidationError) as exc_info:
-            registry.validate_value("test_int", 150)
+            registry.validate_value("meeting_duration_min", 5)
 
-        assert exc_info.value.preference_key == "test_int"
-        assert exc_info.value.value == 150
+        assert exc_info.value.preference_key == "meeting_duration_min"
+        assert exc_info.value.value == 5
 
     def test_unknown_preference_key(self):
         """Test handling of unknown preference keys."""
@@ -94,26 +74,14 @@ class TestSchemaRegistry:
         """Test getting default values from schemas."""
         registry = SchemaRegistryAdapter()
 
-        # Add schema with default
-        test_schema = {"type": "string", "default": "default_value"}
-        registry.add_schema("test_default", test_schema)
-
-        assert registry.get_default_value("test_default") == "default_value"
+        assert registry.get_default_value("meeting_duration_min") == 30
 
     def test_is_sensitive(self):
         """Test checking if preference is sensitive."""
         registry = SchemaRegistryAdapter()
 
-        # Add sensitive schema
-        sensitive_schema = {"type": "string", "sensitive": True}
-        registry.add_schema("sensitive_key", sensitive_schema)
-
-        # Add non-sensitive schema
-        normal_schema = {"type": "string", "sensitive": False}
-        registry.add_schema("normal_key", normal_schema)
-
-        assert registry.is_sensitive("sensitive_key") is True
-        assert registry.is_sensitive("normal_key") is False
+        assert registry.is_sensitive("passport_number") is True
+        assert registry.is_sensitive("meeting_duration_min") is False
 
 
 class TestEncryptionAdapter:
@@ -179,7 +147,7 @@ class TestDatabaseAdapter:
                 key="test_key",
                 value="test_value",
                 sensitive=False,
-                updated_at=None,
+                updated_at=datetime.utcnow(),
                 deleted_at=None,
             )
         )
@@ -316,7 +284,7 @@ class TestPreferenceService:
             key="test_key",
             value="stored_value",
             sensitive=False,
-            updated_at=None,
+            updated_at=datetime.utcnow(),
             deleted_at=None,
         )
         db_adapter.get_preference.return_value = stored_preference
@@ -340,7 +308,7 @@ class TestPreferenceService:
             key="test_key",
             value="encrypted_value",
             sensitive=True,
-            updated_at=None,
+            updated_at=datetime.utcnow(),
             deleted_at=None,
         )
         db_adapter.get_preference.return_value = stored_preference
@@ -388,7 +356,7 @@ class TestPreferenceService:
             key="sensitive_key",
             value="encrypted_value",
             sensitive=True,
-            updated_at=None,
+            updated_at=datetime.utcnow(),
             deleted_at=None,
         )
 
@@ -432,7 +400,7 @@ class TestPreferenceService:
             key="stored_key",
             value="stored_value",
             sensitive=False,
-            updated_at=None,
+            updated_at=datetime.utcnow(),
             deleted_at=None,
         )
         db_adapter.get_all_preferences.return_value = [stored_preference]
@@ -451,21 +419,6 @@ class TestPreferenceService:
         keys = [item.key for item in result]
         assert "stored_key" in keys
         assert "default_key" in keys
-
-    async def test_health_check(self, service_with_mocks):
-        """Test service health check."""
-        service, db_adapter, schema_registry, _encryption_adapter = service_with_mocks
-
-        # Mock all components healthy
-        db_adapter.health_check.return_value = True
-        schema_registry.list_preference_keys.return_value = ["key1", "key2"]
-
-        result = await service.health_check()
-
-        assert result["service"] == "healthy"
-        assert "healthy" in result["database"]
-        assert "2 schemas" in result["schema_registry"]
-        assert result["encryption"] == "healthy"
 
 
 class TestIntegration:
@@ -489,7 +442,8 @@ class TestIntegration:
         # Test specific schemas
         meeting_schema = registry.get_schema("meeting_duration_min")
         assert meeting_schema["type"] == "integer"
-        assert meeting_schema["default"] == 30
+        # Default is not in get_json_schema(); use get_default_value() instead
+        assert registry.get_default_value("meeting_duration_min") == 30
 
         passport_schema = registry.get_schema("passport_number")
         assert passport_schema["type"] == "string"

@@ -538,3 +538,46 @@ class CredentialVaultTable(Base):
         Index("idx_credential_vault_user_tool", user_id, tool_id),
         Index("idx_credential_vault_user_id", user_id),
     )
+
+
+# ExecutionMonitor Tables - Owned by ExecutionMonitor component
+
+
+class ExecutionTrackerTable(Base):
+    """
+    Execution tracker table - monitors running plan executions.
+
+    Owned by ExecutionMonitor component.
+    Background watchdog polls this table to detect stuck/timed-out executions.
+    """
+
+    __tablename__ = "execution_tracker"
+
+    tracker_id = Column(
+        SQLAlchemy_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    plan_id = Column(String(26), nullable=False)
+    user_id = Column(String(255), nullable=False)
+    trace_id = Column(String(255), nullable=False)
+    status = Column(String(32), nullable=False, server_default=text("'running'"))
+    total_steps = Column(Integer, nullable=False, server_default=text("0"))
+    completed_steps = Column(Integer, nullable=False, server_default=text("0"))
+    error_type = Column(String(64), nullable=True)
+    error_details = Column(JSONB, nullable=True)
+    notification_sent = Column(Boolean, nullable=False, server_default=text("false"))
+    started_at = Column(DateTime(timezone=True), nullable=False, server_default=text("NOW()"))
+    last_progress_at = Column(DateTime(timezone=True), nullable=False, server_default=text("NOW()"))
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index(
+            "idx_execution_tracker_active",
+            status,
+            started_at,
+            postgresql_where=text("status = 'running'"),
+        ),
+        Index("idx_execution_tracker_plan_id", plan_id),
+        Index("idx_execution_tracker_user_id", user_id),
+    )
