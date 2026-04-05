@@ -90,3 +90,13 @@ def get_preview_service(request: Request) -> Any:
 def get_approval_service(request: Request) -> Any:
     """Get ApprovalService singleton from app state."""
     return request.app.state.approval_service
+
+
+def get_tracker_service(request: Request) -> Any:
+    """Get TrackerService singleton from app state."""
+    return request.app.state.tracker_service
+
+
+def get_monitor_service(request: Request) -> Any:
+    """Get MonitorService singleton from app state."""
+    return request.app.state.monitor_service

@@ -9,6 +9,8 @@ Usage:
     app = create_app()
 """
 
+import asyncio
+import contextlib
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -240,11 +242,49 @@ async def lifespan(app: FastAPI):
         logger.warning("ApprovalGate init failed: %s", exc)
         app.state.approval_service = None
 
+    # ExecutionMonitor services (background watchdog, graceful degradation)
+    monitor_task = None
+    try:
+        from components.ExecutionMonitor.adapters.notifier import LogNotifier
+        from components.ExecutionMonitor.adapters.tracker_db import TrackerDatabaseAdapter
+        from components.ExecutionMonitor.service.monitor_service import MonitorService
+        from components.ExecutionMonitor.service.tracker_service import TrackerService
+
+        tracker_db = TrackerDatabaseAdapter()
+        app.state.tracker_service = TrackerService(tracker_db=tracker_db)
+        app.state.monitor_service = MonitorService(
+            tracker_db=tracker_db,
+            notifier=LogNotifier(),
+        )
+
+        # Wire tracker into ExecuteOrchestrator
+        if app.state.execute_service is not None:
+            app.state.execute_service._tracker = app.state.tracker_service
+
+        # Start background monitor task
+        monitor_task = asyncio.create_task(
+            app.state.monitor_service.run(), name="execution-monitor"
+        )
+    except Exception as exc:
+        logger.warning("ExecutionMonitor init failed: %s", exc)
+        app.state.tracker_service = None
+        app.state.monitor_service = None
+
     logger.info("All services initialized")
 
     yield
 
     # --- Shutdown ---
+    # Stop ExecutionMonitor background task
+    if monitor_task is not None:
+        try:
+            app.state.monitor_service.stop()
+            monitor_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await monitor_task
+        except Exception as exc:
+            logger.warning("ExecutionMonitor shutdown error: %s", exc)
+
     if intake_redis is not None:
         await intake_redis.close()
     await db.close()
