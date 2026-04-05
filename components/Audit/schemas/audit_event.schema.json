@@ -1,0 +1,52 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AuditEvent",
+  "description": "Schema for an immutable audit event record",
+  "type": "object",
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "minLength": 26,
+      "maxLength": 26,
+      "description": "26-char ULID"
+    },
+    "event_type": {
+      "type": "string",
+      "enum": [
+        "execution_started",
+        "step_completed",
+        "step_failed",
+        "execution_completed",
+        "execution_failed",
+        "approval_granted",
+        "approval_expired",
+        "policy_attestation",
+        "policy_denial",
+        "execution_stuck",
+        "execution_timeout"
+      ]
+    },
+    "plan_id": {
+      "type": ["string", "null"]
+    },
+    "user_id": {
+      "type": ["string", "null"]
+    },
+    "trace_id": {
+      "type": ["string", "null"]
+    },
+    "step_number": {
+      "type": ["integer", "null"]
+    },
+    "event_data": {
+      "type": "object"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 datetime"
+    }
+  },
+  "required": ["event_id", "event_type", "event_data", "created_at"],
+  "additionalProperties": false
+}

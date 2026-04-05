@@ -100,3 +100,8 @@ def get_tracker_service(request: Request) -> Any:
 def get_monitor_service(request: Request) -> Any:
     """Get MonitorService singleton from app state."""
     return request.app.state.monitor_service
+
+
+def get_audit_service(request: Request) -> Any:
+    """Get AuditService singleton from app state."""
+    return request.app.state.audit_service
