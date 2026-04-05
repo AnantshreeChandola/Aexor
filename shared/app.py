@@ -223,6 +223,23 @@ async def lifespan(app: FastAPI):
         logger.warning("PreviewOrchestrator init failed: %s", exc)
         app.state.preview_service = None
 
+    # ApprovalGate service (library -- no routes, graceful degradation)
+    try:
+        from components.ApprovalGate.service.approval_service import (
+            create_approval_service,
+        )
+
+        app.state.approval_service = create_approval_service(
+            preview_service=app.state.preview_service,
+            policy_service=app.state.policy_service,
+            redis_client=intake_redis,
+            jwt_secret=os.environ.get("APPROVAL_TOKEN_SECRET", ""),
+            token_ttl_s=int(os.environ.get("APPROVAL_TOKEN_TTL_S", "900")),
+        )
+    except Exception as exc:
+        logger.warning("ApprovalGate init failed: %s", exc)
+        app.state.approval_service = None
+
     logger.info("All services initialized")
 
     yield
