@@ -67,9 +67,11 @@ class ExecuteService:
         template_resolver: TemplateResolver,
         retry_policy: RetryPolicy,
         tracker: Any | None = None,
+        audit: Any | None = None,
     ) -> None:
         self._policy = policy_service
         self._tracker = tracker
+        self._audit = audit
         self._registry = registry_service
         self._plan_writer = plan_writer_service
         self._mcp = mcp_client
@@ -80,6 +82,36 @@ class ExecuteService:
         self._dag_resolver = dag_resolver
         self._template_resolver = template_resolver
         self._retry = retry_policy
+
+    async def _emit_audit(
+        self,
+        event_type: str,
+        plan_id: str,
+        user_id: str | None = None,
+        trace_id: str | None = None,
+        step_number: int | None = None,
+        **extra: Any,
+    ) -> None:
+        """Fire-and-forget audit event. Never raises."""
+        if self._audit is None:
+            return
+        try:
+            import ulid as _ulid
+
+            from components.Audit.domain.models import AuditEvent, AuditEventType
+
+            event = AuditEvent(
+                event_id=_ulid.new().str,
+                event_type=AuditEventType(event_type),
+                plan_id=plan_id,
+                user_id=user_id,
+                trace_id=trace_id,
+                step_number=step_number,
+                event_data=extra,
+            )
+            await self._audit.record(event)
+        except Exception:
+            pass  # fire-and-forget
 
     async def execute_plan(self, request: ExecuteRequest) -> PlanOutcome:
         """Execute an approved plan end-to-end."""
@@ -100,6 +132,15 @@ class ExecuteService:
                 "total_steps": len(request.plan.graph),
                 "step_types": [s.type for s in request.plan.graph],
             },
+        )
+
+        # Audit: execution_started
+        await self._emit_audit(
+            "execution_started",
+            plan_id=request.plan.plan_id,
+            user_id=request.user_id,
+            trace_id=request.trace_id,
+            total_steps=len(request.plan.graph),
         )
 
         # Tracker: register execution (non-fatal)
@@ -145,7 +186,19 @@ class ExecuteService:
         except Exception as exc:
             outcome = self._build_error_outcome(exc, now_iso, ctx)
 
-        # Phase 5: Persist outcome (non-fatal)
+        # Phase 5: Audit outcome
+        audit_type = "execution_completed" if outcome.success else "execution_failed"
+        await self._emit_audit(
+            audit_type,
+            plan_id=request.plan.plan_id,
+            user_id=request.user_id,
+            trace_id=request.trace_id,
+            success=outcome.success,
+            total_steps=outcome.total_steps,
+            error_type=outcome.error_type,
+        )
+
+        # Phase 6: Persist outcome (non-fatal)
         await self._persist_outcome(request, outcome, start)
 
         # Tracker: mark completion (non-fatal)
@@ -303,6 +356,18 @@ class ExecuteService:
                 "latency_ms": latency_ms,
                 "status": "completed",
             },
+        )
+
+        # Audit: step_completed
+        await self._emit_audit(
+            "step_completed",
+            plan_id=ctx.plan.plan_id,
+            user_id=ctx.user_id,
+            trace_id=ctx.trace_id,
+            step_number=step.step,
+            role=step.role,
+            status="completed",
+            latency_ms=latency_ms,
         )
 
         return step_result
@@ -527,6 +592,16 @@ class ExecuteService:
                     "violations": decision.violations,
                 },
             )
+            # Audit: policy_denial
+            await self._emit_audit(
+                "policy_denial",
+                plan_id=ctx.plan.plan_id,
+                user_id=ctx.user_id,
+                trace_id=ctx.trace_id,
+                step_number=parent.step,
+                reason=decision.reason,
+                violations=decision.violations,
+            )
             raise SpawnDeniedError(decision.reason, decision.violations)
 
         # 6. Create attestation
@@ -534,6 +609,18 @@ class ExecuteService:
         attestation = self._create_attestation(ctx, parent, spawned, decision)
         ctx.attestations.append(attestation)
         ctx.spawned_steps.append(spawned)
+
+        # Audit: policy_attestation
+        await self._emit_audit(
+            "policy_attestation",
+            plan_id=ctx.plan.plan_id,
+            user_id=ctx.user_id,
+            trace_id=ctx.trace_id,
+            step_number=parent.step,
+            attestation_id=attestation.attestation_id,
+            plan_revision=ctx.plan_revision,
+            spawned_step=spawned.step,
+        )
 
         logger.info(
             "spawn_approved",
@@ -602,6 +689,18 @@ class ExecuteService:
                 "error_type": type(error).__name__,
                 "retries": getattr(error, "retries", 0),
             },
+        )
+
+        # Audit: step_failed
+        await self._emit_audit(
+            "step_failed",
+            plan_id=ctx.plan.plan_id,
+            user_id=ctx.user_id,
+            trace_id=ctx.trace_id,
+            step_number=step.step,
+            role=step.role,
+            error_type=type(error).__name__,
+            error_details=str(error)[:500],
         )
 
         reasoner = self._find_recovery_reasoner(ctx.plan.graph)
