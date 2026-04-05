@@ -10,7 +10,7 @@ Reference: LLD.md Section 5
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 # ---------------------------------------------------------------------------
 
 
-class AuditEventType(str, Enum):
+class AuditEventType(StrEnum):
     """All auditable event types in the system."""
 
     EXECUTION_STARTED = "execution_started"
