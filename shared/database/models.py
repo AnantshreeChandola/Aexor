@@ -607,9 +607,7 @@ class AuditEventTable(Base):
     __table_args__ = (
         Index("idx_audit_events_plan_id", plan_id, postgresql_where=text("plan_id IS NOT NULL")),
         Index("idx_audit_events_user_id", user_id, postgresql_where=text("user_id IS NOT NULL")),
-        Index(
-            "idx_audit_events_trace_id", trace_id, postgresql_where=text("trace_id IS NOT NULL")
-        ),
+        Index("idx_audit_events_trace_id", trace_id, postgresql_where=text("trace_id IS NOT NULL")),
         Index("idx_audit_events_event_type", event_type),
         Index("idx_audit_events_created_at", created_at),
         Index(
