@@ -37,7 +37,9 @@ class TestTrackerServiceRegister:
     """TrackerService.register() tests."""
 
     @pytest.mark.asyncio
-    async def test_register_creates_record(self, tracker_service: TrackerService, fake_db: FakeTrackerDB):
+    async def test_register_creates_record(
+        self, tracker_service: TrackerService, fake_db: FakeTrackerDB
+    ):
         await tracker_service.register(SAMPLE_PLAN_ID, SAMPLE_USER_ID, SAMPLE_TRACE_ID, 5)
         record = fake_db.get_record(SAMPLE_PLAN_ID)
         assert record is not None
@@ -46,20 +48,26 @@ class TestTrackerServiceRegister:
         assert record.completed_steps == 0
 
     @pytest.mark.asyncio
-    async def test_register_sets_timestamps(self, tracker_service: TrackerService, fake_db: FakeTrackerDB):
+    async def test_register_sets_timestamps(
+        self, tracker_service: TrackerService, fake_db: FakeTrackerDB
+    ):
         await tracker_service.register(SAMPLE_PLAN_ID, SAMPLE_USER_ID, SAMPLE_TRACE_ID, 3)
         record = fake_db.get_record(SAMPLE_PLAN_ID)
         assert record.started_at is not None
         assert record.last_progress_at is not None
 
     @pytest.mark.asyncio
-    async def test_register_nonfatal_on_db_failure(self, tracker_service: TrackerService, fake_db: FakeTrackerDB):
+    async def test_register_nonfatal_on_db_failure(
+        self, tracker_service: TrackerService, fake_db: FakeTrackerDB
+    ):
         fake_db.set_should_fail(True)
         # Must not raise
         await tracker_service.register(SAMPLE_PLAN_ID, SAMPLE_USER_ID, SAMPLE_TRACE_ID, 5)
 
     @pytest.mark.asyncio
-    async def test_register_zero_steps(self, tracker_service: TrackerService, fake_db: FakeTrackerDB):
+    async def test_register_zero_steps(
+        self, tracker_service: TrackerService, fake_db: FakeTrackerDB
+    ):
         await tracker_service.register(SAMPLE_PLAN_ID, SAMPLE_USER_ID, SAMPLE_TRACE_ID, 0)
         record = fake_db.get_record(SAMPLE_PLAN_ID)
         assert record.total_steps == 0
@@ -69,14 +77,18 @@ class TestTrackerServiceProgress:
     """TrackerService.report_progress() tests."""
 
     @pytest.mark.asyncio
-    async def test_progress_updates_steps(self, tracker_service: TrackerService, fake_db: FakeTrackerDB):
+    async def test_progress_updates_steps(
+        self, tracker_service: TrackerService, fake_db: FakeTrackerDB
+    ):
         await tracker_service.register(SAMPLE_PLAN_ID, SAMPLE_USER_ID, SAMPLE_TRACE_ID, 5)
         await tracker_service.report_progress(SAMPLE_PLAN_ID, 3)
         record = fake_db.get_record(SAMPLE_PLAN_ID)
         assert record.completed_steps == 3
 
     @pytest.mark.asyncio
-    async def test_progress_updates_last_progress_at(self, tracker_service: TrackerService, fake_db: FakeTrackerDB):
+    async def test_progress_updates_last_progress_at(
+        self, tracker_service: TrackerService, fake_db: FakeTrackerDB
+    ):
         await tracker_service.register(SAMPLE_PLAN_ID, SAMPLE_USER_ID, SAMPLE_TRACE_ID, 5)
         before = fake_db.get_record(SAMPLE_PLAN_ID).last_progress_at
         await asyncio.sleep(0.01)
@@ -85,7 +97,9 @@ class TestTrackerServiceProgress:
         assert after >= before
 
     @pytest.mark.asyncio
-    async def test_progress_nonfatal_on_db_failure(self, tracker_service: TrackerService, fake_db: FakeTrackerDB):
+    async def test_progress_nonfatal_on_db_failure(
+        self, tracker_service: TrackerService, fake_db: FakeTrackerDB
+    ):
         fake_db.set_should_fail(True)
         await tracker_service.report_progress(SAMPLE_PLAN_ID, 3)
 
@@ -95,7 +109,9 @@ class TestTrackerServiceProgress:
         await tracker_service.report_progress("01NONEXISTENT000000000000AB", 1)
 
     @pytest.mark.asyncio
-    async def test_progress_multiple_updates(self, tracker_service: TrackerService, fake_db: FakeTrackerDB):
+    async def test_progress_multiple_updates(
+        self, tracker_service: TrackerService, fake_db: FakeTrackerDB
+    ):
         await tracker_service.register(SAMPLE_PLAN_ID, SAMPLE_USER_ID, SAMPLE_TRACE_ID, 10)
         await tracker_service.report_progress(SAMPLE_PLAN_ID, 3)
         await tracker_service.report_progress(SAMPLE_PLAN_ID, 7)
@@ -129,7 +145,9 @@ class TestTrackerServiceComplete:
         assert record.error_details == {"step": 3}
 
     @pytest.mark.asyncio
-    async def test_complete_nonfatal_on_db_failure(self, tracker_service: TrackerService, fake_db: FakeTrackerDB):
+    async def test_complete_nonfatal_on_db_failure(
+        self, tracker_service: TrackerService, fake_db: FakeTrackerDB
+    ):
         fake_db.set_should_fail(True)
         await tracker_service.complete(SAMPLE_PLAN_ID, success=True)
 
@@ -138,7 +156,9 @@ class TestTrackerServiceComplete:
         await tracker_service.complete("01NONEXISTENT000000000000AB", success=True)
 
     @pytest.mark.asyncio
-    async def test_complete_already_completed_noop(self, tracker_service: TrackerService, fake_db: FakeTrackerDB):
+    async def test_complete_already_completed_noop(
+        self, tracker_service: TrackerService, fake_db: FakeTrackerDB
+    ):
         await tracker_service.register(SAMPLE_PLAN_ID, SAMPLE_USER_ID, SAMPLE_TRACE_ID, 5)
         await tracker_service.complete(SAMPLE_PLAN_ID, success=True)
         # Second complete is a no-op (status is no longer 'running')
@@ -164,8 +184,10 @@ class TestMonitorServiceStuck:
     ):
         fake_db.inject_record(stuck_record)
         monitor = MonitorService(
-            tracker_db=fake_db, notifier=fake_notifier,
-            stuck_timeout_minutes=5, max_execution_minutes=60,
+            tracker_db=fake_db,
+            notifier=fake_notifier,
+            stuck_timeout_minutes=5,
+            max_execution_minutes=60,
         )
         await monitor._check_active_executions()
         record = fake_db.get_record(SAMPLE_PLAN_ID)
@@ -181,8 +203,10 @@ class TestMonitorServiceStuck:
     ):
         fake_db.inject_record(stuck_record)
         monitor = MonitorService(
-            tracker_db=fake_db, notifier=fake_notifier,
-            stuck_timeout_minutes=5, max_execution_minutes=60,
+            tracker_db=fake_db,
+            notifier=fake_notifier,
+            stuck_timeout_minutes=5,
+            max_execution_minutes=60,
         )
         await monitor._check_active_executions()
         assert len(fake_notifier.notifications) == 1
@@ -197,8 +221,10 @@ class TestMonitorServiceStuck:
     ):
         fake_db.inject_record(stuck_record)
         monitor = MonitorService(
-            tracker_db=fake_db, notifier=fake_notifier,
-            stuck_timeout_minutes=5, max_execution_minutes=60,
+            tracker_db=fake_db,
+            notifier=fake_notifier,
+            stuck_timeout_minutes=5,
+            max_execution_minutes=60,
         )
         await monitor._check_active_executions()
         record = fake_db.get_record(SAMPLE_PLAN_ID)
@@ -213,8 +239,10 @@ class TestMonitorServiceStuck:
     ):
         fake_db.inject_record(healthy_record)
         monitor = MonitorService(
-            tracker_db=fake_db, notifier=fake_notifier,
-            stuck_timeout_minutes=5, max_execution_minutes=60,
+            tracker_db=fake_db,
+            notifier=fake_notifier,
+            stuck_timeout_minutes=5,
+            max_execution_minutes=60,
         )
         await monitor._check_active_executions()
         record = fake_db.get_record(SAMPLE_PLAN_ID)
@@ -230,8 +258,10 @@ class TestMonitorServiceStuck:
     ):
         fake_db.inject_record(already_notified_stuck_record)
         monitor = MonitorService(
-            tracker_db=fake_db, notifier=fake_notifier,
-            stuck_timeout_minutes=5, max_execution_minutes=60,
+            tracker_db=fake_db,
+            notifier=fake_notifier,
+            stuck_timeout_minutes=5,
+            max_execution_minutes=60,
         )
         await monitor._check_active_executions()
         assert len(fake_notifier.notifications) == 0
@@ -254,8 +284,10 @@ class TestMonitorServiceTimeout:
     ):
         fake_db.inject_record(timeout_record)
         monitor = MonitorService(
-            tracker_db=fake_db, notifier=fake_notifier,
-            stuck_timeout_minutes=5, max_execution_minutes=60,
+            tracker_db=fake_db,
+            notifier=fake_notifier,
+            stuck_timeout_minutes=5,
+            max_execution_minutes=60,
         )
         await monitor._check_active_executions()
         record = fake_db.get_record(SAMPLE_PLAN_ID)
@@ -271,8 +303,10 @@ class TestMonitorServiceTimeout:
     ):
         fake_db.inject_record(timeout_record)
         monitor = MonitorService(
-            tracker_db=fake_db, notifier=fake_notifier,
-            stuck_timeout_minutes=5, max_execution_minutes=60,
+            tracker_db=fake_db,
+            notifier=fake_notifier,
+            stuck_timeout_minutes=5,
+            max_execution_minutes=60,
         )
         await monitor._check_active_executions()
         assert len(fake_notifier.notifications) == 1
@@ -298,8 +332,10 @@ class TestMonitorServiceTimeout:
         )
         fake_db.inject_record(record)
         monitor = MonitorService(
-            tracker_db=fake_db, notifier=fake_notifier,
-            stuck_timeout_minutes=5, max_execution_minutes=60,
+            tracker_db=fake_db,
+            notifier=fake_notifier,
+            stuck_timeout_minutes=5,
+            max_execution_minutes=60,
         )
         await monitor._check_active_executions()
         result = fake_db.get_record(SAMPLE_PLAN_ID)
@@ -326,8 +362,10 @@ class TestMonitorServiceTimeout:
         )
         fake_db.inject_record(record)
         monitor = MonitorService(
-            tracker_db=fake_db, notifier=fake_notifier,
-            stuck_timeout_minutes=5, max_execution_minutes=60,
+            tracker_db=fake_db,
+            notifier=fake_notifier,
+            stuck_timeout_minutes=5,
+            max_execution_minutes=60,
         )
         await monitor._check_active_executions()
         result = fake_db.get_record(SAMPLE_PLAN_ID)
@@ -402,8 +440,10 @@ class TestMonitorServiceNotificationFailure:
         notifier.set_should_fail(True)
         fake_db.inject_record(stuck_record)
         monitor = MonitorService(
-            tracker_db=fake_db, notifier=notifier,
-            stuck_timeout_minutes=5, max_execution_minutes=60,
+            tracker_db=fake_db,
+            notifier=notifier,
+            stuck_timeout_minutes=5,
+            max_execution_minutes=60,
         )
         await monitor._check_active_executions()
         record = fake_db.get_record(SAMPLE_PLAN_ID)
@@ -420,8 +460,10 @@ class TestMonitorServiceNotificationFailure:
         notifier.set_should_fail(True)
         fake_db.inject_record(stuck_record)
         monitor = MonitorService(
-            tracker_db=fake_db, notifier=notifier,
-            stuck_timeout_minutes=5, max_execution_minutes=60,
+            tracker_db=fake_db,
+            notifier=notifier,
+            stuck_timeout_minutes=5,
+            max_execution_minutes=60,
         )
         await monitor._check_active_executions()
         record = fake_db.get_record(SAMPLE_PLAN_ID)
@@ -438,7 +480,9 @@ class TestMonitorServiceMultipleExecutions:
     """MonitorService handles multiple concurrent executions."""
 
     @pytest.mark.asyncio
-    async def test_processes_multiple_executions(self, fake_db: FakeTrackerDB, fake_notifier: FakeNotifier):
+    async def test_processes_multiple_executions(
+        self, fake_db: FakeTrackerDB, fake_notifier: FakeNotifier
+    ):
         now = datetime.now(UTC)
         stuck = TrackerRecord(
             tracker_id=str(uuid4()),
@@ -466,8 +510,10 @@ class TestMonitorServiceMultipleExecutions:
         fake_db.inject_record(healthy)
 
         monitor = MonitorService(
-            tracker_db=fake_db, notifier=fake_notifier,
-            stuck_timeout_minutes=5, max_execution_minutes=60,
+            tracker_db=fake_db,
+            notifier=fake_notifier,
+            stuck_timeout_minutes=5,
+            max_execution_minutes=60,
         )
         await monitor._check_active_executions()
 
@@ -483,7 +529,9 @@ class TestMonitorServiceMultipleExecutions:
         assert len(fake_notifier.notifications) == 1
 
     @pytest.mark.asyncio
-    async def test_completed_executions_not_polled(self, fake_db: FakeTrackerDB, fake_notifier: FakeNotifier):
+    async def test_completed_executions_not_polled(
+        self, fake_db: FakeTrackerDB, fake_notifier: FakeNotifier
+    ):
         """Completed records are not in active executions query."""
         now = datetime.now(UTC)
         completed = TrackerRecord(
@@ -501,8 +549,10 @@ class TestMonitorServiceMultipleExecutions:
         fake_db.inject_record(completed)
 
         monitor = MonitorService(
-            tracker_db=fake_db, notifier=fake_notifier,
-            stuck_timeout_minutes=5, max_execution_minutes=60,
+            tracker_db=fake_db,
+            notifier=fake_notifier,
+            stuck_timeout_minutes=5,
+            max_execution_minutes=60,
         )
         await monitor._check_active_executions()
 

@@ -106,9 +106,7 @@ class FakeTrackerDB:
         record = self._records.get(plan_id)
         if record is None:
             return False
-        self._records[plan_id] = record.model_copy(
-            update={"notification_sent": True}
-        )
+        self._records[plan_id] = record.model_copy(update={"notification_sent": True})
         return True
 
     async def get_active_executions(self, limit: int = 100) -> list[TrackerRecord]:

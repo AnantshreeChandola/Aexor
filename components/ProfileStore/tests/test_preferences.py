@@ -420,6 +420,7 @@ class TestPreferenceService:
         assert "stored_key" in keys
         assert "default_key" in keys
 
+
 class TestIntegration:
     """Integration tests with real components (no database)."""
 

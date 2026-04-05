@@ -44,7 +44,9 @@ class TestTrackerServiceLogging:
         assert record.plan_id == SAMPLE_PLAN_ID
 
     @pytest.mark.asyncio
-    async def test_progress_logs_component(self, tracker_service: TrackerService, fake_db: FakeTrackerDB, caplog):
+    async def test_progress_logs_component(
+        self, tracker_service: TrackerService, fake_db: FakeTrackerDB, caplog
+    ):
         await tracker_service.register(SAMPLE_PLAN_ID, SAMPLE_USER_ID, SAMPLE_TRACE_ID, 5)
         with caplog.at_level(logging.INFO):
             await tracker_service.report_progress(SAMPLE_PLAN_ID, 3)
@@ -54,7 +56,9 @@ class TestTrackerServiceLogging:
         assert progress_records[0].component == "ExecutionMonitor"
 
     @pytest.mark.asyncio
-    async def test_complete_logs_component(self, tracker_service: TrackerService, fake_db: FakeTrackerDB, caplog):
+    async def test_complete_logs_component(
+        self, tracker_service: TrackerService, fake_db: FakeTrackerDB, caplog
+    ):
         await tracker_service.register(SAMPLE_PLAN_ID, SAMPLE_USER_ID, SAMPLE_TRACE_ID, 5)
         with caplog.at_level(logging.INFO):
             await tracker_service.complete(SAMPLE_PLAN_ID, success=True)
@@ -64,7 +68,9 @@ class TestTrackerServiceLogging:
         assert comp_records[0].component == "ExecutionMonitor"
 
     @pytest.mark.asyncio
-    async def test_failure_logs_warning(self, tracker_service: TrackerService, fake_db: FakeTrackerDB, caplog):
+    async def test_failure_logs_warning(
+        self, tracker_service: TrackerService, fake_db: FakeTrackerDB, caplog
+    ):
         fake_db.set_should_fail(True)
         with caplog.at_level(logging.WARNING):
             await tracker_service.register(SAMPLE_PLAN_ID, SAMPLE_USER_ID, SAMPLE_TRACE_ID, 5)
@@ -102,8 +108,10 @@ class TestMonitorServiceLogging:
     ):
         fake_db.inject_record(stuck_record)
         monitor = MonitorService(
-            tracker_db=fake_db, notifier=FakeNotifier(),
-            stuck_timeout_minutes=5, max_execution_minutes=60,
+            tracker_db=fake_db,
+            notifier=FakeNotifier(),
+            stuck_timeout_minutes=5,
+            max_execution_minutes=60,
         )
         with caplog.at_level(logging.WARNING):
             await monitor._check_active_executions()
@@ -121,8 +129,10 @@ class TestMonitorServiceLogging:
     ):
         fake_db.inject_record(timeout_record)
         monitor = MonitorService(
-            tracker_db=fake_db, notifier=FakeNotifier(),
-            stuck_timeout_minutes=5, max_execution_minutes=60,
+            tracker_db=fake_db,
+            notifier=FakeNotifier(),
+            stuck_timeout_minutes=5,
+            max_execution_minutes=60,
         )
         with caplog.at_level(logging.WARNING):
             await monitor._check_active_executions()
@@ -140,7 +150,9 @@ class TestMonitorServiceLogging:
             try:
                 await monitor._check_active_executions()
             except Exception as exc:
-                monitor_logger = logging.getLogger("components.ExecutionMonitor.service.monitor_service")
+                monitor_logger = logging.getLogger(
+                    "components.ExecutionMonitor.service.monitor_service"
+                )
                 monitor_logger.error(
                     "monitor_poll_error",
                     extra={
@@ -162,8 +174,10 @@ class TestMonitorServiceLogging:
     ):
         fake_db.inject_record(stuck_record)
         monitor = MonitorService(
-            tracker_db=fake_db, notifier=FakeNotifier(),
-            stuck_timeout_minutes=5, max_execution_minutes=60,
+            tracker_db=fake_db,
+            notifier=FakeNotifier(),
+            stuck_timeout_minutes=5,
+            max_execution_minutes=60,
         )
         with caplog.at_level(logging.DEBUG):
             await monitor._check_active_executions()
@@ -191,7 +205,9 @@ class TestLogNotifierLogging:
             failure_type="stuck",
             message="Test notification",
         )
-        with caplog.at_level(logging.WARNING, logger="components.ExecutionMonitor.adapters.notifier"):
+        with caplog.at_level(
+            logging.WARNING, logger="components.ExecutionMonitor.adapters.notifier"
+        ):
             result = await notifier.notify(notification)
         assert result is True
         notify_records = [r for r in caplog.records if "execution_notification" in r.message]
@@ -210,7 +226,9 @@ class TestLogNotifierLogging:
             failure_type="timeout",
             message="Timeout notification",
         )
-        with caplog.at_level(logging.WARNING, logger="components.ExecutionMonitor.adapters.notifier"):
+        with caplog.at_level(
+            logging.WARNING, logger="components.ExecutionMonitor.adapters.notifier"
+        ):
             await notifier.notify(notification)
         notify_records = [r for r in caplog.records if "execution_notification" in r.message]
         assert len(notify_records) >= 1

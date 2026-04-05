@@ -84,9 +84,19 @@ class TestTrackerRecordSerialization:
         )
         data = record.model_dump()
         expected_keys = {
-            "tracker_id", "plan_id", "user_id", "trace_id", "status",
-            "total_steps", "completed_steps", "error_type", "error_details",
-            "notification_sent", "started_at", "last_progress_at", "completed_at",
+            "tracker_id",
+            "plan_id",
+            "user_id",
+            "trace_id",
+            "status",
+            "total_steps",
+            "completed_steps",
+            "error_type",
+            "error_details",
+            "notification_sent",
+            "started_at",
+            "last_progress_at",
+            "completed_at",
         }
         assert set(data.keys()) == expected_keys
 
@@ -122,9 +132,19 @@ class TestTableModelAlignment:
     def test_tracker_record_has_all_table_columns(self):
         """TrackerRecord must have fields for every execution_tracker column."""
         expected_columns = [
-            "tracker_id", "plan_id", "user_id", "trace_id", "status",
-            "total_steps", "completed_steps", "error_type", "error_details",
-            "notification_sent", "started_at", "last_progress_at", "completed_at",
+            "tracker_id",
+            "plan_id",
+            "user_id",
+            "trace_id",
+            "status",
+            "total_steps",
+            "completed_steps",
+            "error_type",
+            "error_details",
+            "notification_sent",
+            "started_at",
+            "last_progress_at",
+            "completed_at",
         ]
         model_fields = set(TrackerRecord.model_fields.keys())
         for col in expected_columns:
@@ -133,15 +153,27 @@ class TestTableModelAlignment:
     def test_execution_tracker_table_exists(self):
         """ExecutionTrackerTable should be importable from shared models."""
         from shared.database.models import ExecutionTrackerTable
+
         assert ExecutionTrackerTable.__tablename__ == "execution_tracker"
 
     def test_table_has_expected_columns(self):
         from shared.database.models import ExecutionTrackerTable
+
         table_columns = {c.name for c in ExecutionTrackerTable.__table__.columns}
         expected = {
-            "tracker_id", "plan_id", "user_id", "trace_id", "status",
-            "total_steps", "completed_steps", "error_type", "error_details",
-            "notification_sent", "started_at", "last_progress_at", "completed_at",
+            "tracker_id",
+            "plan_id",
+            "user_id",
+            "trace_id",
+            "status",
+            "total_steps",
+            "completed_steps",
+            "error_type",
+            "error_details",
+            "notification_sent",
+            "started_at",
+            "last_progress_at",
+            "completed_at",
         }
         assert expected.issubset(table_columns)
 

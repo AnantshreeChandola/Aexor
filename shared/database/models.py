@@ -567,12 +567,8 @@ class ExecutionTrackerTable(Base):
     error_type = Column(String(64), nullable=True)
     error_details = Column(JSONB, nullable=True)
     notification_sent = Column(Boolean, nullable=False, server_default=text("false"))
-    started_at = Column(
-        DateTime(timezone=True), nullable=False, server_default=text("NOW()")
-    )
-    last_progress_at = Column(
-        DateTime(timezone=True), nullable=False, server_default=text("NOW()")
-    )
+    started_at = Column(DateTime(timezone=True), nullable=False, server_default=text("NOW()"))
+    last_progress_at = Column(DateTime(timezone=True), nullable=False, server_default=text("NOW()"))
     completed_at = Column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
