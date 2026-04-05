@@ -270,6 +270,25 @@ async def lifespan(app: FastAPI):
         app.state.tracker_service = None
         app.state.monitor_service = None
 
+    # Audit service (platform layer — append-only audit log, graceful degradation)
+    try:
+        from components.Audit.adapters.db import AuditDatabaseAdapter
+        from components.Audit.service.audit_service import AuditService
+
+        audit_db = AuditDatabaseAdapter()
+        app.state.audit_service = AuditService(db_adapter=audit_db)
+
+        # Wire audit into upstream components
+        if app.state.execute_service is not None:
+            app.state.execute_service._audit = app.state.audit_service
+        if app.state.approval_service is not None:
+            app.state.approval_service._audit = app.state.audit_service
+        if app.state.monitor_service is not None:
+            app.state.monitor_service._audit = app.state.audit_service
+    except Exception as exc:
+        logger.warning("Audit init failed: %s", exc)
+        app.state.audit_service = None
+
     logger.info("All services initialized")
 
     yield
@@ -324,6 +343,10 @@ def create_app() -> FastAPI:
     from components.ExecuteOrchestrator.api.routes import router as execute_router
 
     app.include_router(execute_router)
+
+    from components.Audit.api.routes import router as audit_router
+
+    app.include_router(audit_router)
 
     # Root health check
     @app.get("/health")

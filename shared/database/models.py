@@ -581,3 +581,39 @@ class ExecutionTrackerTable(Base):
         Index("idx_execution_tracker_plan_id", plan_id),
         Index("idx_execution_tracker_user_id", user_id),
     )
+
+
+# Audit Tables - Owned by Audit component
+
+
+class AuditEventTable(Base):
+    """
+    Audit events table - immutable, append-only audit log.
+
+    Owned by Audit component. No UPDATE allowed; only INSERT and DELETE (retention).
+    """
+
+    __tablename__ = "audit_events"
+
+    event_id = Column(String(26), primary_key=True)  # ULID
+    event_type = Column(String(32), nullable=False)
+    plan_id = Column(String(26), nullable=True)
+    user_id = Column(String(255), nullable=True)
+    trace_id = Column(String(255), nullable=True)
+    step_number = Column(Integer, nullable=True)
+    event_data = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("NOW()"))
+
+    __table_args__ = (
+        Index("idx_audit_events_plan_id", plan_id, postgresql_where=text("plan_id IS NOT NULL")),
+        Index("idx_audit_events_user_id", user_id, postgresql_where=text("user_id IS NOT NULL")),
+        Index("idx_audit_events_trace_id", trace_id, postgresql_where=text("trace_id IS NOT NULL")),
+        Index("idx_audit_events_event_type", event_type),
+        Index("idx_audit_events_created_at", created_at),
+        Index(
+            "idx_audit_events_plan_created",
+            plan_id,
+            created_at,
+            postgresql_where=text("plan_id IS NOT NULL"),
+        ),
+    )
