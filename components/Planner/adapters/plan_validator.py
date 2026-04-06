@@ -32,8 +32,8 @@ MAX_PLAN_SIZE = 102_400  # 100KB total plan
 class PlanValidator:
     """3-layer validation pipeline for LLM-generated plans."""
 
-    def __init__(self, registry_service: Any = None) -> None:
-        self._registry_service = registry_service
+    def __init__(self) -> None:
+        pass
 
     async def validate(
         self,

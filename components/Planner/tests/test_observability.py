@@ -23,16 +23,16 @@ from .conftest import SAMPLE_INTENT
 def _make_service_with_adapter(
     adapter,
     context_rag,
-    registry,
+    tool_catalog,
     plan_service,
 ):
     return PlannerService(
         context_rag_service=context_rag,
-        registry_service=registry,
+        tool_catalog=tool_catalog,
         plan_service=plan_service,
         llm_adapter=adapter,
         prompt_builder=PromptBuilder(),
-        validator=PlanValidator(registry_service=registry),
+        validator=PlanValidator(),
         primary_breaker=CircuitBreaker(model_name="p", failure_threshold=1),
         fallback_breaker=CircuitBreaker(model_name="f", failure_threshold=1),
         primary_model="test-primary",
@@ -99,7 +99,7 @@ class TestObservability:
     async def test_fallback_triggered_logged(
         self,
         mock_context_rag_service,
-        mock_registry_service,
+        mock_tool_catalog,
         mock_plan_service,
         caplog,
     ):
@@ -109,7 +109,7 @@ class TestObservability:
         svc = _make_service_with_adapter(
             adapter,
             mock_context_rag_service,
-            mock_registry_service,
+            mock_tool_catalog,
             mock_plan_service,
         )
         with caplog.at_level(logging.WARNING):
@@ -120,7 +120,7 @@ class TestObservability:
     @pytest.mark.asyncio
     async def test_context_rag_failure_logged(
         self,
-        mock_registry_service,
+        mock_tool_catalog,
         mock_plan_service,
         mock_llm_adapter,
         caplog,
@@ -132,7 +132,7 @@ class TestObservability:
         svc = _make_service_with_adapter(
             mock_llm_adapter,
             failing_crag,
-            mock_registry_service,
+            mock_tool_catalog,
             mock_plan_service,
         )
         with caplog.at_level(logging.WARNING):

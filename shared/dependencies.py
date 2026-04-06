@@ -42,11 +42,6 @@ def get_pattern_service(request: Request) -> Any:
     return request.app.state.pattern_service
 
 
-def get_registry_service(request: Request) -> Any:
-    """Get RegistryService singleton from app state."""
-    return request.app.state.registry_service
-
-
 def get_vector_index_service(request: Request) -> Any:
     """Get VectorIndexService singleton from app state."""
     return request.app.state.vector_index_service

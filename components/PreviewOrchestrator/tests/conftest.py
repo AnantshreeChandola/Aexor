@@ -5,7 +5,6 @@ PreviewOrchestrator test fixtures -- mock adapters, sample plans, configured ser
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -13,11 +12,6 @@ import pytest
 from components.ExecuteOrchestrator.adapters.dag_resolver import DAGResolver
 from components.ExecuteOrchestrator.adapters.template_resolver import (
     TemplateResolver,
-)
-from components.PluginRegistry.domain.models import (
-    OperationModel,
-    ToolModel,
-    ToolNotFoundError,
 )
 from components.PreviewOrchestrator.adapters.preview_cache import (
     PreviewCacheAdapter,
@@ -31,6 +25,7 @@ from components.PreviewOrchestrator.domain.models import (
 from components.PreviewOrchestrator.service.preview_service import (
     PreviewService,
 )
+from shared.mcp.catalog import ToolDefinition
 from shared.schemas.intent import Intent
 from shared.schemas.plan import Plan, PlanMeta, PlanStep
 
@@ -299,25 +294,13 @@ def mock_mcp_client() -> AsyncMock:
 def _make_tool(
     tool_id: str,
     operations: dict[str, bool] | None = None,
-) -> ToolModel:
-    """Build a ToolModel with configurable previewable flags."""
-    if operations is None:
-        operations = {}
-    ops = {}
-    for op_id, previewable in operations.items():
-        ops[op_id] = OperationModel(
-            operation_id=op_id,
-            n8n_node=f"n8n_{op_id}",
-            previewable=previewable,
-        )
-    return ToolModel(
-        tool_id=tool_id,
-        display_name=tool_id.replace(".", " ").title(),
-        credential_template=f"cred_{tool_id}_{{{{user_id}}}}",
-        n8n_credential_type=f"n8n_{tool_id}",
-        operations=ops,
-        created_at=datetime.now(UTC),
-        updated_at=datetime.now(UTC),
+) -> ToolDefinition:
+    """Build a ToolDefinition for test fixtures."""
+    return ToolDefinition(
+        name=tool_id,
+        server_name="test",
+        provider_name=tool_id.split(".")[0] if "." in tool_id else tool_id,
+        description=f"Test tool {tool_id}",
     )
 
 
@@ -371,15 +354,13 @@ PREVIEWABLE_TOOLS = {
 
 @pytest.fixture()
 def mock_registry_service() -> AsyncMock:
-    """Mock RegistryService. get_tool() returns ToolModel with configurable ops."""
+    """Mock ToolCatalog. get_tool() returns ToolDefinition or None."""
     service = AsyncMock()
 
-    async def _get_tool(tool_id: str, **kwargs: Any) -> ToolModel:
-        if tool_id in PREVIEWABLE_TOOLS:
-            return PREVIEWABLE_TOOLS[tool_id]
-        raise ToolNotFoundError(tool_id)
+    def _get_tool(tool_id: str) -> ToolDefinition | None:
+        return PREVIEWABLE_TOOLS.get(tool_id)
 
-    service.get_tool = AsyncMock(side_effect=_get_tool)
+    service.get_tool = _get_tool
     return service
 
 
@@ -441,7 +422,7 @@ def preview_service(
         mcp_client=mock_mcp_client,
         checker=checker,
         cache=cache,
-        registry_service=mock_registry_service,
+        tool_catalog=mock_registry_service,
     )
 
 
@@ -462,5 +443,5 @@ def preview_service_no_redis(
         mcp_client=mock_mcp_client,
         checker=checker,
         cache=cache,
-        registry_service=mock_registry_service,
+        tool_catalog=mock_registry_service,
     )

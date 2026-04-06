@@ -67,7 +67,7 @@ class PlannerResult(BaseModel):
     )
     registry_version: int = Field(
         ...,
-        description="PluginRegistry version used for this plan",
+        description="ToolCatalog version used for this plan",
     )
 
 
@@ -117,7 +117,7 @@ class LLMCallError(PlannerError):
 
 
 class ToolNotAvailableError(PlannerError):
-    """Intent requires tools that are not registered in the PluginRegistry."""
+    """Intent requires tools that are not registered in the ToolCatalog."""
 
     def __init__(self, intent_type: str, required_tools: list[str]) -> None:
         self.intent_type = intent_type

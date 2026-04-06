@@ -1,7 +1,7 @@
 """
 PlannerService — deterministic plan generation orchestrator.
 
-Coordinates: ContextRAG → PluginRegistry → LLM (with fallbacks) → Validator → Hasher
+Coordinates: ContextRAG → ToolCatalog → LLM (with fallbacks) → Validator → Hasher
 
 Reference: LLD SS7
 """
@@ -43,7 +43,7 @@ class PlannerService:
     def __init__(
         self,
         context_rag_service: Any,
-        registry_service: Any,
+        tool_catalog: Any,
         plan_service: Any,
         llm_adapter: LLMAdapter,
         prompt_builder: PromptBuilder,
@@ -55,7 +55,7 @@ class PlannerService:
         max_output_tokens: int,
     ) -> None:
         self._context_rag = context_rag_service
-        self._registry = registry_service
+        self._tool_catalog = tool_catalog
         self._plan_service = plan_service
         self._llm = llm_adapter
         self._prompt = prompt_builder
@@ -74,11 +74,11 @@ class PlannerService:
         """Lightweight query: determine required entities for an intent type.
 
         Step 1: Ask LLM what tools and entities are needed (no catalog context).
-        Step 2: Validate the LLM's tool suggestions against the PluginRegistry.
+        Step 2: Validate the LLM's tool suggestions against the ToolCatalog.
 
         Raises:
             ToolNotAvailableError: If none of the LLM-suggested tools exist in
-                the registry.
+                the catalog.
 
         This is NOT a full plan generation — no ContextRAG.
         """
@@ -161,28 +161,33 @@ class PlannerService:
                 extra={"component": "planner", "intent_type": intent_type, "error": str(e)},
             )
 
-        # ── Step 2: Validate tools against PluginRegistry ───────────────
-        registry_available = True
+        # ── Step 2: Validate tools against ToolCatalog ───────────────
+        catalog_available = True
         try:
-            catalog = await self._registry.list_catalog()
-            registered_ids = {t.tool_id for t in catalog.tools}
-        except Exception:
+            tools = self._tool_catalog.get_all_tools()
+            registered_names = {t.name for t in tools}
+        except Exception as exc:
             logger.warning(
-                "registry_unavailable_for_entities",
-                extra={"component": "planner", "intent_type": intent_type},
+                "catalog_unavailable_for_entities",
+                extra={
+                    "component": "planner",
+                    "intent_type": intent_type,
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                },
             )
-            # Registry down — skip tool validation, let it through
-            registered_ids = set()
-            registry_available = False
+            # Catalog unavailable — skip tool validation, let it through
+            registered_names = set()
+            catalog_available = False
 
         resolved_tools: list[str] = []
-        if suggested_tools and registry_available:
-            resolved_tools = [t for t in suggested_tools if t in registered_ids]
-            missing_tools = [t for t in suggested_tools if t not in registered_ids]
+        if suggested_tools and catalog_available:
+            resolved_tools = [t for t in suggested_tools if t in registered_names]
+            missing_tools = [t for t in suggested_tools if t not in registered_names]
 
             if missing_tools:
                 logger.info(
-                    "tools_not_in_registry",
+                    "tools_not_in_catalog",
                     extra={
                         "component": "planner",
                         "intent_type": intent_type,
@@ -192,14 +197,17 @@ class PlannerService:
                 )
 
             if not resolved_tools:
-                # None of the LLM-suggested tools exist in the registry
+                # None of the LLM-suggested tools exist in the catalog
                 raise ToolNotAvailableError(
                     intent_type=intent_type,
                     required_tools=suggested_tools,
                 )
-        elif suggested_tools and not registry_available:
-            # Registry down — pass through LLM suggestions unvalidated
-            resolved_tools = suggested_tools
+        elif suggested_tools and not catalog_available:
+            # Catalog unavailable — cannot verify tools exist
+            raise ToolNotAvailableError(
+                intent_type=intent_type,
+                required_tools=suggested_tools,
+            )
 
         # ── Step 3: Build EntityRequirement list ─────────────────────────
         required_entities = []
@@ -265,24 +273,23 @@ class PlannerService:
             evidence = []
             context_degraded = True
 
-        # 2. Get tool catalog from PluginRegistry
+        # 2. Get tool catalog from ToolCatalog
         try:
-            catalog = await self._registry.list_catalog()
-            registry_version = catalog.registry_version
-            tool_ids = {t.tool_id for t in catalog.tools}
+            tools = self._tool_catalog.get_all_tools()
+            tool_names = {t.name for t in tools}
         except Exception:
-            logger.warning("registry_unavailable", extra={"component": "planner"})
-            catalog = None
-            registry_version = 0
-            tool_ids = set()
+            logger.warning("catalog_unavailable", extra={"component": "planner"})
+            tools = []
+            tool_names = set()
+        registry_version = 0  # ToolCatalog has no versioning (TTL-based refresh)
 
         # 3. Build prompts
         system_prompt = self._prompt.build_system_prompt()
-        user_prompt = self._prompt.build_user_prompt(intent, evidence, catalog)
+        user_prompt = self._prompt.build_user_prompt(intent, evidence, tools)
 
         # 4. Generate plan with fallback hierarchy
         plan, fallback_level = await self._generate_with_fallback(
-            system_prompt, user_prompt, intent, registry_version, tool_ids
+            system_prompt, user_prompt, intent, registry_version, tool_names
         )
 
         # 5. Finalize plan (plan_id, intent, plugins, meta with hash)
@@ -541,7 +548,7 @@ class PlannerService:
 
 def create_planner_service(
     context_rag_service: Any,
-    registry_service: Any,
+    tool_catalog: Any,
     plan_service: Any,
     llm_adapter: LLMAdapter | None = None,
 ) -> PlannerService:
@@ -554,13 +561,13 @@ def create_planner_service(
         llm_adapter = AnthropicAdapter()
 
     prompt_builder = PromptBuilder()
-    validator = PlanValidator(registry_service=registry_service)
+    validator = PlanValidator()
     primary_breaker = CircuitBreaker(model_name=primary_model)
     fallback_breaker = CircuitBreaker(model_name=fallback_model)
 
     return PlannerService(
         context_rag_service=context_rag_service,
-        registry_service=registry_service,
+        tool_catalog=tool_catalog,
         plan_service=plan_service,
         llm_adapter=llm_adapter,
         prompt_builder=prompt_builder,

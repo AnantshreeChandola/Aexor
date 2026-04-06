@@ -137,7 +137,7 @@ class IntentParserError(IntakeError):
 
 
 class ToolNotAvailableError(IntakeError):
-    """Intent requires tools not registered in PluginRegistry."""
+    """Intent requires tools not registered in ToolCatalog."""
 
     def __init__(
         self,

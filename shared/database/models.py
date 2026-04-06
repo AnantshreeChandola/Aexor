@@ -19,7 +19,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 
 try:
     from pgvector.sqlalchemy import Vector
@@ -331,108 +331,6 @@ class FactPatternTable(Base):
     )
 
 
-# PluginRegistry Tables - Owned by PluginRegistry component
-
-
-class ToolTable(Base):
-    """
-    Tools table - registered external integrations.
-
-    Owned by PluginRegistry component.
-    Stores credential vault IDs only, NEVER actual secrets.
-    """
-
-    __tablename__ = "tools"
-
-    tool_id = Column(String(128), primary_key=True)
-    display_name = Column(String(255), nullable=False)
-    credential_template = Column(String(512), nullable=False)
-    mcp_server = Column(String(128), nullable=False)
-    transport = Column(String(32), nullable=False, server_default=text("'stdio'"))
-    active = Column(Boolean, nullable=False, default=True)
-    created_at = Column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=text("NOW()"),
-    )
-    updated_at = Column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=text("NOW()"),
-    )
-
-    __table_args__ = (
-        Index(
-            "idx_tools_active",
-            tool_id,
-            postgresql_where=text("active = TRUE"),
-        ),
-    )
-
-
-class OperationTable(Base):
-    """
-    Operations table - capabilities of a registered tool.
-
-    Owned by PluginRegistry component.
-    """
-
-    __tablename__ = "operations"
-
-    id = Column(
-        SQLAlchemy_UUID(as_uuid=True),
-        primary_key=True,
-        server_default=text("gen_random_uuid()"),
-    )
-    operation_id = Column(String(128), nullable=False)
-    tool_id = Column(
-        String(128),
-        ForeignKey("tools.tool_id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    mcp_tool = Column(String(255), nullable=False)
-    previewable = Column(Boolean, nullable=False, default=False)
-    idempotent = Column(Boolean, nullable=False, default=False)
-    scopes = Column(
-        ARRAY(String),
-        nullable=False,
-        server_default=text("'{}'"),
-    )
-    compensation = Column(String(128), nullable=True)
-    created_at = Column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=text("NOW()"),
-    )
-
-    __table_args__ = (
-        UniqueConstraint(
-            "tool_id",
-            "operation_id",
-            name="uq_operations_tool_operation",
-        ),
-        Index("idx_operations_tool", tool_id),
-    )
-
-
-class RegistryVersionTable(Base):
-    """
-    Registry versions table - monotonically increasing version counter.
-
-    Owned by PluginRegistry component.
-    """
-
-    __tablename__ = "registry_versions"
-
-    version = Column(Integer, primary_key=True)
-    created_at = Column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=text("NOW()"),
-    )
-    change_summary = Column(String(512), nullable=False)
-
-
 # PolicyEngine Tables - Owned by PolicyEngine component
 
 
@@ -491,14 +389,14 @@ class PolicyAttestationTable(Base):
     )
 
 
-# Credential Vault Tables - Owned by PluginRegistry component
+# Credential Vault Tables - Owned by ExecuteOrchestrator component
 
 
 class CredentialVaultTable(Base):
     """
     Credential vault table - AES-256-GCM encrypted credentials.
 
-    Owned by PluginRegistry component. LLM never sees plaintext values.
+    Owned by ExecuteOrchestrator component. LLM never sees plaintext values.
     Credentials are decrypted at execution time by ExecuteOrchestrator only.
     """
 
@@ -516,7 +414,6 @@ class CredentialVaultTable(Base):
     )
     tool_id = Column(
         String(128),
-        ForeignKey("tools.tool_id", ondelete="CASCADE"),
         nullable=False,
     )
     encrypted_value = Column(LargeBinary, nullable=False)
@@ -615,5 +512,51 @@ class AuditEventTable(Base):
             plan_id,
             created_at,
             postgresql_where=text("plan_id IS NOT NULL"),
+        ),
+    )
+
+
+# User Connections Tables - Owned by IntegrationManager
+
+
+class UserConnectionTable(Base):
+    """
+    User connections table - tracks provider connection status per user.
+
+    NOT a credential store. Boolean status used by the intake layer
+    to validate tool availability. OAuth tokens are managed by the
+    hosted MCP service (e.g. Composio).
+    """
+
+    __tablename__ = "user_connections"
+
+    id = Column(
+        SQLAlchemy_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    user_id = Column(
+        SQLAlchemy_UUID(as_uuid=True),
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    provider_name = Column(String(64), nullable=False)
+    is_connected = Column(Boolean, nullable=False, default=False)
+    connected_at = Column(DateTime(timezone=True), nullable=True)
+    disconnected_at = Column(DateTime(timezone=True), nullable=True)
+    composio_entity_id = Column(String(128), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            user_id,
+            provider_name,
+            name="uq_user_connections_user_provider",
+        ),
+        Index("idx_user_connections_user_id", user_id),
+        Index(
+            "idx_user_connections_user_provider",
+            user_id,
+            provider_name,
+            postgresql_where=text("is_connected = TRUE"),
         ),
     )

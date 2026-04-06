@@ -1,8 +1,9 @@
 """
 Previewability Checker Adapter
 
-Queries PluginRegistry to determine if a tool operation is previewable.
-Returns False on any lookup failure (fail-safe).
+Queries ToolCatalog to determine if a tool is previewable.
+In the MCP model, any tool present in the catalog is previewable
+(MCP dry-run mode handles read-only semantics).
 
 Reference: LLD.md Section 6.3
 """
@@ -16,40 +17,29 @@ logger = logging.getLogger(__name__)
 
 
 class PreviewabilityChecker:
-    """Check PluginRegistry for operation previewability."""
+    """Check ToolCatalog for tool previewability."""
 
-    def __init__(self, registry_service: Any) -> None:
-        self._registry = registry_service
+    def __init__(self, tool_catalog: Any) -> None:
+        self._catalog = tool_catalog
 
     async def is_previewable(
         self,
         tool_id: str,
-        operation_id: str,
+        operation_id: str,  # noqa: ARG002 — kept for interface compat
     ) -> bool:
-        """Check if a tool operation is marked previewable.
+        """Check if a tool is previewable.
 
-        Returns False if tool/operation not found (fail-safe).
+        In the MCP model, any tool present in the catalog is previewable.
+        Returns False if tool not found (fail-safe).
         """
         try:
-            tool = await self._registry.get_tool(tool_id)
-            op = tool.operations.get(operation_id)
-            if op is None:
-                logger.warning(
-                    "previewability_check_failed",
-                    extra={
-                        "tool_id": tool_id,
-                        "operation_id": operation_id,
-                        "reason": "operation_not_found",
-                    },
-                )
-                return False
-            return bool(op.previewable)
+            tool = self._catalog.get_tool(tool_id)
+            return tool is not None
         except Exception as exc:
             logger.warning(
                 "previewability_check_failed",
                 extra={
                     "tool_id": tool_id,
-                    "operation_id": operation_id,
                     "reason": str(exc),
                 },
             )

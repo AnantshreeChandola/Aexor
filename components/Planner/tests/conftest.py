@@ -256,44 +256,17 @@ SAMPLE_PLAN_MISSING_TOOL = json.dumps(
 # ---------------------------------------------------------------------------
 
 
-def _make_tool_model(tool_id: str, display_name: str, operations: dict | None = None):
-    """Create a mock ToolModel-like object."""
-    tool = MagicMock()
-    tool.tool_id = tool_id
-    tool.display_name = display_name
-    tool.active = True
-    if operations:
-        ops = {}
-        for op_id, op_data in operations.items():
-            op = MagicMock()
-            op.previewable = op_data.get("previewable", False)
-            op.idempotent = op_data.get("idempotent", False)
-            op.scopes = op_data.get("scopes", [])
-            ops[op_id] = op
-        tool.operations = ops
-    else:
-        tool.operations = {}
-    return tool
+def _make_tool_definition(name: str, description: str = "", server_name: str = "composio"):
+    """Create a ToolDefinition-like object for tests."""
+    from shared.mcp.catalog import ToolDefinition
 
-
-def _make_catalog_response(tools, registry_version=1):
-    """Create a mock CatalogResponse-like object."""
-    catalog = MagicMock()
-    catalog.tools = tools
-    catalog.registry_version = registry_version
-    catalog.total = len(tools)
-    catalog.page = 1
-    catalog.page_size = 50
-    return catalog
-
-
-def _make_validation_result(valid=True, issues=None):
-    """Create a mock ValidationResult-like object."""
-    result = MagicMock()
-    result.valid = valid
-    result.current_version = 1
-    result.issues = issues or []
-    return result
+    return ToolDefinition(
+        name=name,
+        server_name=server_name,
+        provider_name=name.split(".")[0] if "." in name else name,
+        description=description,
+        input_schema={},
+    )
 
 
 @pytest.fixture()
@@ -349,42 +322,27 @@ def mock_degraded_context_rag_service():
 
 
 @pytest.fixture()
-def mock_registry_service():
-    """PluginRegistry with google.calendar and system.echo tools."""
-    svc = AsyncMock()
+def mock_tool_catalog():
+    """ToolCatalog with google.calendar and system.echo tools."""
+    catalog = MagicMock()
     tools = [
-        _make_tool_model(
-            "google.calendar",
-            "Google Calendar",
-            {
-                "list_events": {"previewable": True, "scopes": ["calendar.read"]},
-                "create_event": {"previewable": False, "scopes": ["calendar.write"]},
-            },
-        ),
-        _make_tool_model(
-            "system.echo",
-            "System Echo",
-            {
-                "echo": {"previewable": True, "scopes": []},
-                "analyze": {"previewable": True, "scopes": []},
-                "notify": {"previewable": True, "scopes": []},
-            },
-        ),
+        _make_tool_definition("google.calendar", "Google Calendar"),
+        _make_tool_definition("system.echo", "System Echo"),
     ]
-    svc.list_catalog = AsyncMock(return_value=_make_catalog_response(tools))
-    svc.validate_plan_tools = AsyncMock(return_value=_make_validation_result())
-    svc.get_version = AsyncMock(return_value=1)
-    return svc
+    catalog.get_all_tools = MagicMock(return_value=tools)
+    catalog.get_tool = MagicMock(
+        side_effect=lambda name: next((t for t in tools if t.name == name), None)
+    )
+    return catalog
 
 
 @pytest.fixture()
-def mock_empty_registry_service():
-    """PluginRegistry with no tools."""
-    svc = AsyncMock()
-    svc.list_catalog = AsyncMock(return_value=_make_catalog_response([]))
-    svc.validate_plan_tools = AsyncMock(return_value=_make_validation_result())
-    svc.get_version = AsyncMock(return_value=1)
-    return svc
+def mock_empty_tool_catalog():
+    """ToolCatalog with no tools."""
+    catalog = MagicMock()
+    catalog.get_all_tools = MagicMock(return_value=[])
+    catalog.get_tool = MagicMock(return_value=None)
+    return catalog
 
 
 @pytest.fixture()
@@ -443,17 +401,17 @@ def mock_empty_plan_service():
 def planner_service(
     mock_llm_adapter,
     mock_context_rag_service,
-    mock_registry_service,
+    mock_tool_catalog,
     mock_plan_service,
 ):
     """Fully wired PlannerService with all mocks."""
     return PlannerService(
         context_rag_service=mock_context_rag_service,
-        registry_service=mock_registry_service,
+        tool_catalog=mock_tool_catalog,
         plan_service=mock_plan_service,
         llm_adapter=mock_llm_adapter,
         prompt_builder=PromptBuilder(),
-        validator=PlanValidator(registry_service=mock_registry_service),
+        validator=PlanValidator(),
         primary_breaker=CircuitBreaker(model_name="primary-test"),
         fallback_breaker=CircuitBreaker(model_name="fallback-test"),
         primary_model="test-primary",

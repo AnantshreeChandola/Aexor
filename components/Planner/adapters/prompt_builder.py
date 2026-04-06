@@ -33,8 +33,8 @@ Return ONLY a valid JSON object (no markdown, no code fences) matching this sche
       "step": <int, 1-indexed>,
       "mode": "interactive" | "durable",
       "role": "Fetcher" | "Analyzer" | "Watcher" | "Resolver" | "Booker" | "Notifier" | "Reasoner",
-      "uses": "<tool_id from catalog>",
-      "call": "<operation_id>",
+      "uses": "<tool_name from catalog>",
+      "call": "<same tool_name>",
       "args": { ... },
       "after": [<step numbers this depends on>],
       "timeout_s": <int, 5-3600, default 30>,
@@ -66,7 +66,7 @@ Return ONLY a valid JSON object (no markdown, no code fences) matching this sche
 ## Rules
 1. Every step MUST have "dry_run": true (preview-first safety).
 2. Steps with role "Booker" MUST have a non-null "gate_id" (format: "gate-A", "gate-B", etc.) for human-in-the-loop approval.
-3. Only use tool IDs from the provided catalog. Do NOT invent tools.
+3. Only use tool names from the provided catalog. The `uses` and `call` fields should both be the tool name.
 4. Step dependencies in "after" must reference earlier step numbers only (no forward or self-references).
 5. Steps are numbered sequentially starting from 1.
 6. Maximum 50 steps, maximum 10 parallel steps (steps with same "after" dependency).
@@ -109,20 +109,22 @@ Return ONLY a valid JSON object (no markdown, no code fences) matching this sche
 
         # Build tool catalog section
         tools_info = []
-        if hasattr(catalog, "tools"):
-            for tool in catalog.tools:
+        if isinstance(catalog, list):
+            # list[ToolDefinition] from ToolCatalog
+            for tool in catalog:
                 tool_entry: dict[str, Any] = {
-                    "tool_id": tool.tool_id,
-                    "display_name": tool.display_name,
-                    "operations": {},
+                    "name": tool.name,
+                    "description": tool.description,
+                    "input_schema": tool.input_schema,
                 }
-                if hasattr(tool, "operations") and tool.operations:
-                    for op_id, op in tool.operations.items():
-                        tool_entry["operations"][op_id] = {
-                            "previewable": op.previewable,
-                            "idempotent": op.idempotent,
-                            "scopes": op.scopes,
-                        }
+                tools_info.append(tool_entry)
+        elif hasattr(catalog, "tools"):
+            # Legacy CatalogResponse fallback
+            for tool in catalog.tools:
+                tool_entry = {
+                    "tool_id": tool.tool_id,
+                    "display_name": getattr(tool, "display_name", ""),
+                }
                 tools_info.append(tool_entry)
         catalog_json = json.dumps(tools_info, indent=2)
 
@@ -132,7 +134,7 @@ Return ONLY a valid JSON object (no markdown, no code fences) matching this sche
 ## Available Evidence (from memory)
 {evidence_json}
 
-## Available Tools (from registry)
+## Available Tools (from catalog)
 {catalog_json}
 
 Generate a plan that fulfills the user's intent using the available tools and evidence.
