@@ -1,5 +1,5 @@
-# Personal Agent — High-Level Design (HLD) v6.1
-_Preview-first • Human-approved • Pure agentic execution • Policy-bounded • MCP connectors_
+# Personal Agent — High-Level Design (HLD) v6.2
+_Preview-first • Human-approved • Pure agentic execution • Policy-bounded • MCP connectors • Composio integration_
 
 **Purpose:** System architecture overview with clear component responsibilities and real-world examples.
 **Audience:** Developers, architects, and stakeholders.
@@ -448,7 +448,7 @@ t=800ms:  Step 6 (Notifier) sends summary via Slack
 
 ## 3) Component Details
 
-Below are the 15 core components organized by layer. Each will have its own `SPEC.md` and `LLD.md` during implementation.
+Below are the 16 core components organized by layer. Each will have its own `SPEC.md` and `LLD.md` during implementation.
 
 ### Memory Layer (4 components)
 
@@ -487,7 +487,7 @@ Below are the 15 core components organized by layer. Each will have its own `SPE
 
 ---
 
-### Domain Layer (5 components)
+### Domain Layer (6 components)
 
 #### Intake
 **What it does**: Understands what you want across multiple messages
@@ -502,6 +502,12 @@ Intake: [still collecting, asks follow-up]
 User: "Tuesday at 10 AM"
 Intake: [ready! triggers planning]
 ```
+
+**Session-start behavior**: When a new session is created, Intake triggers cache warming via IntegrationManager:
+1. **Connection cache**: Fetches user's connected providers from DB → Redis (`connections:{user_id}`)
+2. **User tool cache**: Fetches user's available MCP tools from Composio → Redis (`user_tools:{user_id}`)
+
+Both are best-effort (failures logged but don't block session creation). Cached connections are used during readiness checks to validate tool availability without per-tool DB queries.
 
 **Output**: Intent JSON with entities and constraints
 
@@ -570,8 +576,8 @@ Intake: [ready! triggers planning]
 
 **Three connector sources**:
 1. **MCP servers**: Community-maintained protocol connectors (primary)
-2. **OpenAPI adapters**: Auto-generated MCP wrappers for REST APIs
-3. **Aggregator services**: Multi-provider APIs (e.g., SerpAPI for search)
+2. **Composio MCP**: Hosted multi-provider MCP server with per-user tool isolation — each user gets a unique MCP endpoint URL. Tools are discovered via JSON-RPC `tools/list` calls. Composio handles OAuth token management and provider API proxying.
+3. **OpenAPI adapters**: Auto-generated MCP wrappers for REST APIs
 
 **Why important**: Adding new capabilities only requires editing the Registry, not the orchestrators.
 
@@ -592,6 +598,35 @@ Intake: [ready! triggers planning]
 **Technology**: PostgreSQL (policy rules), Redis (cached policies for <5ms evaluation)
 
 **Example**: Reasoning step proposes spawning a Fetcher step → PolicyEngine checks: tool in plugins? role allowed? under step limit? → Approves with attestation.
+
+#### IntegrationManager
+**What it does**: Manages user-provider connections (OAuth via Composio) and per-user MCP tool discovery
+
+**Key responsibilities**:
+1. **OAuth connection flow**: Initiates and tracks OAuth connections between users and external providers (Gmail, Google Calendar, Slack, etc.) via Composio SDK
+2. **Connection status**: Tracks which providers each user is connected to (PostgreSQL)
+3. **Connection cache warming**: At session start, fetches all user connections from DB and caches in Redis (`connections:{user_id}`, 3600s TTL) — avoids per-tool DB round-trips during readiness checks
+4. **Per-user tool discovery**: Fetches user-specific MCP tools via Composio's per-user MCP endpoint (`tools/list` JSON-RPC call) and caches in Redis (`user_tools:{user_id}`, 3600s TTL)
+5. **Tool management API**: Allows users to add/remove tools on their Composio MCP server
+
+**Cache warming at session start**:
+```
+New session created (Intake._resolve_session)
+  ↓
+warm_connection_cache(user_id)  →  Redis: connections:{user_id} = ["gmail", "slack", ...]
+  ↓
+warm_user_tools(user_id)  →  Redis: user_tools:{user_id} = [ToolDefinition, ...]
+```
+
+**Technology**: PostgreSQL (user_connections table), Redis (connection cache, user tool cache), Composio SDK (OAuth flows), Composio MCP endpoint (per-user tool discovery)
+
+**API Endpoints**:
+- `POST /api/integrations/connect` — Initiate OAuth connection for a provider
+- `POST /api/integrations/callback` — Handle OAuth callback from Composio
+- `GET /api/integrations/connections` — List user's connection statuses
+- `GET /api/integrations/tools` — List user's available MCP tools (cached)
+- `POST /api/integrations/tools` — Register a tool on user's MCP server
+- `DELETE /api/integrations/tools/{tool_name}` — Remove a tool
 
 #### PlanWriter
 **What it does**: Persists execution results back to memory
@@ -1682,9 +1717,9 @@ usecases/<UseCase>/
 └── fixtures/           # Test data
 ```
 
-**15 Active Components**:
+**16 Active Components**:
 1. ProfileStore, History, PlanLibrary, VectorIndex (Memory Layer)
-2. Intake, ContextRAG, Planner, PluginRegistry, PlanWriter, **PolicyEngine** (Domain Layer)
+2. Intake, ContextRAG, Planner, PluginRegistry, PlanWriter, **PolicyEngine**, **IntegrationManager** (Domain Layer)
 3. PreviewOrchestrator, ApprovalGate, ExecuteOrchestrator, ExecutionMonitor (Orchestration Layer)
 4. Audit (Utilities)
 
@@ -1843,17 +1878,46 @@ finally:
 **Rationale**:
 - WorkflowBuilder's sole purpose was n8n JSON generation
 - DAG traversal and parallel grouping are simple enough to inline in ExecuteOrchestrator
-- Eliminates an entire component (17 → 15 components, with Signer also removed)
+- Eliminates an entire component (17 → 15 components at the time, with Signer also removed; 16 after adding IntegrationManager)
 
 ### MCP Connector Model
 
-**Decision**: Replace n8n's proprietary connector nodes with MCP (Model Context Protocol) servers for all external integrations.
+**Decision**: Replace n8n's proprietary connector nodes with MCP (Model Context Protocol) servers for all external integrations. Use Composio as the primary hosted MCP provider for SaaS integrations.
 
 **Rationale**:
 - **Open protocol**: MCP is an open standard with growing community adoption
-- **Three connector sources**: Native MCP servers, auto-generated OpenAPI wrappers, aggregator services
-- **Transport flexibility**: stdio, SSE, or HTTP — configurable per connector
+- **Composio hosted MCP**: Per-user MCP endpoints with 100+ provider integrations, OAuth management, and tool isolation
+- **Three connector sources**: Native MCP servers, Composio hosted MCP, auto-generated OpenAPI wrappers
+- **Transport flexibility**: stdio, SSE, or Streamable HTTP — configurable per connector
 - **No vendor lock-in**: Community-maintained connectors vs n8n's proprietary node format
+
+### Composio as Hosted MCP Provider
+
+**Decision**: Use Composio as the hosted MCP provider for external tool integrations (Gmail, Google Calendar, Slack, etc.) with per-user tool isolation.
+
+**Architecture**:
+- **Composio MCP endpoint**: Each user gets a unique MCP URL (`/v3/mcp/{config_id}?user_id={user_id}`) — tool calls are scoped to the user's connected accounts
+- **Composio REST API**: Connection status checks via `GET /api/v3/connected_accounts?user_ids=USER_ID&statuses=ACTIVE`
+- **OAuth delegation**: Composio handles the full OAuth flow (redirect URL generation, token exchange, token refresh) — the system never touches raw OAuth tokens
+- **Per-user tool discovery**: `tools/list` JSON-RPC call on the user's MCP URL returns only tools the user has access to
+- **Session-start caching**: At new session creation, both connection status and available tools are fetched and cached in Redis (3600s TTL, matching session TTL)
+
+**Cache layers**:
+- `ConnectionCache` (Redis `connections:{user_id}`): Set of connected provider names — used for fast readiness checks during intent collection
+- `UserToolCache` (Redis `user_tools:{user_id}`): Full tool definitions — used for tool listing API and plan-time tool availability
+
+**Rationale**:
+- Composio provides 100+ pre-built provider integrations with a single API
+- Per-user MCP endpoints provide natural multi-user isolation without custom credential routing
+- OAuth token management is fully delegated — the system stores connection status only, not tokens
+- Session-start caching eliminates per-tool DB/API round-trips during readiness checks
+
+**Trade-offs**:
+- **+** Rapid provider onboarding (no custom OAuth per provider)
+- **+** Multi-user tool isolation built-in
+- **+** No raw OAuth tokens in our system (reduced attack surface)
+- **-** Runtime dependency on Composio service (mitigated by graceful degradation to global catalog on failure)
+- **-** Tool names follow Composio convention (`PROVIDER_ACTION` format, e.g., `GMAIL_SEND_EMAIL`)
 
 ### NemoClaw Deployment Compatibility
 
@@ -2701,7 +2765,7 @@ async def book_meeting_with_multiple_attendees(
 After reading this HLD, you should:
 
 1. **Understand the architecture**: Preview-first, pure agentic execution, policy-bounded
-2. **Know the 16 components**: Memory, Domain (including PolicyEngine), Orchestration, Utilities layers
+2. **Know the 16 components**: Memory, Domain (including PolicyEngine, IntegrationManager), Orchestration, Utilities layers
 3. **See the flow**: Intent → Plan → Preview → Approve → Execute (with LLM reasoning + PolicyEngine + MCP) → Learn
 4. **Understand safety**: PolicyEngine governance, credential vault, two-tier LLM execution, idempotency, compensation, resource locking, privacy tiers
 
@@ -2729,8 +2793,9 @@ After reading this HLD, you should:
 
 ---
 
-**Document Version**: Project_HLD v6.1
-**Last Updated**: 2026-03-31
+**Document Version**: Project_HLD v6.2
+**Last Updated**: 2026-04-06
+**Changes from v6.1**: **Composio Integration & IntegrationManager.** (1) Added IntegrationManager as 16th component in Domain Layer — manages user-provider OAuth connections via Composio SDK, connection caching, per-user MCP tool discovery, and tool management API. (2) Updated PluginRegistry connector sources to include Composio hosted MCP. (3) Added session-start cache warming to Intake component (connection cache + user tool cache in Redis). (4) Added Composio architectural decision (§12) with cache layers, rationale, and trade-offs. (5) Updated MCP Connector Model to reference Composio. (6) Component count: 15 → 16.
 **Changes from v6.0**: **Clarified execution model.** (1) Reworded Core Idea #2: "deterministic graphs with adaptive execution points" — graph topology never changes at runtime, only Reasoner steps introduce variability. (2) Added "Execution Model: Deterministic Graph, Adaptive Execution" section with three patterns: Pure API, Adaptive with Reasoner, Failure Recovery. (3) Added "Data Trust Boundary" section: default-untrusted rule for API outputs, trust classification table, Tier 1→Tier 2 data flow diagram, plan validator enforcement. (4) Annotated §2a meeting example as pure API plan (all type:api, template resolution, no execution-time LLM). (5) Rewrote §2b travel example with explicit Tier 1 sanitization step between API outputs and Tier 2 Reasoners, trust_level annotations on each step, injection stripping example. (6) Added §2c Failure Recovery Example: step failure → error object (system-generated, trusted) → Tier 2 Reasoner → spawned recovery step → Tier 1 sanitization → continuation. (7) Renamed "Hybrid Planning" → "Deterministic Planning with Adaptive Execution" in §5 with clearer graph-vs-execution distinction. (8) Cross-referenced default-untrusted rule in GLOBAL_SPEC.md §8.2.
 **Changes from v5.1**: **Pure Agentic Execution + MCP + Security Model.** (1) Dropped n8n — all execution via Python/FastAPI ExecuteOrchestrator with MCP tool invocations. (2) WorkflowBuilder absorbed into ExecuteOrchestrator (17→16 components). (3) Replaced n8n Secrets Vault with AES-256-GCM encrypted credential vault. (4) Added two-tier LLM execution (trust_level field) for prompt injection defense. (5) MCP connector model replaces n8n proprietary nodes. (6) Long-running tasks use APScheduler + Redis instead of n8n Wait nodes. (7) Parallelism via asyncio.gather() instead of n8n Split/Merge. (8) NemoClaw deployment compatibility for infrastructure-level security.
 **Changes from v5.0**: **VectorIndex + Hybrid Execution Split.** (1) VectorIndex un-deferred — now active with hybrid BM25 + semantic search, ONNX Runtime, pgvector (§1, §3, §10, §12). 17 Active Components. (2) Hybrid execution split: n8n handles API steps, Python/FastAPI handles LLM reasoning steps. Removed custom n8n nodes (LLM Reasoning Node, Policy Check Node). Updated Core Idea #3, Orchestration Layer (§1), WorkflowBuilder (§3), Reasoner role (§4), execution timeline (§2b), credential isolation (§5), tech stack (§7), and WorkflowBuilder code (§13). (3) New architectural decision: "Hybrid Execution Split" with rationale and trade-offs (§12). (4) Updated ContextRAG description to include optional VectorIndex hybrid search with graceful degradation.

@@ -427,3 +427,331 @@ class TestGetRequiredEntitiesCatalogDown:
 
         assert exc_info.value.intent_type == "schedule_meeting"
         assert "google.calendar" in exc_info.value.required_tools
+
+
+# ===========================
+# T604: get_required_entities — provider-level matching
+# ===========================
+
+
+class TestGetRequiredEntitiesProviderMatching:
+    """Verify that provider-level fuzzy matching resolves LLM-suggested
+    tool names (e.g. 'google.calendar') to actual Composio-style catalog
+    tool names (e.g. 'GOOGLECALENDAR_CREATE_EVENT')."""
+
+    @staticmethod
+    def _make_composio_catalog():
+        """Catalog with Composio-style tool names."""
+        from shared.mcp.catalog import ToolDefinition, _extract_provider_name
+
+        tools = [
+            ToolDefinition(
+                name="GOOGLECALENDAR_CREATE_EVENT",
+                server_name="composio",
+                provider_name=_extract_provider_name("GOOGLECALENDAR_CREATE_EVENT"),
+                description="Create a Google Calendar event",
+            ),
+            ToolDefinition(
+                name="GOOGLECALENDAR_LIST_EVENTS",
+                server_name="composio",
+                provider_name=_extract_provider_name("GOOGLECALENDAR_LIST_EVENTS"),
+                description="List Google Calendar events",
+            ),
+            ToolDefinition(
+                name="SLACK_SEND_MESSAGE",
+                server_name="composio",
+                provider_name=_extract_provider_name("SLACK_SEND_MESSAGE"),
+                description="Send a Slack message",
+            ),
+            ToolDefinition(
+                name="GMAIL_SEND_EMAIL",
+                server_name="composio",
+                provider_name=_extract_provider_name("GMAIL_SEND_EMAIL"),
+                description="Send an email via Gmail",
+            ),
+        ]
+        catalog = MagicMock()
+        catalog.get_all_tools = MagicMock(return_value=tools)
+        catalog.get_tool = MagicMock(
+            side_effect=lambda name: next((t for t in tools if t.name == name), None)
+        )
+        return catalog
+
+    def _make_service(self, *, llm_response: str, tool_catalog):
+        adapter = AsyncMock()
+        adapter.generate = AsyncMock(return_value=llm_response)
+        return PlannerService(
+            context_rag_service=AsyncMock(),
+            tool_catalog=tool_catalog,
+            plan_service=AsyncMock(),
+            llm_adapter=adapter,
+            prompt_builder=PromptBuilder(),
+            validator=PlanValidator(),
+            primary_breaker=CircuitBreaker(model_name="p"),
+            fallback_breaker=CircuitBreaker(model_name="f"),
+            primary_model="test-primary",
+            fallback_model="test-fallback",
+            max_output_tokens=4096,
+        )
+
+    @pytest.mark.asyncio
+    async def test_provider_match_google_calendar(self):
+        """LLM suggests 'google.calendar', catalog has GOOGLECALENDAR_* tools."""
+        import json
+
+        llm_response = json.dumps(
+            {
+                "tools_needed": ["google.calendar"],
+                "entities": [
+                    {"name": "attendee", "description": "Who to invite", "required": True},
+                ],
+            }
+        )
+        catalog = self._make_composio_catalog()
+        svc = self._make_service(llm_response=llm_response, tool_catalog=catalog)
+
+        result = await svc.get_required_entities("schedule_meeting")
+
+        assert result.intent_type == "schedule_meeting"
+        assert len(result.resolved_tools) >= 1
+        # Resolved tool should be a Composio-style name, not the LLM suggestion
+        assert any("GOOGLECALENDAR" in t for t in result.resolved_tools)
+
+    @pytest.mark.asyncio
+    async def test_provider_match_slack(self):
+        """LLM suggests 'slack.messaging', catalog has SLACK_SEND_MESSAGE."""
+        import json
+
+        llm_response = json.dumps(
+            {
+                "tools_needed": ["slack.messaging"],
+                "entities": [
+                    {"name": "channel", "description": "Channel to post in", "required": True},
+                ],
+            }
+        )
+        catalog = self._make_composio_catalog()
+        svc = self._make_service(llm_response=llm_response, tool_catalog=catalog)
+
+        result = await svc.get_required_entities("send_message")
+
+        assert len(result.resolved_tools) >= 1
+        assert any("SLACK" in t for t in result.resolved_tools)
+
+    @pytest.mark.asyncio
+    async def test_provider_match_multiple_tools(self):
+        """LLM suggests multiple providers, all resolved via provider matching."""
+        import json
+
+        llm_response = json.dumps(
+            {
+                "tools_needed": ["google.calendar", "slack.messaging"],
+                "entities": [
+                    {"name": "attendee", "description": "Who", "required": True},
+                ],
+            }
+        )
+        catalog = self._make_composio_catalog()
+        svc = self._make_service(llm_response=llm_response, tool_catalog=catalog)
+
+        result = await svc.get_required_entities("schedule_meeting")
+
+        assert len(result.resolved_tools) >= 2
+        resolved_str = " ".join(result.resolved_tools)
+        assert "GOOGLECALENDAR" in resolved_str
+        assert "SLACK" in resolved_str
+
+    @pytest.mark.asyncio
+    async def test_no_provider_match_raises(self):
+        """LLM suggests 'jira.issues' but catalog has no Jira tools."""
+        import json
+
+        llm_response = json.dumps(
+            {
+                "tools_needed": ["jira.issues"],
+                "entities": [
+                    {"name": "issue_key", "description": "Jira issue key", "required": True},
+                ],
+            }
+        )
+        catalog = self._make_composio_catalog()
+        svc = self._make_service(llm_response=llm_response, tool_catalog=catalog)
+
+        with pytest.raises(ToolNotAvailableError) as exc_info:
+            await svc.get_required_entities("track_issue")
+
+        assert "jira.issues" in exc_info.value.required_tools
+
+    @pytest.mark.asyncio
+    async def test_partial_provider_match(self):
+        """One tool resolves, one doesn't — should still succeed."""
+        import json
+
+        llm_response = json.dumps(
+            {
+                "tools_needed": ["google.calendar", "jira.issues"],
+                "entities": [],
+            }
+        )
+        catalog = self._make_composio_catalog()
+        svc = self._make_service(llm_response=llm_response, tool_catalog=catalog)
+
+        result = await svc.get_required_entities("schedule_and_track")
+
+        assert len(result.resolved_tools) >= 1
+        assert any("GOOGLECALENDAR" in t for t in result.resolved_tools)
+
+    @pytest.mark.asyncio
+    async def test_exact_match_takes_priority(self):
+        """If a tool name exactly matches the catalog, use it directly."""
+        import json
+
+        llm_response = json.dumps(
+            {
+                "tools_needed": ["SLACK_SEND_MESSAGE"],
+                "entities": [],
+            }
+        )
+        catalog = self._make_composio_catalog()
+        svc = self._make_service(llm_response=llm_response, tool_catalog=catalog)
+
+        result = await svc.get_required_entities("send_slack_message")
+
+        assert "SLACK_SEND_MESSAGE" in result.resolved_tools
+
+
+# ===========================
+# T605: Deterministic override for collected entities
+# ===========================
+
+
+class TestDeterministicEntityOverride:
+    """Verify that entities whose name exactly matches a key in
+    collected_entities are never marked as missing, regardless of
+    what the LLM returns."""
+
+    def _make_service(self, *, llm_response: str, tool_catalog):
+        adapter = AsyncMock()
+        adapter.generate = AsyncMock(return_value=llm_response)
+        return PlannerService(
+            context_rag_service=AsyncMock(),
+            tool_catalog=tool_catalog,
+            plan_service=AsyncMock(),
+            llm_adapter=adapter,
+            prompt_builder=PromptBuilder(),
+            validator=PlanValidator(),
+            primary_breaker=CircuitBreaker(model_name="p"),
+            fallback_breaker=CircuitBreaker(model_name="f"),
+            primary_model="test-primary",
+            fallback_model="test-fallback",
+            max_output_tokens=4096,
+        )
+
+    @pytest.mark.asyncio
+    async def test_collected_entity_not_in_missing(self, mock_tool_catalog):
+        """LLM marks attendee_email as missing, but it's in collected -> not missing."""
+        import json
+
+        llm_response = json.dumps(
+            {
+                "tools_needed": ["google.calendar"],
+                "entities": [
+                    {
+                        "name": "attendee_email",
+                        "description": "Attendee email",
+                        "required": True,
+                        "missing": True,  # LLM incorrectly says missing
+                    },
+                    {
+                        "name": "duration",
+                        "description": "How long?",
+                        "required": True,
+                        "missing": True,  # Genuinely missing
+                    },
+                ],
+            }
+        )
+        svc = self._make_service(
+            llm_response=llm_response, tool_catalog=mock_tool_catalog
+        )
+
+        result = await svc.get_required_entities(
+            "schedule_meeting",
+            collected_entities={"attendee_email": "alice@example.com", "attendee": "Alice"},
+        )
+
+        missing_names = [e.name for e in result.missing_entities]
+        assert "attendee_email" not in missing_names
+        assert "duration" in missing_names
+
+    @pytest.mark.asyncio
+    async def test_all_collected_none_missing(self, mock_tool_catalog):
+        """All entities are collected -> missing list is empty."""
+        import json
+
+        llm_response = json.dumps(
+            {
+                "tools_needed": ["google.calendar"],
+                "entities": [
+                    {
+                        "name": "attendee",
+                        "description": "Who?",
+                        "required": True,
+                        "missing": True,
+                    },
+                    {
+                        "name": "time",
+                        "description": "When?",
+                        "required": True,
+                        "missing": True,
+                    },
+                ],
+            }
+        )
+        svc = self._make_service(
+            llm_response=llm_response, tool_catalog=mock_tool_catalog
+        )
+
+        result = await svc.get_required_entities(
+            "schedule_meeting",
+            collected_entities={"attendee": "Alice", "time": "3 PM"},
+        )
+
+        assert len(result.missing_entities) == 0
+
+    @pytest.mark.asyncio
+    async def test_uncollected_entity_stays_missing(self, mock_tool_catalog):
+        """Entities NOT in collected stay missing when LLM says so."""
+        import json
+
+        llm_response = json.dumps(
+            {
+                "tools_needed": ["google.calendar"],
+                "entities": [
+                    {
+                        "name": "attendee",
+                        "description": "Who?",
+                        "required": True,
+                        "missing": False,
+                    },
+                    {
+                        "name": "duration",
+                        "description": "How long?",
+                        "required": True,
+                        "missing": True,
+                    },
+                ],
+            }
+        )
+        svc = self._make_service(
+            llm_response=llm_response, tool_catalog=mock_tool_catalog
+        )
+
+        result = await svc.get_required_entities(
+            "schedule_meeting",
+            collected_entities={"attendee": "Alice"},
+        )
+
+        missing_names = [e.name for e in result.missing_entities]
+        assert "attendee" not in missing_names
+        assert "duration" in missing_names

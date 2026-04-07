@@ -342,7 +342,7 @@ Policies are evaluated in order of specificity:
 ---
 
 ## 5) Conformance
-- Each `SPEC.md` must declare conformance to `GLOBAL_SPEC.md v3` and list deltas.  
+- Each `SPEC.md` must declare conformance to `GLOBAL_SPEC.md v3.1` and list deltas.  
 - Handlers are thin: validate Intent → call service → return wrapped Preview/Execute.  
 - `preview()` must never mutate; `execute()` only after valid approval token.
 
@@ -416,6 +416,43 @@ LLM reasoning steps operate in one of two trust tiers, declared via `trust_level
 4. **PolicyEngine governance**: All spawned steps evaluated by PolicyEngine (deny-by-default)
 5. **Credential isolation**: Neither tier can access plaintext credentials
 
+### 8.3 Composio Integration & Per-User Tool Management
+
+The system uses **Composio** as the hosted MCP provider for SaaS tool integrations (Gmail, Google Calendar, Slack, etc.). Composio handles OAuth flows, token management, and per-user tool isolation.
+
+#### Connection Model
+- Users connect to providers via OAuth (Composio SDK handles redirect URL generation, token exchange, token refresh)
+- The system stores **connection status only** (connected/disconnected per user per provider) — never raw OAuth tokens
+- IntegrationManager tracks connections in PostgreSQL (`user_connections` table)
+
+#### Per-User MCP Tool Discovery
+- Each user gets a unique Composio MCP endpoint URL: `/v3/mcp/{config_id}?user_id={user_id}`
+- `tools/list` JSON-RPC call on the user's URL returns only tools the user has access to
+- Tool names follow Composio convention: `PROVIDER_ACTION` (e.g., `GMAIL_SEND_EMAIL`, `GOOGLECALENDAR_CREATE_EVENT`)
+
+#### Session-Start Cache Warming
+When a new session is created (via Intake), two caches are populated:
+
+| Cache | Redis Key | TTL | Contents | Purpose |
+|-------|-----------|-----|----------|---------|
+| **ConnectionCache** | `connections:{user_id}` | 3600s | JSON array of connected provider names | Fast readiness checks (is user connected to required provider?) |
+| **UserToolCache** | `user_tools:{user_id}` | 3600s | JSON array of serialized ToolDefinition dicts | Tool listing, plan-time tool availability |
+
+**Cache warming is best-effort** — failures are logged but do not block session creation. On cache miss during readiness checks, the system falls back to direct DB queries.
+
+**Cache invalidation**: Connection cache is invalidated on `handle_callback()`, `disconnect()`, and `mark_connected()` operations.
+
+#### Tool Management API
+Users can add/remove tools on their Composio MCP server via REST endpoints:
+- `GET /api/integrations/tools` — List available MCP tools (per-user cache first, global catalog fallback)
+- `POST /api/integrations/tools` — Register a tool on the user's MCP server
+- `DELETE /api/integrations/tools/{tool_name}` — Remove a tool
+
+#### Graceful Degradation
+- If Composio is unreachable during `refresh_user()`, the system falls back to the global tool catalog
+- If Redis cache is unavailable, connection checks fall back to direct PostgreSQL queries
+- All Redis operations in both caches swallow errors with warnings (no hard failure)
+
 ---
 
 ## 9) Repository Structure
@@ -447,8 +484,9 @@ Use-case packets in `usecases/<UseCase>/` (when needed):
 
 ---
 
-**Document Version**: GLOBAL_SPEC v3.0
-**Last Updated**: 2026-03-31
+**Document Version**: GLOBAL_SPEC v3.1
+**Last Updated**: 2026-04-06
+**Changes from v3.0**: **Composio Integration.** (1) Added §8.3 Composio Integration & Per-User Tool Management — covers connection model, per-user MCP tool discovery, session-start cache warming (ConnectionCache + UserToolCache in Redis), tool management API, and graceful degradation. (2) IntegrationManager is the 16th component (Domain Layer).
 **v3.0 addendum (v6.1 HLD alignment)**: Added default-untrusted rule to §8.2 (all external API responses are untrusted; Tier 2 Reasoner's context_from must not reference API steps without intervening Tier 1 sanitization). Updated §2.0 terminology: "Hybrid Execution" → "Adaptive Execution" to align with HLD v6.1 "Deterministic Planning with Adaptive Execution".
 **Changes from v2.4**: **Pure Agentic Execution + MCP + Security Model.** (1) Dropped n8n — all execution via Python/FastAPI ExecuteOrchestrator with MCP tool invocations. (2) Replaced n8n Secrets Vault with AES-256-GCM encrypted credential vault in PostgreSQL. (3) Added §8.1 Credential Vault & LLM Isolation. (4) Added §8.2 Two-Tier LLM Execution with trust_level field and 5-layer prompt injection defense. (5) Updated §2.3 Plan schema with trust_level field. (6) Updated §2.8 execution model: MCP tool invocations + asyncio.gather() parallelism. (7) WorkflowBuilder absorbed into ExecuteOrchestrator. (8) NemoClaw deployment compatibility for infrastructure-level security.
 **Changes from v2.3**: **Hybrid Execution Split.** (1) Updated §1 Execute note: n8n for API steps, Python/FastAPI for LLM reasoning steps. (2) Updated §1 Adaptive: LLM reasoning executes in Python ExecuteOrchestrator (not custom n8n nodes). (3) Updated §2.8 execution model: API steps in n8n, LLM reasoning in Python. (4) Updated §8 credential isolation: reasoning steps in Python service have ZERO access to n8n Secrets Vault.

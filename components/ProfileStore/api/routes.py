@@ -21,7 +21,6 @@ from ..domain.models import (
     ConsentDeniedError,
     PreferenceRequest,
     SuccessResponse,
-    UnknownPreferenceError,
     ValidationError,
 )
 from ..service.preference_service import PreferenceService
@@ -68,13 +67,9 @@ async def get_preference(
             f"GET preference success: user={user_id}, key={preference_key}, plan_id={plan_id}"
         )
 
-        return SuccessResponse(
-            data=evidence.model_dump(),
-            tier=2,
-            sensitive=False,  # Evidence Item doesn't expose sensitivity
-        )
+        return SuccessResponse(data=evidence.model_dump())
 
-    except (ConsentDeniedError, UserNotFoundError, UnknownPreferenceError) as e:
+    except (ConsentDeniedError, UserNotFoundError) as e:
         return error_handler.handle_service_errors(e)
 
 
@@ -113,9 +108,9 @@ async def set_preference(
             f"key={request_body.preference_key}, plan_id={plan_id}"
         )
 
-        return SuccessResponse(data=response.model_dump(), tier=2, sensitive=response.sensitive)
+        return SuccessResponse(data=response.model_dump())
 
-    except (UserNotFoundError, UnknownPreferenceError, ValidationError) as e:
+    except (UserNotFoundError, ValidationError) as e:
         return error_handler.handle_service_errors(e)
 
 
@@ -149,9 +144,9 @@ async def delete_preference(
             f"DELETE preference success: user={user_id}, key={preference_key}, plan_id={plan_id}"
         )
 
-        return SuccessResponse(data=response.model_dump(), tier=2, sensitive=False)
+        return SuccessResponse(data=response.model_dump())
 
-    except (UserNotFoundError, UnknownPreferenceError) as e:
+    except UserNotFoundError as e:
         return error_handler.handle_service_errors(e)
 
 
@@ -185,9 +180,7 @@ async def get_all_preferences(
             f"count={len(evidence_items)}, plan_id={plan_id}"
         )
 
-        return SuccessResponse(
-            data=[item.model_dump() for item in evidence_items], tier=2, sensitive=False
-        )
+        return SuccessResponse(data=[item.model_dump() for item in evidence_items])
 
     except (ConsentDeniedError, UserNotFoundError) as e:
         return error_handler.handle_service_errors(e)

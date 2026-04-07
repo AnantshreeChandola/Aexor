@@ -179,6 +179,7 @@ ignore = [
 "__init__.py" = ["F401"]  # Allow unused imports in __init__.py
 "**/tests/**" = ["ARG", "S", "B017"]  # Allow unused arguments, security issues, and broad exception assertions in tests
 "**/api/routes.py" = ["ARG001"]  # FastAPI Depends() injects auth_context — intentionally unused in body
+"**/api/orchestrate_routes.py" = ["ARG001"]  # Same: FastAPI Depends() for auth
 
 [tool.ruff.format]
 quote-style = "double"

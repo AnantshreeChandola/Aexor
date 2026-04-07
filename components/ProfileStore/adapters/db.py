@@ -7,6 +7,7 @@ Uses shared database utilities for connection management.
 Reference: LLD.md §6.1
 """
 
+import json
 import logging
 from typing import Any
 from uuid import UUID
@@ -111,10 +112,16 @@ class DatabaseAdapter:
 
             result = await session.execute(
                 stmt,
-                {"user_id": user_id, "key": preference_key, "value": value, "sensitive": sensitive},
+                {
+                    "user_id": user_id,
+                    "key": preference_key,
+                    "value": json.dumps(value),
+                    "sensitive": sensitive,
+                },
             )
 
             row = result.fetchone()
+            await session.commit()
             if not row:
                 raise RuntimeError("Upsert operation failed to return result")
 
@@ -155,6 +162,7 @@ class DatabaseAdapter:
             """)
 
             result = await session.execute(stmt, {"user_id": user_id, "key": preference_key})
+            await session.commit()
 
             # Return True if any rows were affected
             return result.rowcount > 0

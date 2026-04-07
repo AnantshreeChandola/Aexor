@@ -24,6 +24,7 @@ class SessionTurn(BaseModel):
     """A single turn in a conversation session."""
 
     message: str
+    assistant_response: str | None = None
     timestamp: datetime
     extracted_intent: str | None = None
     extracted_entities: dict[str, Any] = Field(default_factory=dict)
@@ -42,6 +43,8 @@ class Session(BaseModel):
     extracted_entities: dict[str, Any] = Field(default_factory=dict)
     extracted_constraints: dict[str, Any] = Field(default_factory=dict)
     profile_defaults_offered: dict[str, Any] = Field(default_factory=dict)
+    contact_suggestions: dict[str, str] = Field(default_factory=dict)
+    last_follow_up: str | None = None
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
     )

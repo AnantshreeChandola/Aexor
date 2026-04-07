@@ -35,6 +35,12 @@ SYSTEM_PROMPT = (
     "- constraints: user preferences or limits (e.g. {'prefer_morning': true}).\n"
     "- If intent cannot be determined, return intent: null.\n"
     "- If context is provided, merge: new values override old.\n"
+    "- IMPORTANT: If pending_suggestions is provided in the context, it means "
+    "the system previously suggested a value for an entity (e.g. an email). "
+    "If the user confirms (says 'yes', 'correct', 'that's right', etc.), "
+    "emit the suggested value as the entity value — NOT the word 'yes'. "
+    "For example, if pending_suggestions has {\"attendee_email\": \"alice@x.com\"} "
+    "and the user says 'yes', return {\"attendee_email\": \"alice@x.com\"}.\n"
     "- Return ONLY valid JSON, no explanation."
 )
 
@@ -90,13 +96,28 @@ class LLMBasedParser:
 
     @staticmethod
     def _build_user_prompt(message: str, context: Session | None) -> str:
-        parts = [f"User message: {message}"]
+        parts: list[str] = []
+
+        if context and context.turns:
+            # Replay conversation history so the LLM sees the full
+            # back-and-forth — just like Claude Chat would.
+            parts.append("Conversation so far:")
+            for turn in context.turns:
+                parts.append(f"  User: {turn.message}")
+                if turn.assistant_response:
+                    parts.append(f"  Assistant: {turn.assistant_response}")
+
+        # Current state
         if context and (context.detected_intent or context.extracted_entities):
-            parts.append("\nPrior context:")
+            parts.append("\nCurrent state:")
             if context.detected_intent:
                 parts.append(f"  detected_intent: {context.detected_intent}")
             if context.extracted_entities:
                 parts.append(f"  extracted_entities: {json.dumps(context.extracted_entities)}")
+            if context.contact_suggestions:
+                parts.append(f"  pending_suggestions: {json.dumps(context.contact_suggestions)}")
+
+        parts.append(f"\nNew user message: {message}")
         return "\n".join(parts)
 
     @staticmethod

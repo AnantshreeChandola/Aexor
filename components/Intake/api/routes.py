@@ -28,6 +28,7 @@ from ..domain.models import (
     SessionStoreUnavailableError,
     ToolNotAvailableError,
 )
+from ..service.intake_service import ProviderNotConnectedError
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +96,15 @@ def _handle_domain_error(exc: Exception) -> JSONResponse:
                 },
             ).model_dump(),
         )
+    if isinstance(exc, ProviderNotConnectedError):
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content=ErrorResponse(
+                error_code="PROVIDER_NOT_CONNECTED",
+                message=str(exc),
+                details={"provider_names": exc.provider_names},
+            ).model_dump(),
+        )
     if isinstance(exc, IntentParserError):
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -139,6 +149,7 @@ async def submit_message(
         MaxTurnsExceededError,
         SessionStoreUnavailableError,
         ToolNotAvailableError,
+        ProviderNotConnectedError,
         IntentParserError,
     ) as exc:
         return _handle_domain_error(exc)

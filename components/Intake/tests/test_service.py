@@ -101,15 +101,23 @@ class TestSingleTurn:
         """All entities provided -> ready with Intent."""
         mock_parser.parse.return_value = ParseResult(
             intent="schedule_meeting",
-            entities={"attendee": "Alice", "time": "10 AM", "duration_min": 30},
+            entities={
+                "attendee": "Alice",
+                "attendee_email": "alice@example.com",
+                "date": "Tuesday",
+                "time": "10 AM",
+                "duration": "30m",
+            },
         )
         mock_planner_service.get_required_entities.return_value = RequiredEntitiesResult(
             intent_type="schedule_meeting",
             resolved_tools=["google.calendar"],
             required_entities=[
                 EntityRequirement(name="attendee", description="Who?"),
+                EntityRequirement(name="attendee_email", description="Email?"),
+                EntityRequirement(name="date", description="Date?"),
                 EntityRequirement(name="time", description="When?"),
-                EntityRequirement(name="duration_min", description="How long?"),
+                EntityRequirement(name="duration", description="How long?"),
             ],
             missing_entities=[],
         )
@@ -143,7 +151,10 @@ class TestMultiTurn:
             session_id="ses_01JXYZ12345678901234567890",
             user_id=USER_ID,
             detected_intent="schedule_meeting",
-            extracted_entities={"attendee": "Alice"},
+            extracted_entities={
+                "attendee": "Alice",
+                "attendee_email": "alice@example.com",
+            },
             turns=[
                 SessionTurn(
                     message="prev",
@@ -155,15 +166,21 @@ class TestMultiTurn:
         )
         mock_session_store.get.return_value = existing
 
-        # Second turn adds time
+        # Second turn adds remaining fields
         mock_parser.parse.return_value = ParseResult(
             intent="schedule_meeting",
-            entities={"time": "10 AM", "duration_min": 30},
+            entities={"date": "Tuesday", "time": "10 AM", "duration": "30m"},
         )
         mock_planner_service.get_required_entities.return_value = RequiredEntitiesResult(
             intent_type="schedule_meeting",
             resolved_tools=["google.calendar"],
-            required_entities=[],
+            required_entities=[
+                EntityRequirement(name="attendee", description="Who?"),
+                EntityRequirement(name="attendee_email", description="Email?"),
+                EntityRequirement(name="date", description="Date?"),
+                EntityRequirement(name="time", description="When?"),
+                EntityRequirement(name="duration", description="How long?"),
+            ],
             missing_entities=[],
         )
         resp = await service.process_message(
@@ -351,3 +368,258 @@ class TestSessionCreation:
         )
         assert resp.session_id.startswith("ses_")
         assert resp.session_id != "ses_expired"
+
+
+# ------------------------------------------------------------------
+# Planner-driven entity readiness (schema overrides removed)
+# ------------------------------------------------------------------
+
+
+# ------------------------------------------------------------------
+# Contact resolution
+# ------------------------------------------------------------------
+
+
+class TestContactResolution:
+    """Tests for contact_suggestions and LLM-driven confirmation flow."""
+
+    def test_apply_confirmed_suggestions_clears_resolved(self):
+        """When LLM emits the suggested value, the suggestion is cleared."""
+        session = Session(
+            session_id="ses_test",
+            user_id=USER_ID,
+            detected_intent="schedule_meeting",
+            extracted_entities={"attendee": "Utkarsh"},
+            contact_suggestions={"attendee_email": "utkarsh@example.com"},
+        )
+        parse_result = ParseResult(
+            intent="schedule_meeting",
+            entities={"attendee_email": "utkarsh@example.com", "date": "tomorrow"},
+        )
+        IntakeService._apply_confirmed_suggestions(session, parse_result)
+        assert session.contact_suggestions == {}
+        assert parse_result.entities["attendee_email"] == "utkarsh@example.com"
+
+    def test_apply_confirmed_suggestions_fixes_literal_yes(self):
+        """When LLM emits 'yes' for a pending suggestion, replace with actual value."""
+        session = Session(
+            session_id="ses_test",
+            user_id=USER_ID,
+            detected_intent="schedule_meeting",
+            extracted_entities={"attendee": "Utkarsh"},
+            contact_suggestions={"attendee_email": "utkarsh@example.com"},
+        )
+        parse_result = ParseResult(
+            intent="schedule_meeting",
+            entities={"attendee_email": "yes", "date": "tomorrow"},
+        )
+        IntakeService._apply_confirmed_suggestions(session, parse_result)
+        assert session.contact_suggestions == {}
+        # "yes" replaced with the actual suggested email
+        assert parse_result.entities["attendee_email"] == "utkarsh@example.com"
+
+    def test_apply_confirmed_suggestions_keeps_unresolved(self):
+        """When LLM does NOT emit anything for the entity, suggestion stays."""
+        session = Session(
+            session_id="ses_test",
+            user_id=USER_ID,
+            detected_intent="schedule_meeting",
+            extracted_entities={"attendee": "Utkarsh"},
+            contact_suggestions={"attendee_email": "utkarsh@example.com"},
+        )
+        parse_result = ParseResult(
+            intent="schedule_meeting",
+            entities={"date": "tomorrow"},
+        )
+        IntakeService._apply_confirmed_suggestions(session, parse_result)
+        assert "attendee_email" in session.contact_suggestions
+
+    def test_apply_confirmed_suggestions_user_corrects(self):
+        """LLM emits a different real email -> user corrected, suggestion cleared."""
+        session = Session(
+            session_id="ses_test",
+            user_id=USER_ID,
+            detected_intent="schedule_meeting",
+            extracted_entities={"attendee": "Utkarsh"},
+            contact_suggestions={"attendee_email": "utkarsh@example.com"},
+        )
+        parse_result = ParseResult(
+            intent="schedule_meeting",
+            entities={"attendee_email": "other@example.com"},
+        )
+        IntakeService._apply_confirmed_suggestions(session, parse_result)
+        # User provided a different value — accepted, suggestion cleared
+        assert session.contact_suggestions == {}
+        assert parse_result.entities["attendee_email"] == "other@example.com"
+
+    def test_apply_confirmed_suggestions_empty_noop(self):
+        """No pending suggestions -> no-op."""
+        session = Session(
+            session_id="ses_test",
+            user_id=USER_ID,
+            detected_intent="schedule_meeting",
+            extracted_entities={"attendee": "Alice"},
+        )
+        parse_result = ParseResult(intent="schedule_meeting", entities={})
+        IntakeService._apply_confirmed_suggestions(session, parse_result)
+        assert session.contact_suggestions == {}
+
+    async def test_resolve_contact_email_no_db(self):
+        """No db_adapter -> returns None."""
+        svc = IntakeService(
+            session_store=AsyncMock(),
+            intent_parser=AsyncMock(),
+            planner_service=AsyncMock(),
+            preference_service=AsyncMock(),
+            db_adapter=None,
+        )
+        result = await svc._resolve_contact_email("Alice")
+        assert result is None
+
+    async def test_contact_suggestion_in_follow_up(
+        self, service, mock_parser, mock_planner_service
+    ):
+        """When Planner reports attendee_email missing and contact resolves, suggest it."""
+        # Patch service to have a mock db_adapter that resolves the contact
+        service._db_adapter = AsyncMock()
+
+        # Mock the _resolve_contact_email directly for simplicity
+        async def mock_resolve(name):
+            if name == "Utkarsh":
+                return "utkarsh@example.com"
+            return None
+
+        service._resolve_contact_email = mock_resolve
+
+        mock_parser.parse.return_value = ParseResult(
+            intent="schedule_meeting",
+            entities={
+                "attendee": "Utkarsh",
+                "date": "Monday",
+                "time": "3 PM",
+                "duration": "1h",
+            },
+        )
+        mock_planner_service.get_required_entities.return_value = RequiredEntitiesResult(
+            intent_type="schedule_meeting",
+            resolved_tools=["GOOGLECALENDAR_CREATE_EVENT"],
+            required_entities=[
+                EntityRequirement(name="attendee", description="Who?"),
+                EntityRequirement(name="attendee_email", description="Attendee email address"),
+                EntityRequirement(name="date", description="Date?"),
+                EntityRequirement(name="time", description="When?"),
+                EntityRequirement(name="duration", description="How long?"),
+            ],
+            missing_entities=[
+                EntityRequirement(name="attendee_email", description="Attendee email address"),
+            ],
+        )
+        resp = await service.process_message(
+            user_id=USER_ID, message="Schedule a meeting with Utkarsh", context_tier=2
+        )
+        assert resp.status == "collecting"
+        assert "attendee_email" in resp.missing_fields
+        assert "utkarsh@example.com" in resp.follow_up
+
+
+# ------------------------------------------------------------------
+# Follow-up guard: skip already-collected entities
+# ------------------------------------------------------------------
+
+
+class TestBuildFollowUpGuard:
+    """Verify _build_follow_up skips entities already in extracted_entities."""
+
+    async def test_build_follow_up_skips_already_collected_entities(
+        self, service, mock_planner_service
+    ):
+        """If Planner marks an entity as missing but it's already collected, skip it."""
+        session = Session(
+            session_id="ses_guard_test",
+            user_id=USER_ID,
+            detected_intent="schedule_meeting",
+            extracted_entities={
+                "attendee": "Utkarsh",
+                "attendee_email": "utkarsh@example.com",
+                "date": "Monday",
+                "time": "3 PM",
+            },
+        )
+        # Planner incorrectly reports attendee_email as missing
+        planner_result = RequiredEntitiesResult(
+            intent_type="schedule_meeting",
+            resolved_tools=["GOOGLECALENDAR_CREATE_EVENT"],
+            required_entities=[
+                EntityRequirement(name="attendee_email", description="Attendee email"),
+                EntityRequirement(name="duration", description="How long?"),
+            ],
+            missing_entities=[
+                EntityRequirement(name="attendee_email", description="Attendee email"),
+                EntityRequirement(name="duration", description="How long?"),
+            ],
+        )
+        follow_up = await service._build_follow_up(
+            session,
+            missing_fields=["attendee_email", "duration"],
+            planner_result=planner_result,
+            context_tier=2,
+            user_id=USER_ID,
+        )
+        # attendee_email is already collected — should NOT appear in follow-up
+        assert "attendee_email" not in follow_up.lower().replace(" ", "_")
+        assert "Attendee email" not in follow_up
+        # duration IS still missing — should appear
+        assert "How long?" in follow_up
+
+
+# ------------------------------------------------------------------
+# last_follow_up persistence
+# ------------------------------------------------------------------
+
+
+class TestLastFollowUp:
+    """Verify last_follow_up is stored in session after each turn."""
+
+    async def test_last_follow_up_stored_when_collecting(
+        self, service, mock_session_store
+    ):
+        """When status=collecting, last_follow_up is set to the follow-up text."""
+        resp = await service.process_message(
+            user_id=USER_ID,
+            message="Meet with Alice",
+            context_tier=2,
+        )
+        assert resp.status == "collecting"
+        # Verify session was saved with last_follow_up set
+        saved_session = mock_session_store.save.call_args[0][0]
+        assert saved_session.last_follow_up is not None
+        assert saved_session.last_follow_up == resp.follow_up
+
+    async def test_last_follow_up_cleared_when_ready(
+        self, service, mock_session_store, mock_parser, mock_planner_service
+    ):
+        """When status=ready, last_follow_up is None."""
+        mock_parser.parse.return_value = ParseResult(
+            intent="schedule_meeting",
+            entities={
+                "attendee": "Alice",
+                "attendee_email": "alice@example.com",
+                "date": "Tuesday",
+                "time": "10 AM",
+                "duration": "30m",
+            },
+        )
+        mock_planner_service.get_required_entities.return_value = RequiredEntitiesResult(
+            intent_type="schedule_meeting",
+            resolved_tools=["google.calendar"],
+            required_entities=[],
+            missing_entities=[],
+        )
+        resp = await service.process_message(
+            user_id=USER_ID,
+            message="All details provided",
+            context_tier=1,
+        )
+        assert resp.status == "ready"
+        saved_session = mock_session_store.save.call_args[0][0]
+        assert saved_session.last_follow_up is None

@@ -4,7 +4,7 @@ Plan Schema - GLOBAL_SPEC §2.3 Implementation
 Pydantic models for the pure agentic execution plan contract.
 Used by Planner, PlanWriter, Signer, and ExecuteOrchestrator.
 
-Reference: GLOBAL_SPEC.md §2.3, plan.schema.json
+Reference: GLOBAL_SPEC.md §2.3
 """
 
 from typing import Any, Literal

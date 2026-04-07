@@ -24,7 +24,7 @@ ALTER TABLE plan_embeddings
     ADD COLUMN IF NOT EXISTS intent_type VARCHAR(64) NOT NULL DEFAULT 'unknown';
 
 ALTER TABLE plan_embeddings
-    ADD COLUMN IF NOT EXISTS embedding vector(384) NOT NULL DEFAULT '[0]';
+    ADD COLUMN IF NOT EXISTS embedding vector(384);
 
 ALTER TABLE plan_embeddings
     ADD COLUMN IF NOT EXISTS search_text TEXT NOT NULL DEFAULT '';

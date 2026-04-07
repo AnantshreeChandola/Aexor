@@ -4,7 +4,7 @@ Intent Schema - GLOBAL_SPEC §2.1 Implementation
 Pydantic model for user intent input contract.
 Used by Planner, PlanWriter, and ContextRAG.
 
-Reference: GLOBAL_SPEC.md §2.1, intent.schema.json
+Reference: GLOBAL_SPEC.md §2.1
 """
 
 from typing import Any

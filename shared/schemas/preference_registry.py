@@ -213,22 +213,36 @@ class PreferenceRegistry:
         logger.debug(f"Registered preference: {preference.key}")
 
     def get_preference_definition(self, key: str) -> PreferenceDefinition:
-        """Get preference definition by key."""
-        if key not in self.preferences:
-            raise KeyError(f"Unknown preference key: {key}")
-        return self.preferences[key]
+        """Get preference definition by key. Returns dynamic definition for unregistered keys."""
+        if key in self.preferences:
+            return self.preferences[key]
+        # Dynamic definition for user-defined preferences
+        return PreferenceDefinition(
+            key=key,
+            value_type="object",  # JSONB accepts any JSON type
+            sensitive=False,
+            default=None,
+            description=f"User-defined preference: {key}",
+            category="user",
+        )
 
     def get_default_value(self, key: str) -> Any:
         """Get default value for a preference."""
-        return self.get_preference_definition(key).default
+        if key not in self.preferences:
+            return None
+        return self.preferences[key].default
 
     def is_sensitive(self, key: str) -> bool:
         """Check if preference is sensitive."""
-        return self.get_preference_definition(key).sensitive
+        if key not in self.preferences:
+            return False
+        return self.preferences[key].sensitive
 
     def validate_value(self, key: str, value: Any) -> bool:
         """Validate a value against preference schema."""
-        preference = self.get_preference_definition(key)
+        if key not in self.preferences:
+            return True  # User-defined keys accept any JSON value
+        preference = self.preferences[key]
         schema = preference.get_json_schema()
 
         try:

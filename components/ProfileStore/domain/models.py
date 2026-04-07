@@ -128,5 +128,3 @@ class SuccessResponse(BaseModel):
 
     status: Literal["ok"] = "ok"
     data: Any
-    tier: int = Field(default=2)  # ProfileStore is always Tier 2
-    sensitive: bool = Field(default=False)

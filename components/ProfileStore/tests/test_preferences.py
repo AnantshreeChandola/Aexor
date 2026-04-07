@@ -20,7 +20,6 @@ from components.ProfileStore.adapters.schema_registry import SchemaRegistryAdapt
 from components.ProfileStore.domain.models import (
     ConsentDeniedError,
     PreferenceDB,
-    UnknownPreferenceError,
     ValidationError,
 )
 from components.ProfileStore.service.preference_service import PreferenceService
@@ -61,14 +60,42 @@ class TestSchemaRegistry:
         assert exc_info.value.preference_key == "meeting_duration_min"
         assert exc_info.value.value == 5
 
-    def test_unknown_preference_key(self):
-        """Test handling of unknown preference keys."""
+    def test_unknown_preference_key_returns_dynamic_definition(self):
+        """Test that unknown keys return a dynamic definition instead of raising."""
         registry = SchemaRegistryAdapter()
 
-        with pytest.raises(UnknownPreferenceError) as exc_info:
-            registry.get_schema("nonexistent_key")
+        # Should return a schema for any key (no error)
+        schema = registry.get_schema("nonexistent_key")
+        assert schema["type"] == "object"
 
-        assert exc_info.value.preference_key == "nonexistent_key"
+        # Default should be None
+        assert registry.get_default_value("nonexistent_key") is None
+
+        # Should not be sensitive
+        assert registry.is_sensitive("nonexistent_key") is False
+
+    def test_user_defined_preference_validates_any_value(self):
+        """Test that user-defined keys accept any JSON value."""
+        registry = SchemaRegistryAdapter()
+
+        # All these should pass validation for an unregistered key
+        assert registry.validate_value("custom_key", "a string") is True
+        assert registry.validate_value("custom_key", 42) is True
+        assert registry.validate_value("custom_key", {"nested": "object"}) is True
+        assert registry.validate_value("custom_key", [1, 2, 3]) is True
+        assert registry.validate_value("custom_key", True) is True
+        assert registry.validate_value("custom_key", None) is True
+
+    def test_user_defined_preference_info(self):
+        """Test that get_preference_info works for unregistered keys."""
+        registry = SchemaRegistryAdapter()
+
+        info = registry.get_preference_info("my_custom_pref")
+        assert info["key"] == "my_custom_pref"
+        assert info["type"] == "object"
+        assert info["default"] is None
+        assert info["sensitive"] is False
+        assert info["category"] == "user"
 
     def test_get_default_value(self):
         """Test getting default values from schemas."""
@@ -420,6 +447,71 @@ class TestPreferenceService:
         assert "stored_key" in keys
         assert "default_key" in keys
 
+    async def test_set_user_defined_preference(self, service_with_mocks):
+        """Test setting an arbitrary user-defined preference succeeds."""
+        service, db_adapter, schema_registry, _ = service_with_mocks
+
+        user_id = uuid4()
+
+        # Mock schema registry returns dynamic values for unknown keys
+        schema_registry.is_sensitive.return_value = False
+        schema_registry.validate_value.return_value = True
+
+        # Mock successful upsert
+        db_adapter.upsert_preference.return_value = PreferenceDB(
+            preference_id=uuid4(),
+            user_id=user_id,
+            key="favorite_color",
+            value="blue",
+            sensitive=False,
+            updated_at=datetime.utcnow(),
+            deleted_at=None,
+        )
+
+        result = await service.set_preference(
+            user_id=user_id,
+            preference_key="favorite_color",
+            preference_value="blue",
+            sensitive=False,
+        )
+
+        assert result.preference_key == "favorite_color"
+        assert result.preference_value == "blue"
+        db_adapter.upsert_preference.assert_called_once()
+
+    async def test_get_user_defined_preference_returns_none_default(self, service_with_mocks):
+        """Test getting an unset user-defined preference returns None default."""
+        service, db_adapter, schema_registry, _ = service_with_mocks
+
+        user_id = uuid4()
+
+        # Not in DB
+        db_adapter.get_preference.return_value = None
+        # Dynamic default is None for user-defined keys
+        schema_registry.get_default_value.return_value = None
+
+        result = await service.get_preference(
+            user_id=user_id, preference_key="custom_key", context_tier=2
+        )
+
+        assert isinstance(result, EvidenceItem)
+        assert result.key == "custom_key"
+        assert result.value is None
+
+    async def test_delete_user_defined_preference(self, service_with_mocks):
+        """Test deleting an arbitrary user-defined preference succeeds."""
+        service, db_adapter, _, _ = service_with_mocks
+
+        user_id = uuid4()
+        db_adapter.delete_preference.return_value = True
+
+        result = await service.delete_preference(
+            user_id=user_id, preference_key="custom_key"
+        )
+
+        assert result.preference_key == "custom_key"
+        assert "deleted successfully" in result.message
+
 
 class TestIntegration:
     """Integration tests with real components (no database)."""
@@ -448,6 +540,25 @@ class TestIntegration:
         passport_schema = registry.get_schema("passport_number")
         assert passport_schema["type"] == "string"
         assert registry.is_sensitive("passport_number") is True
+
+    def test_user_defined_preference_integration(self):
+        """Test that arbitrary keys work end-to-end through registry adapter."""
+        registry = SchemaRegistryAdapter()
+
+        # Arbitrary key should return a valid schema
+        schema = registry.get_schema("totally_new_preference")
+        assert schema["type"] == "object"
+
+        # Should not be sensitive
+        assert registry.is_sensitive("totally_new_preference") is False
+
+        # Default should be None
+        assert registry.get_default_value("totally_new_preference") is None
+
+        # Validation should pass for any JSON value
+        assert registry.validate_value("totally_new_preference", "hello") is True
+        assert registry.validate_value("totally_new_preference", 42) is True
+        assert registry.validate_value("totally_new_preference", {"key": "val"}) is True
 
     def test_real_encryption_integration(self):
         """Test with real encryption service."""

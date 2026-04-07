@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from datetime import UTC, datetime
 from typing import Any
@@ -31,7 +32,6 @@ from ..adapters.retry import RetryPolicy
 from ..adapters.template_resolver import TemplateResolver
 from ..domain.models import (
     ApprovalTokenError,
-    CompensationRecord,
     CycleDetectedError,
     ExecuteRequest,
     ExecutionContext,
@@ -46,7 +46,7 @@ from ..domain.models import (
 logger = logging.getLogger(__name__)
 
 # Approval token secret key (should be env-configured in production)
-_APPROVAL_TOKEN_SECRET = "approval-gate-secret"
+_APPROVAL_TOKEN_SECRET = os.environ.get("APPROVAL_TOKEN_SECRET", "approval-gate-secret")
 _MAX_RECOVERY_ACTIONS = 5
 
 
@@ -56,7 +56,7 @@ class ExecuteService:
     def __init__(
         self,
         policy_service: Any,
-        registry_service: Any,
+        tool_catalog: Any,
         plan_writer_service: Any,
         mcp_client: MCPClient,
         llm_client: LLMClient,
@@ -72,7 +72,7 @@ class ExecuteService:
         self._policy = policy_service
         self._tracker = tracker
         self._audit = audit
-        self._registry = registry_service
+        self._tool_catalog = tool_catalog
         self._plan_writer = plan_writer_service
         self._mcp = mcp_client
         self._llm = llm_client
@@ -420,19 +420,24 @@ class ExecuteService:
                     },
                 )
 
-            # 5. Resolve tool info from PluginRegistry
-            tool = await self._registry.get_tool(step.uses)
-            mcp_server = getattr(tool, "mcp_server", step.uses)
-            op = tool.operations.get(step.call)
-            mcp_tool = getattr(op, "n8n_node", step.call) if op else step.call
+            # 5. Resolve tool info from ToolCatalog
+            tool_def = self._tool_catalog.get_tool(step.uses)
+            mcp_server = tool_def.server_name if tool_def else step.uses
+            mcp_tool = step.uses  # In MCP model, tool name IS the operation
 
             # 6. MCP invocation with retry
+            # Always include user_id so MCPClientAdapter can generate
+            # per-user Composio URLs when in Composio mode.
+            cred_dict: dict[str, str] = {"user_id": ctx.user_id}
+            if plaintext_cred:
+                cred_dict["token"] = plaintext_cred
+
             result = await self._retry.execute_with_retry(
                 lambda: self._mcp.invoke(
                     server=mcp_server,
                     tool=mcp_tool,
                     args=resolved_args,
-                    credentials=({"token": plaintext_cred} if plaintext_cred else None),
+                    credentials=cred_dict,
                     timeout_s=step.timeout_s,
                 ),
                 step,
@@ -442,20 +447,7 @@ class ExecuteService:
             # 7. Zero credential
             plaintext_cred = None
 
-            # 8. Record compensation (Booker only)
-            if step.role == "Booker" and op:
-                comp_op = getattr(op, "compensation", None)
-                ctx.compensation_stack.append(
-                    CompensationRecord(
-                        step=step.step,
-                        tool_id=step.uses,
-                        operation=step.call,
-                        result=result,
-                        compensation_operation=comp_op,
-                    )
-                )
-
-            # 9. Mark idempotency succeeded (Booker only)
+            # 8. Mark idempotency succeeded (Booker only)
             if idem_key:
                 await self._idempotency.mark_succeeded(idem_key, result)
 
@@ -893,7 +885,7 @@ class ExecuteService:
 
 def create_execute_service(
     policy_service: Any,
-    registry_service: Any,
+    tool_catalog: Any,
     plan_writer_service: Any,
     mcp_client: MCPClient,
     llm_client: LLMClient,
@@ -913,7 +905,7 @@ def create_execute_service(
 
     return ExecuteService(
         policy_service=policy_service,
-        registry_service=registry_service,
+        tool_catalog=tool_catalog,
         plan_writer_service=plan_writer_service,
         mcp_client=mcp_client,
         llm_client=llm_client,

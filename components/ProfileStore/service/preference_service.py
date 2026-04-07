@@ -21,7 +21,6 @@ from ..domain.models import (
     ConsentDeniedError,
     DeleteResponse,
     PreferenceResponse,
-    UnknownPreferenceError,
     ValidationError,
 )
 
@@ -73,19 +72,11 @@ class PreferenceService:
         Raises:
             ConsentDeniedError: If context_tier < 2
             UserNotFoundError: If user_id does not exist
-            UnknownPreferenceError: If preference_key not in schema registry
         """
         # Consent enforcement: ProfileStore requires Tier 2+
         if context_tier < 2:
             logger.warning(f"Consent denied for user {user_id}: required=2, current={context_tier}")
             raise ConsentDeniedError(user_id, required_tier=2, current_tier=context_tier)
-
-        # Validate preference key exists in schema
-        try:
-            self.schema_registry.get_schema(preference_key)
-        except UnknownPreferenceError:
-            logger.warning(f"Unknown preference key: {preference_key}")
-            raise
 
         # Try to get preference from database
         preference = await self.db.get_preference(user_id, preference_key)
@@ -146,16 +137,8 @@ class PreferenceService:
 
         Raises:
             UserNotFoundError: If user_id does not exist
-            UnknownPreferenceError: If preference_key not in schema registry
             ValidationError: If preference_value fails schema validation
         """
-        # Validate preference key exists and get schema
-        try:
-            self.schema_registry.get_schema(preference_key)
-        except UnknownPreferenceError:
-            logger.warning(f"Unknown preference key: {preference_key}")
-            raise
-
         # Check if preference should be sensitive based on schema
         schema_sensitive = self.schema_registry.is_sensitive(preference_key)
         if schema_sensitive and not sensitive:
@@ -213,15 +196,7 @@ class PreferenceService:
 
         Raises:
             UserNotFoundError: If user_id does not exist
-            UnknownPreferenceError: If preference_key not in schema registry
         """
-        # Validate preference key exists in schema
-        try:
-            self.schema_registry.get_schema(preference_key)
-        except UnknownPreferenceError:
-            logger.warning(f"Unknown preference key: {preference_key}")
-            raise
-
         # Delete from database (soft delete)
         deleted = await self.db.delete_preference(user_id, preference_key)
 
