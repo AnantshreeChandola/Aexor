@@ -10,11 +10,15 @@ Reference: LLD.md Section 6.2
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, Literal, Protocol, runtime_checkable
 
 from shared.schemas.policy import ReasoningConfig
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_MODEL = os.environ.get("REASONING_MODEL", "claude-haiku-4-5-20251001")
+_ANTHROPIC_PREFIXES = ("claude-",)
 
 
 @runtime_checkable
@@ -60,8 +64,17 @@ class AnthropicReasoningAdapter:
         """
         messages = self._build_messages(context)
 
+        # Guard: reject non-Anthropic model names from Planner output
+        model = config.model
+        if not model.startswith(_ANTHROPIC_PREFIXES):
+            logger.warning(
+                "non_anthropic_model_overridden",
+                extra={"requested": model, "using": _DEFAULT_MODEL},
+            )
+            model = _DEFAULT_MODEL
+
         kwargs: dict[str, Any] = {
-            "model": config.model,
+            "model": model,
             "max_tokens": config.max_tokens,
             "temperature": config.temperature,
             "system": config.system_prompt_ref,

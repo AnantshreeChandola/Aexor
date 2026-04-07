@@ -13,7 +13,7 @@ from typing import Any
 
 from ..domain.models import StepResult
 
-_STEP_PATTERN = re.compile(r"\{\{step_(\d+)\.result\.(.+?)\}\}")
+_STEP_PATTERN = re.compile(r"\{\{step_(\d+)\.(?:result|response)\.(.+?)\}\}")
 _PREVIEW_PATTERN = re.compile(r"\{\{preview\.cached_state\.step_(\d+)_result\.(.+?)\}\}")
 
 

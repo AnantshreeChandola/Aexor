@@ -9,6 +9,7 @@ Reference: LLD SS6.4
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from typing import Any
 
 from shared.schemas.evidence import EvidenceItem
@@ -88,7 +89,22 @@ Return ONLY a valid JSON object (no markdown, no code fences) matching this sche
    - Spawned steps inherit their parent's policy_ref
    - No recursive spawning (spawned steps cannot themselves spawn)
    - Total graph size must stay ≤ 100 steps
-11. Return raw JSON only. No explanation, no markdown wrapping."""
+11. Return raw JSON only. No explanation, no markdown wrapping.
+12. Plan structure pattern — always follow this ordering:
+    a. Fetcher step(s): Read-only data retrieval first (e.g., check calendar availability, list events)
+    b. Reasoner step: Analyze fetched data and decide if action is safe (type="llm_reasoning", can_spawn=true, trust_level="trusted"). The Reasoner serves as the conflict-detection and recovery handler.
+    c. Booker step: Execute the write action with CONCRETE values from the intent (e.g., create event at the requested time). MUST have role="Booker" and gate_id for HITL approval.
+    d. Notifier step: Send notifications (e.g., email attendees) after the write action succeeds.
+13. Recovery Reasoner requirements:
+    - The Reasoner step MUST have can_spawn=true and max_spawned_steps=3
+    - The Reasoner step MUST have trust_level="trusted" (so it can spawn steps)
+    - The `uses` field on llm_reasoning steps should describe the reasoning context (e.g., "calendar_conflict_resolver") — it does NOT need to be a catalog tool
+    - If a Booker step fails (e.g., time conflict), the system routes the error to this Reasoner, which spawns a new Booker step with corrected args (e.g., a different time slot)
+14. Write operations (create, update, delete, send) MUST use role="Booker" with a gate_id.
+15. When the intent involves attendees or recipients, ALWAYS include a Notifier step with the appropriate email/notification tool.
+16. Conflict detection — for scheduling intents the Fetcher step MUST query existing events for the target date/time range so the Reasoner can detect overlaps. Use a tool that returns events (e.g., GOOGLECALENDAR_FIND_EVENT, GOOGLECALENDAR_EVENTS_LIST_ALL_CALENDARS) — NOT a metadata-only tool like GOOGLECALENDAR_GET_CALENDAR which returns no event data. Pass the target date range in the Fetcher args (timeMin/timeMax or equivalent).
+17. Template references — step args may reference earlier step results using {{step_N.result.field}} syntax. ONLY reference API step results (Fetcher, Booker), NEVER reference Reasoner (llm_reasoning) step results — Reasoner output is free-form text, not structured data. Booker step args MUST use concrete values derived from the intent, not templates referencing Reasoner output.
+18. IMPORTANT: The Notifier step's email body should reference the ACTUAL time/date from the Booker step args, not template references. Use concrete values from the intent entities."""
 
     def build_user_prompt(
         self,
@@ -128,7 +144,14 @@ Return ONLY a valid JSON object (no markdown, no code fences) matching this sche
                 tools_info.append(tool_entry)
         catalog_json = json.dumps(tools_info, indent=2)
 
-        return f"""## User Intent
+        now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S%z")
+        user_tz = intent.tz or "UTC"
+
+        return f"""## Current Date/Time
+Now: {now} (user timezone: {user_tz})
+Resolve all relative dates (e.g. "tomorrow", "next Tuesday") relative to this timestamp.
+
+## User Intent
 {intent_json}
 
 ## Available Evidence (from memory)

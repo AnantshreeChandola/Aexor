@@ -177,8 +177,11 @@ class PreviewService:
             classification, reason = await self._classify_step(step, deferred_steps, failed_steps)
 
             if classification == "deferred":
+                result_data = None
+                if reason == "write_action":
+                    result_data = {"summary": self._build_action_summary(step)}
                 step_results[step.step] = PreviewStepResult(
-                    step=step.step, status="deferred", reason=reason
+                    step=step.step, status="deferred", result=result_data, reason=reason
                 )
                 deferred_steps.add(step.step)
                 logger.info(
@@ -280,6 +283,10 @@ class PreviewService:
         if not previewable:
             return ("deferred", "non_previewable")
 
+        # 5.5 Write actions — defer (don't execute mutations in preview)
+        if self._checker.is_write_action(step.uses, step.call):
+            return ("deferred", "write_action")
+
         # 6. Previewable -- dispatch via MCP
         return ("dispatch", None)
 
@@ -322,12 +329,12 @@ class PreviewService:
         mcp_server = tool_def.server_name if tool_def else step.uses
         mcp_tool = step.uses  # In MCP model, tool name IS the operation
 
-        # Invoke MCP (no credentials -- read-only)
+        # Invoke MCP — pass user_id so Composio resolves the per-user account
         result = await self._mcp.invoke(
             server=mcp_server,
             tool=mcp_tool,
             args=resolved_args,
-            credentials=None,
+            credentials={"user_id": request.user_id},
             timeout_s=step.timeout_s,
         )
 
@@ -353,6 +360,17 @@ class PreviewService:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_action_summary(step: PlanStep) -> str:
+        """Build human-readable summary for a deferred write action."""
+        parts = [f"Action: {step.uses}"]
+        if step.args:
+            for key, value in step.args.items():
+                if key == "dry_run":
+                    continue
+                parts.append(f"  {key}: {value}")
+        return "\n".join(parts)
 
     @staticmethod
     def _to_exec_step_results(

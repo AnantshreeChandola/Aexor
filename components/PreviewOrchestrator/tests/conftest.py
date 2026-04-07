@@ -349,6 +349,12 @@ PREVIEWABLE_TOOLS = {
             "check_budget": False,
         },
     ),
+    "GMAIL_SEND_EMAIL": _make_tool(
+        "GMAIL_SEND_EMAIL",
+    ),
+    "GOOGLECALENDAR_CREATE_EVENT": _make_tool(
+        "GOOGLECALENDAR_CREATE_EVENT",
+    ),
 }
 
 
