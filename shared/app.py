@@ -14,8 +14,12 @@ import contextlib
 import logging
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 logger = logging.getLogger(__name__)
 
@@ -418,6 +422,14 @@ def create_app() -> FastAPI:
     app.middleware("http")(create_error_handler_middleware())
     app.add_middleware(AuthMiddleware)
 
+    # CORS (useful for local dev when opening HTML directly)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
     # Routers
     from components.History.api.routes import router as history_router
     from components.Intake.api.routes import router as intake_router
@@ -449,5 +461,14 @@ def create_app() -> FastAPI:
     @app.get("/health")
     async def root_health():
         return {"status": "ok", "service": "personal-agent"}
+
+    # Serve static UI files
+    static_dir = Path(__file__).resolve().parent.parent / "static"
+    if static_dir.is_dir():
+        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+        @app.get("/")
+        async def root_redirect():
+            return FileResponse(str(static_dir / "index.html"))
 
     return app

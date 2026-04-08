@@ -19,7 +19,7 @@ from typing import Any
 import ulid
 
 from components.Planner.adapters.circuit_breaker import CircuitBreaker
-from components.Planner.adapters.llm_adapter import AnthropicAdapter, LLMAdapter
+from components.Planner.adapters.llm_adapter import AnthropicAdapter, LLMAdapter, OpenAIAdapter
 from components.Planner.adapters.plan_hasher import compute_plan_hash
 from components.Planner.adapters.plan_validator import PlanValidator
 from components.Planner.adapters.prompt_builder import PromptBuilder
@@ -54,11 +54,13 @@ class PlannerService:
         primary_model: str,
         fallback_model: str,
         max_output_tokens: int,
+        fallback_llm_adapter: LLMAdapter | None = None,
     ) -> None:
         self._context_rag = context_rag_service
         self._tool_catalog = tool_catalog
         self._plan_service = plan_service
         self._llm = llm_adapter
+        self._fallback_llm = fallback_llm_adapter
         self._prompt = prompt_builder
         self._validator = validator
         self._primary_breaker = primary_breaker
@@ -153,7 +155,7 @@ class PlannerService:
         try:
             raw = await self._primary_breaker.call(
                 self._llm.generate,
-                model=self._fallback_model,  # Cheaper model for lightweight query
+                model=self._fallback_model,  # Sonnet for entity inference
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 max_tokens=1024,
@@ -372,10 +374,7 @@ class PlannerService:
             evidence = context_result.evidence
             if context_result.degraded_sources:
                 context_degraded = True
-                print(f"[DEBUG PLANNER] context_degraded sources={context_result.degraded_sources}")
-            print(f"[DEBUG PLANNER] evidence count={len(evidence)}")
-        except Exception as e:
-            print(f"[DEBUG PLANNER] context_rag_failed: {type(e).__name__}: {e}")
+        except Exception:
             logger.warning("context_rag_failed", extra={"component": "planner"})
             evidence = []
             context_degraded = True
@@ -388,21 +387,16 @@ class PlannerService:
             user_tools = await self._tool_catalog.get_user_tools(intent.user_id)
             if user_tools:
                 tools = user_tools
-                print(f"[DEBUG PLANNER] per-user tools from cache count={len(tools)}")
             else:
                 # b) Global in-memory catalog (populated at startup)
                 tools = self._tool_catalog.get_all_tools()
-                print(f"[DEBUG PLANNER] global catalog count={len(tools)}")
 
             # c) If both empty, try live refresh for this user
             if not tools:
-                print("[DEBUG PLANNER] catalog empty, attempting live refresh_user")
                 tools = await self._tool_catalog.refresh_user(intent.user_id)
-                print(f"[DEBUG PLANNER] after refresh_user count={len(tools)}")
 
             tool_names = {t.name for t in tools}
-        except Exception as e:
-            print(f"[DEBUG PLANNER] catalog_unavailable: {type(e).__name__}: {e}")
+        except Exception:
             tools = []
             tool_names = set()
         registry_version = 0  # ToolCatalog has no versioning (TTL-based refresh)
@@ -453,7 +447,27 @@ class PlannerService:
     ) -> tuple[Plan, int]:
         """4-level fallback hierarchy. Returns (plan, fallback_level)."""
 
-        # Level 1: Primary model
+        # Fast path: if both LLM circuits are open, skip straight to templates
+        from components.Planner.adapters.circuit_breaker import CircuitState
+
+        primary_state = self._primary_breaker.get_state()
+        fallback_state = self._fallback_breaker.get_state()
+        if primary_state == CircuitState.OPEN and fallback_state == CircuitState.OPEN:
+            logger.warning(
+                "both_circuits_open_skipping_llm",
+                extra={
+                    "component": "planner",
+                    "primary_model": self._primary_model,
+                    "fallback_model": self._fallback_model,
+                    "intent_type": intent.intent,
+                },
+            )
+            plan = await self._try_template_level(intent)
+            if plan is not None:
+                return plan, 3
+            return self._create_minimal_plan(intent), 4
+
+        # Level 1: Primary model (Anthropic adapter)
         plan = await self._try_llm_level(
             self._primary_breaker,
             self._primary_model,
@@ -463,11 +477,13 @@ class PlannerService:
             registry_version,
             tool_ids,
             level=1,
+            llm_adapter=self._llm,
         )
         if plan is not None:
             return plan, 1
 
-        # Level 2: Fallback model
+        # Level 2: Fallback model (OpenAI adapter if available, else primary adapter)
+        fallback_adapter = self._fallback_llm if self._fallback_llm else self._llm
         plan = await self._try_llm_level(
             self._fallback_breaker,
             self._fallback_model,
@@ -477,6 +493,7 @@ class PlannerService:
             registry_version,
             tool_ids,
             level=2,
+            llm_adapter=fallback_adapter,
         )
         if plan is not None:
             return plan, 2
@@ -508,29 +525,27 @@ class PlannerService:
         registry_version: int,
         tool_ids: set[str],
         level: int,
+        llm_adapter: LLMAdapter | None = None,
     ) -> Plan | None:
         """Try generating a plan via LLM with circuit breaker. Returns None on failure."""
+        adapter = llm_adapter or self._llm
         try:
             raw_output = await breaker.call(
-                self._llm.generate,
+                adapter.generate,
                 model=model,
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 max_tokens=self._max_output_tokens,
                 temperature=0.0,
             )
-            print(f"[DEBUG PLANNER L{level}] raw_output (first 500)={raw_output[:500]}")
             plan = await self._validator.validate(raw_output, intent, registry_version, tool_ids)
             return plan
         except CircuitOpenError:
-            print(f"[DEBUG PLANNER L{level}] circuit_open_skip model={model}")
             logger.info(
                 "circuit_open_skip",
                 extra={"component": "planner", "model": model, "level": level},
             )
         except (LLMCallError, PlanValidationError) as e:
-            details = getattr(e, 'details', None)
-            print(f"[DEBUG PLANNER L{level}] fallback reason={e} details={details}")
             next_level = level + 1
             logger.warning(
                 "fallback_triggered",
@@ -543,7 +558,6 @@ class PlannerService:
                 },
             )
         except Exception as e:
-            print(f"[DEBUG PLANNER L{level}] unexpected error={type(e).__name__}: {e}")
             logger.warning(
                 "llm_unexpected_error",
                 extra={"component": "planner", "model": model, "error": str(e)},
@@ -684,14 +698,20 @@ def create_planner_service(
     tool_catalog: Any,
     plan_service: Any,
     llm_adapter: LLMAdapter | None = None,
+    fallback_llm_adapter: LLMAdapter | None = None,
 ) -> PlannerService:
     """Factory function for PlannerService. Reads config from env vars."""
     primary_model = os.environ.get("PLANNER_PRIMARY_MODEL", "claude-sonnet-4-5-20250929")
-    fallback_model = os.environ.get("PLANNER_FALLBACK_MODEL", "claude-haiku-4-5-20251001")
+    fallback_model = os.environ.get("PLANNER_FALLBACK_MODEL", "claude-sonnet-4-5-20250929")
     max_output_tokens = int(os.environ.get("PLANNER_MAX_OUTPUT_TOKENS", "4096"))
 
+    # Primary adapter: Anthropic
     if llm_adapter is None:
         llm_adapter = AnthropicAdapter()
+
+    # Fallback adapter: reuse Anthropic
+    if fallback_llm_adapter is None:
+        fallback_llm_adapter = AnthropicAdapter()
 
     prompt_builder = PromptBuilder()
     validator = PlanValidator()
@@ -710,4 +730,5 @@ def create_planner_service(
         primary_model=primary_model,
         fallback_model=fallback_model,
         max_output_tokens=max_output_tokens,
+        fallback_llm_adapter=fallback_llm_adapter,
     )

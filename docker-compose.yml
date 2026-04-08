@@ -40,6 +40,12 @@ services:
       ENVIRONMENT: development
       # Anthropic Claude API key — required for Planner and Intake LLM calls
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?Set ANTHROPIC_API_KEY in .env}
+      # OpenAI API key — available as fallback (optional)
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # Planner model configuration
+      PLANNER_PRIMARY_MODEL: claude-sonnet-4-5-20250929
+      PLANNER_FALLBACK_MODEL: claude-sonnet-4-5-20250929
+      INTAKE_PARSER_MODEL: claude-sonnet-4-5-20250929
       # AES-256-GCM master key (hex) for credential vault decryption
       # Generate: python -c "import secrets; print(secrets.token_hex(32))"
       CREDENTIAL_MASTER_KEY: ${CREDENTIAL_MASTER_KEY:-0000000000000000000000000000000000000000000000000000000000000000}

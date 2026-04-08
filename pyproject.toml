@@ -3,14 +3,14 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "personal-agent"
+name = "aexor"
 version = "0.1.0"
 description = "Preview-first personal assistant with deterministic planning and multi-agent orchestration"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [
-    {name = "Personal Agent Team"}
+    {name = "Aexor Team"}
 ]
 keywords = ["ai", "agent", "orchestration", "planning", "preview-first"]
 classifiers = [
@@ -34,8 +34,9 @@ dependencies = [
     "alembic>=1.13.0",
     # Caching & Coordination
     "redis[hiredis]>=5.0",
-    # AI/LLM (Anthropic Claude — sole external AI dependency)
+    # AI/LLM
     "anthropic>=0.18.0",
+    "openai>=1.12.0",
     # Utilities
     "httpx>=0.27",
     "python-dotenv>=1.0.0",
@@ -206,6 +207,7 @@ strict_equality = true
 [[tool.mypy.overrides]]
 module = [
     "anthropic.*",
+    "openai.*",
 ]
 ignore_missing_imports = true
 
