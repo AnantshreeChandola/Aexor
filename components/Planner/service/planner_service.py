@@ -19,7 +19,7 @@ from typing import Any
 import ulid
 
 from components.Planner.adapters.circuit_breaker import CircuitBreaker
-from components.Planner.adapters.llm_adapter import AnthropicAdapter, LLMAdapter, OpenAIAdapter
+from components.Planner.adapters.llm_adapter import AnthropicAdapter, LLMAdapter
 from components.Planner.adapters.plan_hasher import compute_plan_hash
 from components.Planner.adapters.plan_validator import PlanValidator
 from components.Planner.adapters.prompt_builder import PromptBuilder
