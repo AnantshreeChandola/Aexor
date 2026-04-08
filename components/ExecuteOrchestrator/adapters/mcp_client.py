@@ -107,9 +107,7 @@ class MCPClientAdapter:
             MCPInvocationError: On config, HTTP, timeout, or parse failure.
         """
         try:
-            return await self._invoke_with_retry(
-                server, tool, args, credentials, timeout_s
-            )
+            return await self._invoke_with_retry(server, tool, args, credentials, timeout_s)
         except MCPInvocationError:
             raise
         except Exception as exc:
@@ -140,9 +138,7 @@ class MCPClientAdapter:
                     server,
                 )
                 self._sessions.invalidate(server)
-                return await self._do_invoke_legacy(
-                    server, tool, args, credentials, timeout_s
-                )
+                return await self._do_invoke_legacy(server, tool, args, credentials, timeout_s)
             raise
 
     async def _invoke_with_retry_composio(
@@ -159,9 +155,7 @@ class MCPClientAdapter:
         the session cache, then retries once.
         """
         try:
-            return await self._do_invoke_composio(
-                server, tool, args, credentials, timeout_s
-            )
+            return await self._do_invoke_composio(server, tool, args, credentials, timeout_s)
         except MCPInvocationError as exc:
             if any(f"HTTP {code}" in str(exc) for code in _SESSION_EXPIRED_CODES):
                 user_id = self._extract_entity_id(credentials) or "__system__"
@@ -173,9 +167,7 @@ class MCPClientAdapter:
                 self._url_manager.invalidate(user_id)
                 # Also invalidate any cached session for this user's URL
                 # (the URL itself served as cache_key)
-                return await self._do_invoke_composio(
-                    server, tool, args, credentials, timeout_s
-                )
+                return await self._do_invoke_composio(server, tool, args, credentials, timeout_s)
             raise
 
     async def _do_invoke_composio(
@@ -202,9 +194,7 @@ class MCPClientAdapter:
         }
 
         # 3. Get/create session (cache_key=url for per-user isolation)
-        session = await self._sessions.get_session(
-            "composio", url, headers, cache_key=url
-        )
+        session = await self._sessions.get_session("composio", url, headers, cache_key=url)
         if session.session_id:
             headers["Mcp-Session-Id"] = session.session_id
 
@@ -236,19 +226,13 @@ class MCPClientAdapter:
         if response.status_code in _SESSION_EXPIRED_CODES:
             # Invalidate session for this URL so retry gets a new one
             self._sessions.invalidate(url)
-            raise MCPInvocationError(
-                server, tool, f"HTTP {response.status_code}"
-            )
+            raise MCPInvocationError(server, tool, f"HTTP {response.status_code}")
 
         if response.status_code in _RETRYABLE_STATUS_CODES:
-            raise MCPInvocationError(
-                server, tool, f"HTTP {response.status_code}"
-            )
+            raise MCPInvocationError(server, tool, f"HTTP {response.status_code}")
 
         if response.status_code >= 400:
-            raise MCPInvocationError(
-                server, tool, f"HTTP {response.status_code}"
-            )
+            raise MCPInvocationError(server, tool, f"HTTP {response.status_code}")
 
         # 7. Parse response (reuse existing parser)
         data = self._parse_response(response, server, tool)
@@ -296,9 +280,7 @@ class MCPClientAdapter:
         call_args = dict(args)
 
         if entity_id:
-            url, call_args = self._inject_entity_id(
-                cfg, url, call_args, headers, entity_id
-            )
+            url, call_args = self._inject_entity_id(cfg, url, call_args, headers, entity_id)
             logger.debug(
                 "Entity ID injected via %s for server '%s'",
                 cfg.entity_id_injection,
@@ -331,19 +313,13 @@ class MCPClientAdapter:
 
         # 7. Handle HTTP errors
         if response.status_code in _SESSION_EXPIRED_CODES:
-            raise MCPInvocationError(
-                server, tool, f"HTTP {response.status_code}"
-            )
+            raise MCPInvocationError(server, tool, f"HTTP {response.status_code}")
 
         if response.status_code in _RETRYABLE_STATUS_CODES:
-            raise MCPInvocationError(
-                server, tool, f"HTTP {response.status_code}"
-            )
+            raise MCPInvocationError(server, tool, f"HTTP {response.status_code}")
 
         if response.status_code >= 400:
-            raise MCPInvocationError(
-                server, tool, f"HTTP {response.status_code}"
-            )
+            raise MCPInvocationError(server, tool, f"HTTP {response.status_code}")
 
         # 8. Parse response
         data = self._parse_response(response, server, tool)
@@ -416,9 +392,7 @@ class MCPClientAdapter:
         try:
             return response.json()
         except Exception as exc:
-            raise MCPInvocationError(
-                server, tool, f"Failed to parse JSON response: {exc}"
-            ) from exc
+            raise MCPInvocationError(server, tool, f"Failed to parse JSON response: {exc}") from exc
 
     @staticmethod
     def _sanitize_response(result: Any) -> Any:
@@ -471,6 +445,4 @@ def _parse_sse_response(
     try:
         return json.loads(joined)
     except json.JSONDecodeError as exc:
-        raise MCPInvocationError(
-            server, tool, f"Failed to parse SSE data as JSON: {exc}"
-        ) from exc
+        raise MCPInvocationError(server, tool, f"Failed to parse SSE data as JSON: {exc}") from exc

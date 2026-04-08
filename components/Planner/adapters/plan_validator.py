@@ -172,10 +172,7 @@ class PlanValidator:
         # - Resolver steps use pass-through tool names (e.g. "system.confirm",
         #   "confirm_action") that aren't real MCP tools — the execution engine
         #   handles them as gate-only checkpoints without MCP invocation.
-        plan_tool_ids = {
-            s.uses for s in plan.graph
-            if s.type == "api" and s.role != "Resolver"
-        }
+        plan_tool_ids = {s.uses for s in plan.graph if s.type == "api" and s.role != "Resolver"}
         missing_tools = plan_tool_ids - tool_ids
         if missing_tools:
             raise PlanValidationError(

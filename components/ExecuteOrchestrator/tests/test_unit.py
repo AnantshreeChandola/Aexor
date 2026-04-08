@@ -432,9 +432,7 @@ class TestMCPClient:
         import httpx
 
         mock_http = AsyncMock(spec=httpx.AsyncClient)
-        mock_http.post = AsyncMock(
-            return_value=httpx.Response(503, text="Service Unavailable")
-        )
+        mock_http.post = AsyncMock(return_value=httpx.Response(503, text="Service Unavailable"))
         client = self._make_adapter(mock_http)
         with pytest.raises(MCPInvocationError):
             await client.invoke("srv", "tool", {})

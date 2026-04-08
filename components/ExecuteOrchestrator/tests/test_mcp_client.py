@@ -102,7 +102,9 @@ class TestJSONRPCPayload:
     @pytest.mark.asyncio()
     async def test_no_credentials_in_body(self, adapter, mock_http):
         await adapter.invoke(
-            "composio", "GCAL_CREATE", {"date": "2026-04-01"},
+            "composio",
+            "GCAL_CREATE",
+            {"date": "2026-04-01"},
             credentials={"entity_id": "user-42"},
         )
 
@@ -152,7 +154,9 @@ class TestEntityIDInjection:
     @pytest.mark.asyncio()
     async def test_entity_id_in_arguments_default(self, adapter, mock_http):
         await adapter.invoke(
-            "composio", "TOOL", {"arg1": "val1"},
+            "composio",
+            "TOOL",
+            {"arg1": "val1"},
             credentials={"entity_id": "user-42"},
         )
 
@@ -168,7 +172,9 @@ class TestEntityIDInjection:
         adapter = MCPClientAdapter(registry, mock_http, mock_session_manager)
 
         await adapter.invoke(
-            "composio", "TOOL", {},
+            "composio",
+            "TOOL",
+            {},
             credentials={"entity_id": "user-99"},
         )
 
@@ -184,7 +190,9 @@ class TestEntityIDInjection:
         adapter = MCPClientAdapter(registry, mock_http, mock_session_manager)
 
         await adapter.invoke(
-            "composio", "TOOL", {},
+            "composio",
+            "TOOL",
+            {},
             credentials={"entity_id": "user-77"},
         )
 
@@ -196,7 +204,9 @@ class TestEntityIDInjection:
     async def test_string_credentials_used_as_entity_id(self, adapter, mock_http):
         """String passed directly as credentials is treated as entity ID."""
         await adapter.invoke(
-            "composio", "TOOL", {},
+            "composio",
+            "TOOL",
+            {},
             credentials="user-direct",
         )
 
@@ -262,7 +272,9 @@ class TestErrorHandling:
 class TestSessionRetry:
     @pytest.mark.asyncio()
     async def test_401_invalidates_and_retries(
-        self, config_registry, mock_session_manager,
+        self,
+        config_registry,
+        mock_session_manager,
     ):
         """On 401, session is invalidated and the call is retried once."""
         call_count = 0
@@ -289,13 +301,13 @@ class TestSessionRetry:
 
     @pytest.mark.asyncio()
     async def test_401_retry_fails_raises(
-        self, config_registry, mock_session_manager,
+        self,
+        config_registry,
+        mock_session_manager,
     ):
         """If retry after 401 also fails, raise MCPInvocationError."""
         mock_http = AsyncMock(spec=httpx.AsyncClient)
-        mock_http.post = AsyncMock(
-            return_value=httpx.Response(401, text="Unauthorized")
-        )
+        mock_http.post = AsyncMock(return_value=httpx.Response(401, text="Unauthorized"))
 
         adapter = MCPClientAdapter(config_registry, mock_http, mock_session_manager)
 
@@ -306,11 +318,7 @@ class TestSessionRetry:
 class TestSSEParsing:
     @pytest.mark.asyncio()
     async def test_sse_response(self, adapter, mock_http):
-        sse_text = (
-            'event: message\n'
-            'data: {"jsonrpc":"2.0","id":1,"result":{"status":"ok"}}\n'
-            '\n'
-        )
+        sse_text = 'event: message\ndata: {"jsonrpc":"2.0","id":1,"result":{"status":"ok"}}\n\n'
         mock_http.post.return_value = httpx.Response(
             200,
             text=sse_text,
@@ -322,11 +330,7 @@ class TestSSEParsing:
 
     @pytest.mark.asyncio()
     async def test_sse_multiline_data(self, adapter, mock_http):
-        sse_text = (
-            'data: {"jsonrpc":"2.0","id":1,\n'
-            'data: "result":{"value":"multi"}}\n'
-            '\n'
-        )
+        sse_text = 'data: {"jsonrpc":"2.0","id":1,\ndata: "result":{"value":"multi"}}\n\n'
         mock_http.post.return_value = httpx.Response(
             200,
             text=sse_text,
@@ -393,10 +397,7 @@ class TestParseSSE:
         assert _parse_sse_response(text, "s", "t") == {"result": {"ok": True}}
 
     def test_multiple_events_returns_last(self):
-        text = (
-            'data: {"result": {"first": true}}\n\n'
-            'data: {"result": {"second": true}}\n\n'
-        )
+        text = 'data: {"result": {"first": true}}\n\ndata: {"result": {"second": true}}\n\n'
         assert _parse_sse_response(text, "s", "t") == {"result": {"second": True}}
 
     def test_multiline_data(self):
@@ -451,9 +452,7 @@ def composio_mock_http():
 @pytest.fixture()
 def composio_url_manager():
     mgr = MagicMock(spec=MCPUrlManager)
-    mgr.get_url = AsyncMock(
-        side_effect=lambda uid: f"https://composio.dev/mcp/{uid}"
-    )
+    mgr.get_url = AsyncMock(side_effect=lambda uid: f"https://composio.dev/mcp/{uid}")
     mgr.invalidate = MagicMock()
     return mgr
 
@@ -472,11 +471,16 @@ def composio_adapter(composio_mock_http, mock_session_manager, composio_url_mana
 class TestComposioMode:
     @pytest.mark.asyncio()
     async def test_uses_per_user_url(
-        self, composio_adapter, composio_mock_http, composio_url_manager,
+        self,
+        composio_adapter,
+        composio_mock_http,
+        composio_url_manager,
     ):
         """In Composio mode, invocation should use per-user URL from url_manager."""
         await composio_adapter.invoke(
-            "composio", "GCAL_CREATE", {"date": "2026-04-01"},
+            "composio",
+            "GCAL_CREATE",
+            {"date": "2026-04-01"},
             credentials={"user_id": "user-42"},
         )
 
@@ -487,11 +491,15 @@ class TestComposioMode:
 
     @pytest.mark.asyncio()
     async def test_composio_api_key_in_header(
-        self, composio_adapter, composio_mock_http,
+        self,
+        composio_adapter,
+        composio_mock_http,
     ):
         """Composio API key should be in x-api-key header."""
         await composio_adapter.invoke(
-            "composio", "TOOL", {},
+            "composio",
+            "TOOL",
+            {},
             credentials={"user_id": "user-1"},
         )
 
@@ -500,11 +508,15 @@ class TestComposioMode:
 
     @pytest.mark.asyncio()
     async def test_no_entity_id_injection(
-        self, composio_adapter, composio_mock_http,
+        self,
+        composio_adapter,
+        composio_mock_http,
     ):
         """In Composio mode, entity_id should NOT be injected into arguments."""
         await composio_adapter.invoke(
-            "composio", "TOOL", {"arg1": "val1"},
+            "composio",
+            "TOOL",
+            {"arg1": "val1"},
             credentials={"user_id": "user-42"},
         )
 
@@ -516,7 +528,9 @@ class TestComposioMode:
 
     @pytest.mark.asyncio()
     async def test_system_user_when_no_credentials(
-        self, composio_adapter, composio_url_manager,
+        self,
+        composio_adapter,
+        composio_url_manager,
     ):
         """With no credentials, should fall back to __system__ user_id."""
         await composio_adapter.invoke("composio", "TOOL", {})
@@ -525,11 +539,15 @@ class TestComposioMode:
 
     @pytest.mark.asyncio()
     async def test_json_rpc_payload_structure(
-        self, composio_adapter, composio_mock_http,
+        self,
+        composio_adapter,
+        composio_mock_http,
     ):
         """Composio-mode payload should be standard JSON-RPC tools/call."""
         await composio_adapter.invoke(
-            "composio", "GCAL_CREATE", {"date": "2026-04-01"},
+            "composio",
+            "GCAL_CREATE",
+            {"date": "2026-04-01"},
             credentials={"user_id": "user-1"},
         )
 
@@ -542,11 +560,16 @@ class TestComposioMode:
 
     @pytest.mark.asyncio()
     async def test_session_cache_key_is_url(
-        self, composio_adapter, mock_session_manager, composio_url_manager,
+        self,
+        composio_adapter,
+        mock_session_manager,
+        composio_url_manager,
     ):
         """Composio mode should use the per-user URL as session cache_key."""
         await composio_adapter.invoke(
-            "composio", "TOOL", {},
+            "composio",
+            "TOOL",
+            {},
             credentials={"user_id": "user-1"},
         )
 
@@ -556,7 +579,10 @@ class TestComposioMode:
 
     @pytest.mark.asyncio()
     async def test_401_invalidates_url_and_retries(
-        self, composio_mock_http, mock_session_manager, composio_url_manager,
+        self,
+        composio_mock_http,
+        mock_session_manager,
+        composio_url_manager,
     ):
         """On 401 in Composio mode, URL cache should be invalidated and retried."""
         call_count = 0
@@ -582,7 +608,9 @@ class TestComposioMode:
         )
 
         result = await adapter.invoke(
-            "composio", "TOOL", {},
+            "composio",
+            "TOOL",
+            {},
             credentials={"user_id": "user-1"},
         )
 
@@ -592,7 +620,9 @@ class TestComposioMode:
 
     @pytest.mark.asyncio()
     async def test_response_sanitization(
-        self, composio_adapter, composio_mock_http,
+        self,
+        composio_adapter,
+        composio_mock_http,
     ):
         """Prompt injection patterns should be wrapped even in Composio mode."""
         composio_mock_http.post.return_value = httpx.Response(
@@ -608,7 +638,9 @@ class TestComposioMode:
         )
 
         result = await composio_adapter.invoke(
-            "composio", "TOOL", {},
+            "composio",
+            "TOOL",
+            {},
             credentials={"user_id": "user-1"},
         )
 

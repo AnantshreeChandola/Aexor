@@ -33,6 +33,7 @@ def _normalize_provider(name: str) -> str:
     """
     return re.sub(r"[_\-\s]", "", name).lower()
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -94,9 +95,7 @@ class IntegrationManager:
             ComposioUnreachableError: On network errors.
         """
         if self._composio_config is None or self._composio is None:
-            raise NotImplementedError(
-                "Composio OAuth flow requires COMPOSIO_API_KEY to be set."
-            )
+            raise NotImplementedError("Composio OAuth flow requires COMPOSIO_API_KEY to be set.")
 
         # 1. Static config (COMPOSIO_AUTH_CONFIGS env var)
         auth_configs = getattr(self._composio_config, "auth_configs", {})
@@ -233,9 +232,7 @@ class IntegrationManager:
 
         Used by the intake layer to validate tool availability.
         """
-        return await self._db.is_user_connected(
-            user_id, _normalize_provider(provider_name)
-        )
+        return await self._db.is_user_connected(user_id, _normalize_provider(provider_name))
 
     async def is_user_connected_cached(
         self,
@@ -369,9 +366,7 @@ class IntegrationManager:
             ComposioUnreachableError: On network errors.
         """
         if self._composio_config is None or self._composio is None:
-            raise NotImplementedError(
-                "Integration management requires COMPOSIO_API_KEY to be set."
-            )
+            raise NotImplementedError("Integration management requires COMPOSIO_API_KEY to be set.")
 
         logger.info("create_integration", extra={"app_name": app_name})
         result = await self._composio.create_integration(app_name)
@@ -410,9 +405,7 @@ class IntegrationManager:
             ComposioUnreachableError: On network errors.
         """
         if self._composio_config is None or self._composio is None:
-            raise NotImplementedError(
-                "Tool management requires COMPOSIO_API_KEY to be set."
-            )
+            raise NotImplementedError("Tool management requires COMPOSIO_API_KEY to be set.")
 
         mcp_config_id = getattr(self._composio_config, "mcp_config_id", "")
         config = await self._composio.get_mcp_config(mcp_config_id)
@@ -429,9 +422,7 @@ class IntegrationManager:
             ComposioUnreachableError: On network errors.
         """
         if self._composio_config is None or self._composio is None:
-            raise NotImplementedError(
-                "Tool management requires COMPOSIO_API_KEY to be set."
-            )
+            raise NotImplementedError("Tool management requires COMPOSIO_API_KEY to be set.")
 
         mcp_config_id = getattr(self._composio_config, "mcp_config_id", "")
         logger.info(
@@ -462,9 +453,7 @@ class IntegrationManager:
             ComposioUnreachableError: On network errors.
         """
         if self._composio_config is None or self._composio is None:
-            raise NotImplementedError(
-                "Tool management requires COMPOSIO_API_KEY to be set."
-            )
+            raise NotImplementedError("Tool management requires COMPOSIO_API_KEY to be set.")
 
         mcp_config_id = getattr(self._composio_config, "mcp_config_id", "")
         logger.info(

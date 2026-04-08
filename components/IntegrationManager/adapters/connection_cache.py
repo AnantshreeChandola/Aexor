@@ -66,9 +66,7 @@ class ConnectionCache:
         try:
             await self._redis.delete(self._key(user_id))
         except redis.exceptions.RedisError:
-            logger.warning(
-                "connection_cache_invalidate_failed", extra={"user_id": user_id}
-            )
+            logger.warning("connection_cache_invalidate_failed", extra={"user_id": user_id})
 
     async def is_cached(self, user_id: str, provider_name: str) -> bool | None:
         """Check if provider is in cached set.

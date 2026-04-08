@@ -45,8 +45,7 @@ class ProviderNotConnectedError(Exception):
         self.provider_names = provider_names
         names = ", ".join(provider_names)
         super().__init__(
-            f"You haven't connected: {names}. "
-            f"Go to Settings > Integrations to set them up."
+            f"You haven't connected: {names}. Go to Settings > Integrations to set them up."
         )
 
 
@@ -269,9 +268,7 @@ class IntakeService:
         missing_names = [e.name for e in result.missing_entities]
         if not missing_names:
             # All entities collected — check provider connections if available
-            await self._check_provider_connections(
-                session.user_id, result.resolved_tools
-            )
+            await self._check_provider_connections(session.user_id, result.resolved_tools)
             return "ready", [], result
         return "collecting", missing_names, result
 
@@ -370,8 +367,16 @@ class IntakeService:
             return
         # Common confirmation words the LLM might emit as a literal value
         confirmation_literals = {
-            "yes", "yeah", "yep", "correct", "confirm", "sure", "ok",
-            "that's right", "thats right", "true",
+            "yes",
+            "yeah",
+            "yep",
+            "correct",
+            "confirm",
+            "sure",
+            "ok",
+            "that's right",
+            "thats right",
+            "true",
         }
         resolved = []
         for entity_name, suggested_value in session.contact_suggestions.items():
@@ -451,9 +456,7 @@ class IntakeService:
                         resolved = await self._resolve_contact_email(attendee_name)
                         if resolved is not None:
                             session.contact_suggestions["attendee_email"] = resolved
-                            lines.append(
-                                f"- {entity.description}: Is this {resolved}?"
-                            )
+                            lines.append(f"- {entity.description}: Is this {resolved}?")
                             continue
 
                 if (

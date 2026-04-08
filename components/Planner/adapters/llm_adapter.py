@@ -86,9 +86,7 @@ class OpenAIAdapter:
     def __init__(self, api_key: str | None = None) -> None:
         key = api_key or os.environ.get("OPENAI_API_KEY")
         if not key:
-            raise ValueError(
-                "OPENAI_API_KEY must be set in environment or passed to OpenAIAdapter"
-            )
+            raise ValueError("OPENAI_API_KEY must be set in environment or passed to OpenAIAdapter")
         import openai
 
         self._timeout_s = int(os.environ.get("PLANNER_OPENAI_TIMEOUT_S", "15"))

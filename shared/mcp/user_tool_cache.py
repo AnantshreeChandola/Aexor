@@ -75,6 +75,4 @@ class UserToolCache:
         try:
             await self._redis.delete(self._key(user_id))
         except redis.exceptions.RedisError:
-            logger.warning(
-                "user_tool_cache_invalidate_failed", extra={"user_id": user_id}
-            )
+            logger.warning("user_tool_cache_invalidate_failed", extra={"user_id": user_id})

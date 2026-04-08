@@ -433,7 +433,9 @@ class ExecuteService:
         tool_def = self._tool_catalog.get_tool(step.uses)
         if tool_def is None and step.role == "Resolver":
             gate_choice = (
-                request.preview_state.get(step.gate_id) if request.preview_state and step.gate_id else None
+                request.preview_state.get(step.gate_id)
+                if request.preview_state and step.gate_id
+                else None
             )
             result: dict[str, Any] = {"approved": True, "choice": gate_choice, "step": step.step}
             # Copy Reasoner recommendation fields from context_from steps,
@@ -548,7 +550,9 @@ class ExecuteService:
         if result is None:
             return result
 
-        serialized = _json.dumps(result, default=str) if isinstance(result, (dict, list)) else str(result)
+        serialized = (
+            _json.dumps(result, default=str) if isinstance(result, (dict, list)) else str(result)
+        )
 
         # Small enough already — return as-is
         if len(serialized) <= max_bytes:
@@ -605,13 +609,15 @@ class ExecuteService:
             for ev in events:
                 if not isinstance(ev, dict):
                     continue
-                slim.append({
-                    "summary": ev.get("summary") or ev.get("title", ""),
-                    "start": ev.get("start"),
-                    "end": ev.get("end"),
-                    "status": ev.get("status"),
-                    "id": ev.get("id"),
-                })
+                slim.append(
+                    {
+                        "summary": ev.get("summary") or ev.get("title", ""),
+                        "start": ev.get("start"),
+                        "end": ev.get("end"),
+                        "status": ev.get("status"),
+                        "id": ev.get("id"),
+                    }
+                )
             return {"events": slim, "_note": f"Summarized {len(events)} events"}
 
         # ── Generic fallback: hard truncate ──
@@ -679,7 +685,7 @@ class ExecuteService:
     _REASONER_JSON_PREFIX = (
         "CRITICAL INSTRUCTION: You MUST return ONLY a valid JSON object. "
         "No prose, no explanation, no markdown fences. The JSON MUST include "
-        'ALL of these fields:\n'
+        "ALL of these fields:\n"
         '- "recommended_time": ISO 8601 datetime string (e.g. "2026-04-08T10:00:00")\n'
         '- "has_conflict": boolean (true if any existing event overlaps)\n'
         '- "conflicts": array of strings describing each conflicting event (empty array if none)\n'
@@ -714,11 +720,16 @@ class ExecuteService:
         ]
         # Always include the intent so the Reasoner knows what to schedule
         intent_data = ctx.plan.intent.model_dump(mode="json") if ctx.plan.intent else {}
-        context.append({"step": "intent", "result": {
-            "intent": intent_data.get("intent", ""),
-            "entities": intent_data.get("entities", {}),
-            "tz": intent_data.get("tz", "UTC"),
-        }})
+        context.append(
+            {
+                "step": "intent",
+                "result": {
+                    "intent": intent_data.get("intent", ""),
+                    "entities": intent_data.get("entities", {}),
+                    "tz": intent_data.get("tz", "UTC"),
+                },
+            }
+        )
 
         # 2. Wrap system_prompt_ref with explicit JSON instruction.
         #    The Planner LLM may set system_prompt_ref to a short label
@@ -726,10 +737,12 @@ class ExecuteService:
         config = step.reasoning_config
         if config:
             wrapped_prompt = self._REASONER_JSON_PREFIX + (config.system_prompt_ref or "")
-            config = config.model_copy(update={
-                "system_prompt_ref": wrapped_prompt,
-                "max_tokens": max(config.max_tokens, 1024),
-            })
+            config = config.model_copy(
+                update={
+                    "system_prompt_ref": wrapped_prompt,
+                    "max_tokens": max(config.max_tokens, 1024),
+                }
+            )
 
         # 3. Dispatch with trust tier
         trust = step.trust_level or "untrusted_input"

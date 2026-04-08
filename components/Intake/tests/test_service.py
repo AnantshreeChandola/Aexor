@@ -580,9 +580,7 @@ class TestBuildFollowUpGuard:
 class TestLastFollowUp:
     """Verify last_follow_up is stored in session after each turn."""
 
-    async def test_last_follow_up_stored_when_collecting(
-        self, service, mock_session_store
-    ):
+    async def test_last_follow_up_stored_when_collecting(self, service, mock_session_store):
         """When status=collecting, last_follow_up is set to the follow-up text."""
         resp = await service.process_message(
             user_id=USER_ID,

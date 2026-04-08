@@ -65,5 +65,6 @@ class PlanOutcome(BaseModel):
     )
 
     persist_status: str | None = Field(
-        default=None, description="Outcome persistence status: ok, partial, error, or None if not yet persisted"
+        default=None,
+        description="Outcome persistence status: ok, partial, error, or None if not yet persisted",
     )

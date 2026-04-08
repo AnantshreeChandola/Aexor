@@ -168,6 +168,7 @@ Return ONLY a valid JSON object (no markdown, no code fences) matching this sche
             now_local = now_local_dt.strftime("%Y-%m-%dT%H:%M:%S%z (%A)")
             # Build explicit week calendar to prevent day-of-week miscalculation
             from datetime import timedelta
+
             week_lines = []
             start_of_week = now_local_dt - timedelta(days=now_local_dt.weekday())  # Monday
             for i in range(7):

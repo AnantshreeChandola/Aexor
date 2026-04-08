@@ -36,9 +36,7 @@ def manager(composio_config):
 class TestGetUrl:
     @pytest.mark.asyncio()
     async def test_generates_url_on_first_call(self, manager):
-        with patch(
-            "shared.mcp.url_manager._lazy_import_composio"
-        ) as mock_import:
+        with patch("shared.mcp.url_manager._lazy_import_composio") as mock_import:
             mock_composio = MagicMock()
             mock_composio.mcp.generate.return_value = "https://composio.dev/mcp/user-1"
             mock_import.return_value = mock_composio
@@ -50,9 +48,7 @@ class TestGetUrl:
 
     @pytest.mark.asyncio()
     async def test_returns_cached_url(self, manager):
-        with patch(
-            "shared.mcp.url_manager._lazy_import_composio"
-        ) as mock_import:
+        with patch("shared.mcp.url_manager._lazy_import_composio") as mock_import:
             mock_composio = MagicMock()
             mock_composio.mcp.generate.return_value = "https://composio.dev/mcp/user-1"
             mock_import.return_value = mock_composio
@@ -71,9 +67,7 @@ class TestGetUrl:
 
         call_count = 0
 
-        with patch(
-            "shared.mcp.url_manager._lazy_import_composio"
-        ) as mock_import:
+        with patch("shared.mcp.url_manager._lazy_import_composio") as mock_import:
             mock_composio = MagicMock()
 
             def gen(user_id, config_id):
@@ -92,12 +86,10 @@ class TestGetUrl:
 
     @pytest.mark.asyncio()
     async def test_different_users_get_different_urls(self, manager):
-        with patch(
-            "shared.mcp.url_manager._lazy_import_composio"
-        ) as mock_import:
+        with patch("shared.mcp.url_manager._lazy_import_composio") as mock_import:
             mock_composio = MagicMock()
-            mock_composio.mcp.generate.side_effect = (
-                lambda uid, cid: f"https://composio.dev/mcp/{uid}"
+            mock_composio.mcp.generate.side_effect = lambda uid, cid: (
+                f"https://composio.dev/mcp/{uid}"
             )
             mock_import.return_value = mock_composio
 
@@ -112,9 +104,7 @@ class TestGetUrl:
 class TestGetSystemUrl:
     @pytest.mark.asyncio()
     async def test_uses_system_user_id(self, manager):
-        with patch(
-            "shared.mcp.url_manager._lazy_import_composio"
-        ) as mock_import:
+        with patch("shared.mcp.url_manager._lazy_import_composio") as mock_import:
             mock_composio = MagicMock()
             mock_composio.mcp.generate.return_value = "https://composio.dev/system"
             mock_import.return_value = mock_composio
@@ -129,9 +119,7 @@ class TestGetSystemUrl:
         config = _make_config(system_user_id="platform-admin")
         mgr = MCPUrlManager(config)
 
-        with patch(
-            "shared.mcp.url_manager._lazy_import_composio"
-        ) as mock_import:
+        with patch("shared.mcp.url_manager._lazy_import_composio") as mock_import:
             mock_composio = MagicMock()
             mock_composio.mcp.generate.return_value = "https://url"
             mock_import.return_value = mock_composio
@@ -143,9 +131,7 @@ class TestGetSystemUrl:
 class TestInvalidation:
     @pytest.mark.asyncio()
     async def test_invalidate_forces_regeneration(self, manager):
-        with patch(
-            "shared.mcp.url_manager._lazy_import_composio"
-        ) as mock_import:
+        with patch("shared.mcp.url_manager._lazy_import_composio") as mock_import:
             mock_composio = MagicMock()
             call_count = 0
 
@@ -166,9 +152,7 @@ class TestInvalidation:
 
     @pytest.mark.asyncio()
     async def test_invalidate_all_clears_all(self, manager):
-        with patch(
-            "shared.mcp.url_manager._lazy_import_composio"
-        ) as mock_import:
+        with patch("shared.mcp.url_manager._lazy_import_composio") as mock_import:
             mock_composio = MagicMock()
             mock_composio.mcp.generate.return_value = "https://url"
             mock_import.return_value = mock_composio
@@ -191,9 +175,7 @@ class TestConcurrency:
         """Multiple concurrent get_url calls for same user produce one SDK call."""
         call_count = 0
 
-        with patch(
-            "shared.mcp.url_manager._lazy_import_composio"
-        ) as mock_import:
+        with patch("shared.mcp.url_manager._lazy_import_composio") as mock_import:
             mock_composio = MagicMock()
 
             def gen(uid, cid):

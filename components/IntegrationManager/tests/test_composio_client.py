@@ -134,15 +134,11 @@ class TestInitiateConnection:
             import json
 
             captured_body.update(json.loads(request.content))
-            return httpx.Response(
-                200, json={"redirectUrl": "https://oauth.example.com"}
-            )
+            return httpx.Response(200, json={"redirectUrl": "https://oauth.example.com"})
 
         transport = httpx.MockTransport(handler)
         client = _make_client(transport)
-        await client.initiate_connection(
-            "user-1", "ac_gcal", redirect_url="https://myapp.com/cb"
-        )
+        await client.initiate_connection("user-1", "ac_gcal", redirect_url="https://myapp.com/cb")
 
         assert captured_body["connection"]["callback_url"] == "https://myapp.com/cb"
         assert captured_body["connection"]["user_id"] == "user-1"
@@ -156,9 +152,7 @@ class TestInitiateConnection:
             import json
 
             captured_body.update(json.loads(request.content))
-            return httpx.Response(
-                200, json={"redirectUrl": "https://oauth.example.com"}
-            )
+            return httpx.Response(200, json={"redirectUrl": "https://oauth.example.com"})
 
         transport = httpx.MockTransport(handler)
         client = _make_client(transport)
@@ -168,9 +162,7 @@ class TestInitiateConnection:
 
     @pytest.mark.asyncio()
     async def test_fallback_redirect_url_key(self):
-        transport = _mock_transport(
-            json_body={"redirect_url": "https://oauth.example.com/alt"}
-        )
+        transport = _mock_transport(json_body={"redirect_url": "https://oauth.example.com/alt"})
         client = _make_client(transport)
         url = await client.initiate_connection("user-1", "ac_gcal")
         assert url == "https://oauth.example.com/alt"

@@ -187,8 +187,7 @@ def load_composio_config_from_env() -> ComposioConfig | None:
     mcp_config_id = os.environ.get("COMPOSIO_MCP_CONFIG_ID", "").strip()
     if not mcp_config_id:
         logger.warning(
-            "COMPOSIO_API_KEY set but COMPOSIO_MCP_CONFIG_ID missing — "
-            "Composio mode disabled"
+            "COMPOSIO_API_KEY set but COMPOSIO_MCP_CONFIG_ID missing — Composio mode disabled"
         )
         return None
 

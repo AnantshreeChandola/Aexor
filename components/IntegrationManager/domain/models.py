@@ -55,9 +55,7 @@ class ConnectionNotFoundError(Exception):
     def __init__(self, user_id: str, provider_name: str) -> None:
         self.user_id = user_id
         self.provider_name = provider_name
-        super().__init__(
-            f"No connection found for user '{user_id}' and provider '{provider_name}'"
-        )
+        super().__init__(f"No connection found for user '{user_id}' and provider '{provider_name}'")
 
 
 class ComposioApiError(Exception):

@@ -78,9 +78,7 @@ class ComposioClient:
         """GET /api/v3/mcp/{mcp_config_id} — read current MCP config."""
         return await self._request("GET", f"/api/v3/mcp/{mcp_config_id}")
 
-    async def update_allowed_tools(
-        self, mcp_config_id: str, tools: list[str]
-    ) -> dict:
+    async def update_allowed_tools(self, mcp_config_id: str, tools: list[str]) -> dict:
         """PATCH /api/v3/mcp/{mcp_config_id} — update allowed_tools list."""
         return await self._request(
             "PATCH",
@@ -111,9 +109,7 @@ class ComposioClient:
             "connection": connection,
         }
 
-        data = await self._request(
-            "POST", "/api/v3/connected_accounts", json=body
-        )
+        data = await self._request("POST", "/api/v3/connected_accounts", json=body)
         return data.get("redirectUrl") or data.get("redirect_url") or str(data)
 
     async def create_integration(self, app_name: str) -> dict:
@@ -162,6 +158,4 @@ class ComposioClient:
 
     async def revoke_connection(self, connected_account_id: str) -> None:
         """DELETE /api/v3/connected_accounts/{id} — revoke a connection."""
-        await self._request(
-            "DELETE", f"/api/v3/connected_accounts/{connected_account_id}"
-        )
+        await self._request("DELETE", f"/api/v3/connected_accounts/{connected_account_id}")

@@ -50,9 +50,7 @@ def mock_http():
 @pytest.fixture()
 def mock_session_manager():
     mgr = AsyncMock(spec=MCPSessionManager)
-    mgr.get_session = AsyncMock(
-        return_value=MCPSession(server_name="composio", session_id="ses-1")
-    )
+    mgr.get_session = AsyncMock(return_value=MCPSession(server_name="composio", session_id="ses-1"))
     return mgr
 
 
@@ -82,18 +80,20 @@ class TestExtractProviderName:
 class TestToolCatalog:
     @pytest.mark.asyncio()
     async def test_refresh_populates_tools(self, catalog, mock_http):
-        mock_http.post.return_value = _make_tools_list_response([
-            {
-                "name": "GOOGLECALENDAR_CREATE_EVENT",
-                "description": "Create a calendar event",
-                "inputSchema": {"type": "object", "properties": {}},
-            },
-            {
-                "name": "GMAIL_SEND_EMAIL",
-                "description": "Send an email",
-                "inputSchema": {},
-            },
-        ])
+        mock_http.post.return_value = _make_tools_list_response(
+            [
+                {
+                    "name": "GOOGLECALENDAR_CREATE_EVENT",
+                    "description": "Create a calendar event",
+                    "inputSchema": {"type": "object", "properties": {}},
+                },
+                {
+                    "name": "GMAIL_SEND_EMAIL",
+                    "description": "Send an email",
+                    "inputSchema": {},
+                },
+            ]
+        )
 
         await catalog.refresh()
 
@@ -113,10 +113,12 @@ class TestToolCatalog:
 
     @pytest.mark.asyncio()
     async def test_get_tools_for_server(self, catalog, mock_http):
-        mock_http.post.return_value = _make_tools_list_response([
-            {"name": "TOOL_A", "description": ""},
-            {"name": "TOOL_B", "description": ""},
-        ])
+        mock_http.post.return_value = _make_tools_list_response(
+            [
+                {"name": "TOOL_A", "description": ""},
+                {"name": "TOOL_B", "description": ""},
+            ]
+        )
         await catalog.refresh()
 
         tools = catalog.get_tools_for_server("composio")
@@ -124,11 +126,13 @@ class TestToolCatalog:
 
     @pytest.mark.asyncio()
     async def test_get_tools_for_provider(self, catalog, mock_http):
-        mock_http.post.return_value = _make_tools_list_response([
-            {"name": "SLACK_SEND", "description": ""},
-            {"name": "SLACK_READ", "description": ""},
-            {"name": "GMAIL_SEND", "description": ""},
-        ])
+        mock_http.post.return_value = _make_tools_list_response(
+            [
+                {"name": "SLACK_SEND", "description": ""},
+                {"name": "SLACK_READ", "description": ""},
+                {"name": "GMAIL_SEND", "description": ""},
+            ]
+        )
         await catalog.refresh()
 
         slack_tools = catalog.get_tools_for_provider("slack")
@@ -137,10 +141,12 @@ class TestToolCatalog:
     @pytest.mark.asyncio()
     async def test_allowlist_filters(self, catalog, mock_http, monkeypatch):
         monkeypatch.setenv("TOOL_ALLOWLIST", "GMAIL_SEND")
-        mock_http.post.return_value = _make_tools_list_response([
-            {"name": "GMAIL_SEND", "description": ""},
-            {"name": "SLACK_POST", "description": ""},
-        ])
+        mock_http.post.return_value = _make_tools_list_response(
+            [
+                {"name": "GMAIL_SEND", "description": ""},
+                {"name": "SLACK_POST", "description": ""},
+            ]
+        )
         await catalog.refresh()
 
         assert catalog.get_tool("GMAIL_SEND") is not None
@@ -150,10 +156,12 @@ class TestToolCatalog:
     async def test_blocklist_filters(self, catalog, mock_http, monkeypatch):
         monkeypatch.setenv("TOOL_BLOCKLIST", "DANGEROUS_TOOL")
         monkeypatch.delenv("TOOL_ALLOWLIST", raising=False)
-        mock_http.post.return_value = _make_tools_list_response([
-            {"name": "SAFE_TOOL", "description": ""},
-            {"name": "DANGEROUS_TOOL", "description": ""},
-        ])
+        mock_http.post.return_value = _make_tools_list_response(
+            [
+                {"name": "SAFE_TOOL", "description": ""},
+                {"name": "DANGEROUS_TOOL", "description": ""},
+            ]
+        )
         await catalog.refresh()
 
         assert catalog.get_tool("SAFE_TOOL") is not None
@@ -161,7 +169,9 @@ class TestToolCatalog:
 
     @pytest.mark.asyncio()
     async def test_refresh_failure_preserves_previous_tools(
-        self, config_registry, mock_session_manager,
+        self,
+        config_registry,
+        mock_session_manager,
     ):
         """If refresh fails for a server, keep previously loaded tools."""
         mock_http = AsyncMock(spec=httpx.AsyncClient)
@@ -172,9 +182,11 @@ class TestToolCatalog:
         )
 
         # First refresh succeeds
-        mock_http.post.return_value = _make_tools_list_response([
-            {"name": "TOOL_A", "description": "first load"},
-        ])
+        mock_http.post.return_value = _make_tools_list_response(
+            [
+                {"name": "TOOL_A", "description": "first load"},
+            ]
+        )
         await catalog.refresh()
         assert catalog.get_tool("TOOL_A") is not None
 
@@ -198,16 +210,20 @@ class TestToolCatalog:
     @pytest.mark.asyncio()
     async def test_refresh_server(self, catalog, mock_http):
         # Initial full refresh
-        mock_http.post.return_value = _make_tools_list_response([
-            {"name": "OLD_TOOL", "description": ""},
-        ])
+        mock_http.post.return_value = _make_tools_list_response(
+            [
+                {"name": "OLD_TOOL", "description": ""},
+            ]
+        )
         await catalog.refresh()
         assert catalog.get_tool("OLD_TOOL") is not None
 
         # Refresh single server with new tools
-        mock_http.post.return_value = _make_tools_list_response([
-            {"name": "NEW_TOOL", "description": ""},
-        ])
+        mock_http.post.return_value = _make_tools_list_response(
+            [
+                {"name": "NEW_TOOL", "description": ""},
+            ]
+        )
         await catalog.refresh_server("composio")
 
         assert catalog.get_tool("NEW_TOOL") is not None
@@ -253,10 +269,12 @@ class TestToolCatalogComposioMode:
         url_mgr = MagicMock(spec=MCPUrlManager)
         url_mgr.get_system_url = AsyncMock(return_value="https://composio.dev/mcp/system")
 
-        mock_http.post.return_value = _make_tools_list_response([
-            {"name": "GCAL_CREATE_EVENT", "description": "Create event"},
-            {"name": "GMAIL_SEND", "description": "Send email"},
-        ])
+        mock_http.post.return_value = _make_tools_list_response(
+            [
+                {"name": "GCAL_CREATE_EVENT", "description": "Create event"},
+                {"name": "GMAIL_SEND", "description": "Send email"},
+            ]
+        )
 
         catalog = ToolCatalog(
             config=MCPConfigRegistry({}),
@@ -276,7 +294,9 @@ class TestToolCatalogComposioMode:
 
     @pytest.mark.asyncio()
     async def test_composio_refresh_failure_preserves_stale(
-        self, mock_http, mock_session_manager,
+        self,
+        mock_http,
+        mock_session_manager,
     ):
         """If Composio refresh fails, previously loaded tools are preserved."""
         composio_cfg = _make_composio_config()
@@ -284,9 +304,11 @@ class TestToolCatalogComposioMode:
         url_mgr.get_system_url = AsyncMock(return_value="https://composio.dev/mcp/system")
 
         # First refresh succeeds
-        mock_http.post.return_value = _make_tools_list_response([
-            {"name": "TOOL_A", "description": "tool A"},
-        ])
+        mock_http.post.return_value = _make_tools_list_response(
+            [
+                {"name": "TOOL_A", "description": "tool A"},
+            ]
+        )
 
         catalog = ToolCatalog(
             config=MCPConfigRegistry({}),

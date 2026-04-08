@@ -150,9 +150,7 @@ async def initiate_connection(body: ConnectRequest, request: Request):
         raise HTTPException(401, "Authentication required")
 
     try:
-        redirect_url = await service.initiate_connection(
-            str(user_id), body.provider_name
-        )
+        redirect_url = await service.initiate_connection(str(user_id), body.provider_name)
         return ConnectResponse(
             redirect_url=redirect_url,
             provider_name=body.provider_name,

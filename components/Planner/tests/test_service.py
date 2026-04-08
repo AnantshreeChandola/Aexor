@@ -405,9 +405,7 @@ class TestGetRequiredEntitiesCatalogDown:
         assert result.resolved_tools == []
 
     @pytest.mark.asyncio
-    async def test_catalog_empty_with_tools_raises(
-        self, mock_empty_tool_catalog
-    ):
+    async def test_catalog_empty_with_tools_raises(self, mock_empty_tool_catalog):
         """Catalog available but empty + LLM suggests tools -> ToolNotAvailableError."""
         import json
 
@@ -418,9 +416,7 @@ class TestGetRequiredEntitiesCatalogDown:
             }
         )
 
-        svc = self._make_service(
-            llm_response=llm_response, tool_catalog=mock_empty_tool_catalog
-        )
+        svc = self._make_service(llm_response=llm_response, tool_catalog=mock_empty_tool_catalog)
 
         with pytest.raises(ToolNotAvailableError) as exc_info:
             await svc.get_required_entities("schedule_meeting")
@@ -671,9 +667,7 @@ class TestDeterministicEntityOverride:
                 ],
             }
         )
-        svc = self._make_service(
-            llm_response=llm_response, tool_catalog=mock_tool_catalog
-        )
+        svc = self._make_service(llm_response=llm_response, tool_catalog=mock_tool_catalog)
 
         result = await svc.get_required_entities(
             "schedule_meeting",
@@ -708,9 +702,7 @@ class TestDeterministicEntityOverride:
                 ],
             }
         )
-        svc = self._make_service(
-            llm_response=llm_response, tool_catalog=mock_tool_catalog
-        )
+        svc = self._make_service(llm_response=llm_response, tool_catalog=mock_tool_catalog)
 
         result = await svc.get_required_entities(
             "schedule_meeting",
@@ -743,9 +735,7 @@ class TestDeterministicEntityOverride:
                 ],
             }
         )
-        svc = self._make_service(
-            llm_response=llm_response, tool_catalog=mock_tool_catalog
-        )
+        svc = self._make_service(llm_response=llm_response, tool_catalog=mock_tool_catalog)
 
         result = await svc.get_required_entities(
             "schedule_meeting",

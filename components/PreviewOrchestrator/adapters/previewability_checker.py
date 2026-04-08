@@ -19,11 +19,28 @@ logger = logging.getLogger(__name__)
 class PreviewabilityChecker:
     """Check ToolCatalog for tool previewability."""
 
-    _WRITE_VERBS = frozenset({
-        "CREATE", "UPDATE", "DELETE", "REMOVE", "SEND", "POST",
-        "PATCH", "PUT", "INSERT", "ADD", "SET", "MODIFY", "MOVE",
-        "CANCEL", "REVOKE", "APPROVE", "REJECT", "ARCHIVE",
-    })
+    _WRITE_VERBS = frozenset(
+        {
+            "CREATE",
+            "UPDATE",
+            "DELETE",
+            "REMOVE",
+            "SEND",
+            "POST",
+            "PATCH",
+            "PUT",
+            "INSERT",
+            "ADD",
+            "SET",
+            "MODIFY",
+            "MOVE",
+            "CANCEL",
+            "REVOKE",
+            "APPROVE",
+            "REJECT",
+            "ARCHIVE",
+        }
+    )
 
     def __init__(self, tool_catalog: Any) -> None:
         self._catalog = tool_catalog
@@ -34,7 +51,9 @@ class PreviewabilityChecker:
 
         Checks both tool_id and call for write verbs (Composio & legacy conventions).
         """
-        tokens = tool_id.upper().replace(".", "_").split("_") + call.upper().replace(".", "_").split("_")
+        tokens = tool_id.upper().replace(".", "_").split("_") + call.upper().replace(
+            ".", "_"
+        ).split("_")
         return any(t in PreviewabilityChecker._WRITE_VERBS for t in tokens)
 
     async def is_previewable(

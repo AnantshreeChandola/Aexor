@@ -659,9 +659,7 @@ class PlannerService:
 
         # Always set meta with real timestamp
         now = datetime.now(UTC).isoformat()
-        plan = plan.model_copy(
-            update={"meta": PlanMeta(created_at=now, canonical_hash="0" * 64)}
-        )
+        plan = plan.model_copy(update={"meta": PlanMeta(created_at=now, canonical_hash="0" * 64)})
 
         # Populate plugins from graph
         plugins = list({s.uses for s in plan.graph})
@@ -678,9 +676,7 @@ class PlannerService:
         # Compute canonical hash — exclude identity/derived fields:
         # plan_id (unique ULID per call) and meta (created_at + canonical_hash)
         plan_dict = plan.model_dump(mode="json")
-        hashable_dict = {
-            k: v for k, v in plan_dict.items() if k not in ("plan_id", "meta")
-        }
+        hashable_dict = {k: v for k, v in plan_dict.items() if k not in ("plan_id", "meta")}
         canonical_hash = compute_plan_hash(hashable_dict)
 
         meta = plan.meta.model_copy(update={"canonical_hash": canonical_hash})

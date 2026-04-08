@@ -47,8 +47,8 @@ SYSTEM_PROMPT = (
     "the system previously suggested a value for an entity (e.g. an email). "
     "If the user confirms (says 'yes', 'correct', 'that's right', etc.), "
     "emit the suggested value as the entity value — NOT the word 'yes'. "
-    "For example, if pending_suggestions has {\"attendee_email\": \"alice@x.com\"} "
-    "and the user says 'yes', return {\"attendee_email\": \"alice@x.com\"}.\n"
+    'For example, if pending_suggestions has {"attendee_email": "alice@x.com"} '
+    'and the user says \'yes\', return {"attendee_email": "alice@x.com"}.\n'
     "- Return ONLY valid JSON, no explanation."
 )
 
@@ -110,10 +110,7 @@ class LLMBasedParser:
 
         # Current date/time context for resolving relative dates
         now = datetime.now()
-        parts.append(
-            f"Current date/time: {now.strftime('%A, %Y-%m-%d %H:%M')} "
-            f"(timezone: {tz})"
-        )
+        parts.append(f"Current date/time: {now.strftime('%A, %Y-%m-%d %H:%M')} (timezone: {tz})")
 
         if context and context.turns:
             # Replay conversation history so the LLM sees the full

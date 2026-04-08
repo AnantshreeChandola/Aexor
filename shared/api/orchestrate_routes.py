@@ -51,9 +51,7 @@ class PlanRequest(BaseModel):
 class ExecuteApprovalRequest(BaseModel):
     """Request body for POST /orchestrate/execute."""
 
-    plan: dict[str, Any] = Field(
-        ..., description="The plan dict from /orchestrate/plan"
-    )
+    plan: dict[str, Any] = Field(..., description="The plan dict from /orchestrate/plan")
     scopes: list[str] = Field(
         ...,
         min_length=1,
@@ -63,7 +61,8 @@ class ExecuteApprovalRequest(BaseModel):
         default=None, description="Optional user selection from preview"
     )
     preview_state: dict[str, Any] | None = Field(
-        default=None, description="Accumulated gate approvals and step results for multi-gate replay"
+        default=None,
+        description="Accumulated gate approvals and step results for multi-gate replay",
     )
 
 

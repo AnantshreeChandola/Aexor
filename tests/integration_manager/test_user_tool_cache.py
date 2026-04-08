@@ -31,8 +31,18 @@ def cache(mock_redis):
 
 
 _SAMPLE_TOOLS = [
-    {"name": "GMAIL_SEND_EMAIL", "server_name": "composio", "provider_name": "gmail", "description": "Send email"},
-    {"name": "GOOGLECALENDAR_CREATE_EVENT", "server_name": "composio", "provider_name": "google_calendar", "description": "Create event"},
+    {
+        "name": "GMAIL_SEND_EMAIL",
+        "server_name": "composio",
+        "provider_name": "gmail",
+        "description": "Send email",
+    },
+    {
+        "name": "GOOGLECALENDAR_CREATE_EVENT",
+        "server_name": "composio",
+        "provider_name": "google_calendar",
+        "description": "Create event",
+    },
 ]
 
 

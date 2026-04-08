@@ -20,13 +20,9 @@ from ..domain.models import StepResult
 #   {step3.field}               — no underscore, no .result.
 #   {{step_3.response.field}}   — .response. alias
 #   {step_3.field}              — no .result.
-_STEP_PATTERN = re.compile(
-    r"\{?\{step[_]?(\d+)\.(?:result|response)\.(.+?)\}?\}"
-)
+_STEP_PATTERN = re.compile(r"\{?\{step[_]?(\d+)\.(?:result|response)\.(.+?)\}?\}")
 # Fallback: {stepN.field} — no .result. segment at all
-_STEP_SHORTHAND = re.compile(
-    r"\{?\{step[_]?(\d+)\.(.+?)\}?\}"
-)
+_STEP_SHORTHAND = re.compile(r"\{?\{step[_]?(\d+)\.(.+?)\}?\}")
 
 _PREVIEW_PATTERN = re.compile(r"\{\{preview\.cached_state\.step_(\d+)_result\.(.+?)\}\}")
 
@@ -114,11 +110,13 @@ class TemplateResolver:
             text,
         )
         result = _STEP_SHORTHAND.sub(
-            lambda m: str(self._extract_step_field(
-                int(m.group(1)),
-                m.group(2)[7:] if m.group(2).startswith("result.") else m.group(2),
-                step_results,
-            )),
+            lambda m: str(
+                self._extract_step_field(
+                    int(m.group(1)),
+                    m.group(2)[7:] if m.group(2).startswith("result.") else m.group(2),
+                    step_results,
+                )
+            ),
             result,
         )
         result = _PREVIEW_PATTERN.sub(

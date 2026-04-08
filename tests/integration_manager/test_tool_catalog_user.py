@@ -14,6 +14,7 @@ from shared.mcp.catalog import ToolCatalog, ToolDefinition
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _jsonrpc_response(tools: list[dict]) -> dict:
     return {
         "jsonrpc": "2.0",
@@ -24,7 +25,11 @@ def _jsonrpc_response(tools: list[dict]) -> dict:
 
 _RAW_TOOLS = [
     {"name": "GMAIL_SEND_EMAIL", "description": "Send email", "inputSchema": {}},
-    {"name": "GOOGLECALENDAR_CREATE_EVENT", "description": "Create event", "inputSchema": {"type": "object"}},
+    {
+        "name": "GOOGLECALENDAR_CREATE_EVENT",
+        "description": "Create event",
+        "inputSchema": {"type": "object"},
+    },
 ]
 
 
@@ -203,9 +208,7 @@ class TestGetUserTools:
         result = await catalog.get_user_tools("user-1")
         assert result is None
 
-    async def test_no_cache_returns_none(
-        self, mock_config, mock_http, mock_session_manager
-    ):
+    async def test_no_cache_returns_none(self, mock_config, mock_http, mock_session_manager):
         catalog = ToolCatalog(
             config=mock_config,
             http_client=mock_http,

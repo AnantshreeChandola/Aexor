@@ -147,9 +147,7 @@ def intake_service(
 
 
 class TestSessionCreationWarmsCache:
-    async def test_new_session_triggers_warm(
-        self, intake_service, mock_integration_manager
-    ):
+    async def test_new_session_triggers_warm(self, intake_service, mock_integration_manager):
         """Creating a new session should call warm_connection_cache."""
         await intake_service.process_message(
             user_id="user-1",
@@ -157,9 +155,7 @@ class TestSessionCreationWarmsCache:
             context_tier=1,
         )
 
-        mock_integration_manager.warm_connection_cache.assert_awaited_once_with(
-            "user-1"
-        )
+        mock_integration_manager.warm_connection_cache.assert_awaited_once_with("user-1")
 
     async def test_existing_session_does_not_warm(
         self,
@@ -186,9 +182,7 @@ class TestSessionCreationWarmsCache:
         mock_integration_manager,
     ):
         """If cache warming fails, session should still be created."""
-        mock_integration_manager.warm_connection_cache.side_effect = RuntimeError(
-            "Redis down"
-        )
+        mock_integration_manager.warm_connection_cache.side_effect = RuntimeError("Redis down")
 
         # Should not raise
         response = await intake_service.process_message(
@@ -224,9 +218,7 @@ class TestSessionCreationWarmsCache:
 
 
 class TestProviderCheckUsesCachedPath:
-    async def test_uses_is_user_connected_cached(
-        self, intake_service, mock_integration_manager
-    ):
+    async def test_uses_is_user_connected_cached(self, intake_service, mock_integration_manager):
         """_check_provider_connections should use cached method."""
         await intake_service.process_message(
             user_id="user-1",
@@ -238,9 +230,7 @@ class TestProviderCheckUsesCachedPath:
             "user-1", "google_calendar"
         )
 
-    async def test_not_connected_raises(
-        self, intake_service, mock_integration_manager
-    ):
+    async def test_not_connected_raises(self, intake_service, mock_integration_manager):
         """If user not connected, should raise ProviderNotConnectedError."""
         mock_integration_manager.is_user_connected_cached.return_value = False
 

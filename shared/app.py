@@ -239,9 +239,7 @@ async def lifespan(app: FastAPI):
         )
 
         integration_db = IntegrationDatabaseAdapter()
-        connection_cache = (
-            ConnectionCache(intake_redis) if intake_redis is not None else None
-        )
+        connection_cache = ConnectionCache(intake_redis) if intake_redis is not None else None
 
         composio_client = None
         if composio_config is not None:

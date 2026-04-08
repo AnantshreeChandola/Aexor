@@ -174,7 +174,9 @@ class TestMCPSessionManager:
 
     @pytest.mark.asyncio()
     async def test_different_cache_keys_get_different_sessions(
-        self, session_manager, mock_http_client,
+        self,
+        session_manager,
+        mock_http_client,
     ):
         """Different cache_keys (different user URLs) should produce separate sessions."""
         s1 = await session_manager.get_session(

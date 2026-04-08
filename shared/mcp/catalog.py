@@ -188,9 +188,7 @@ class ToolCatalog:
             "x-api-key": self._composio_config.api_key,
         }
 
-        session = await self._sessions.get_session(
-            "composio", url, headers, cache_key=url
-        )
+        session = await self._sessions.get_session("composio", url, headers, cache_key=url)
         if session.session_id:
             headers["Mcp-Session-Id"] = session.session_id
 
@@ -204,15 +202,11 @@ class ToolCatalog:
         response = await self._http.post(url, json=payload, headers=headers)
 
         if response.status_code >= 400:
-            raise RuntimeError(
-                f"tools/list failed for Composio: HTTP {response.status_code}"
-            )
+            raise RuntimeError(f"tools/list failed for Composio: HTTP {response.status_code}")
 
         data = _parse_sse_or_json(response)
         if "error" in data:
-            raise RuntimeError(
-                f"tools/list JSON-RPC error for Composio: {data['error']}"
-            )
+            raise RuntimeError(f"tools/list JSON-RPC error for Composio: {data['error']}")
 
         raw_tools = data.get("result", {}).get("tools", [])
         tools: list[ToolDefinition] = []
@@ -250,9 +244,7 @@ class ToolCatalog:
 
         # Remove old tools for this server
         self._tools = {
-            name: td
-            for name, td in self._tools.items()
-            if td.server_name != server_name
+            name: td for name, td in self._tools.items() if td.server_name != server_name
         }
 
         # Add new tools
@@ -370,9 +362,7 @@ class ToolCatalog:
 
         data = _parse_sse_or_json(response)
         if "error" in data:
-            raise RuntimeError(
-                f"tools/list JSON-RPC error for user '{user_id}': {data['error']}"
-            )
+            raise RuntimeError(f"tools/list JSON-RPC error for user '{user_id}': {data['error']}")
 
         raw_tools = data.get("result", {}).get("tools", [])
         tools: list[ToolDefinition] = []
@@ -452,9 +442,7 @@ class ToolCatalog:
             "params": {},
         }
 
-        response = await self._http.post(
-            cfg.url, json=payload, headers=request_headers
-        )
+        response = await self._http.post(cfg.url, json=payload, headers=request_headers)
 
         if response.status_code >= 400:
             raise RuntimeError(
@@ -463,9 +451,7 @@ class ToolCatalog:
 
         data = response.json()
         if "error" in data:
-            raise RuntimeError(
-                f"tools/list JSON-RPC error for '{server_name}': {data['error']}"
-            )
+            raise RuntimeError(f"tools/list JSON-RPC error for '{server_name}': {data['error']}")
 
         raw_tools = data.get("result", {}).get("tools", [])
 

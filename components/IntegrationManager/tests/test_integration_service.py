@@ -43,7 +43,9 @@ def mock_composio_client():
     client.list_connections = AsyncMock(return_value=[])
     client.revoke_connection = AsyncMock()
     client.get_auth_config = AsyncMock(return_value=None)
-    client.create_integration = AsyncMock(return_value={"id": "ac_test123", "auth_scheme": "OAUTH2"})
+    client.create_integration = AsyncMock(
+        return_value={"id": "ac_test123", "auth_scheme": "OAUTH2"}
+    )
     return client
 
 
@@ -126,9 +128,7 @@ class TestDisconnect:
         )
 
     @pytest.mark.asyncio()
-    async def test_disconnect_revokes_on_composio(
-        self, mock_db, mock_composio_client
-    ):
+    async def test_disconnect_revokes_on_composio(self, mock_db, mock_composio_client):
         cfg = _make_composio_config()
         mock_composio_client.list_connections.return_value = [
             {"id": "ca-123", "appName": "google_calendar", "status": "ACTIVE"},
@@ -151,9 +151,7 @@ class TestDisconnect:
         mock_composio_client.revoke_connection.assert_called_once_with("ca-123")
 
     @pytest.mark.asyncio()
-    async def test_disconnect_tolerates_composio_failure(
-        self, mock_db, mock_composio_client
-    ):
+    async def test_disconnect_tolerates_composio_failure(self, mock_db, mock_composio_client):
         cfg = _make_composio_config()
         mock_composio_client.list_connections.side_effect = ComposioApiError(500, "err")
         mock_db.upsert_connection.return_value = UserConnection(
@@ -357,9 +355,7 @@ class TestAddTool:
     @pytest.mark.asyncio()
     async def test_adds_tool_to_allowed_list(self, mock_db, mock_composio_client):
         cfg = _make_composio_config()
-        mock_composio_client.get_mcp_config.return_value = {
-            "allowed_tools": ["TOOL_A"]
-        }
+        mock_composio_client.get_mcp_config.return_value = {"allowed_tools": ["TOOL_A"]}
         svc = IntegrationManager(
             db_adapter=mock_db,
             composio_config=cfg,
@@ -428,16 +424,12 @@ class TestRemoveTool:
 
         await svc.remove_tool("GMAIL_SEND_EMAIL")
 
-        mock_composio_client.update_allowed_tools.assert_called_once_with(
-            "cfg-abc", ["TOOL_A"]
-        )
+        mock_composio_client.update_allowed_tools.assert_called_once_with("cfg-abc", ["TOOL_A"])
 
     @pytest.mark.asyncio()
     async def test_noop_if_tool_not_in_list(self, mock_db, mock_composio_client):
         cfg = _make_composio_config()
-        mock_composio_client.get_mcp_config.return_value = {
-            "allowed_tools": ["TOOL_A"]
-        }
+        mock_composio_client.get_mcp_config.return_value = {"allowed_tools": ["TOOL_A"]}
         svc = IntegrationManager(
             db_adapter=mock_db,
             composio_config=cfg,
@@ -513,8 +505,7 @@ class TestSyncConnections:
         mock_composio_client.list_connections.assert_called_once_with("user-1")
         # gmail was marked disconnected since it wasn't in remote
         assert any(
-            call.kwargs.get("provider_name") == "gmail"
-            and call.kwargs.get("is_connected") is False
+            call.kwargs.get("provider_name") == "gmail" and call.kwargs.get("is_connected") is False
             for call in mock_db.upsert_connection.call_args_list
         )
 

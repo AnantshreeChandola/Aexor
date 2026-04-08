@@ -505,9 +505,7 @@ class TestPreferenceService:
         user_id = uuid4()
         db_adapter.delete_preference.return_value = True
 
-        result = await service.delete_preference(
-            user_id=user_id, preference_key="custom_key"
-        )
+        result = await service.delete_preference(user_id=user_id, preference_key="custom_key")
 
         assert result.preference_key == "custom_key"
         assert "deleted successfully" in result.message
