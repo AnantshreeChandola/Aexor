@@ -14,7 +14,7 @@
 
 > **Watch Aexor in action:**
 
-[![Aexor Demo Video](https://img.shields.io/badge/▶️_Watch_Demo-Loom-625DF5?style=for-the-badge)](https://www.loom.com/share/YOUR_VIDEO_ID)
+[![Aexor Demo Video](https://www.loom.com/share/8bfadf98c7634be29dba70eae6e4a512)](https://www.loom.com/share/YOUR_VIDEO_ID)
 
 *Replace `YOUR_VIDEO_ID` with your actual Loom video ID after recording*
 
