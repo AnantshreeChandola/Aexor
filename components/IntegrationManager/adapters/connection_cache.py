@@ -21,7 +21,7 @@ import redis.exceptions
 logger = logging.getLogger(__name__)
 
 _KEY_PREFIX = "connections"
-_DEFAULT_TTL = 3600  # 1 hour, same as session TTL
+_DEFAULT_TTL = 86400  # 24 hours, same as session TTL
 
 
 class ConnectionCache:

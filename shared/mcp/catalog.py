@@ -49,19 +49,28 @@ class ToolDefinition:
     input_schema: dict[str, Any] = field(default_factory=dict)
 
 
+# Tools with these app prefixes use a different provider's OAuth connection.
+# e.g. GOOGLEMEET_* tools authenticate via Google Calendar, not a separate app.
+_PROVIDER_ALIASES: dict[str, str] = {
+    "googlemeet": "googlecalendar",
+}
+
+
 def _extract_provider_name(tool_name: str) -> str:
     """Extract provider name from MCP tool name.
 
-    Composio convention: ``GOOGLECALENDAR_CREATE_EVENT`` → ``google_calendar``.
-    Splits on first ``_``, lowercases, and inserts ``_`` before uppercase
-    transitions in the prefix (e.g. ``GOOGLECALENDAR`` → ``google_calendar``).
+    Composio convention: ``GOOGLECALENDAR_CREATE_EVENT`` → ``googlecalendar``.
+    Splits on first ``_``, lowercases, and applies provider aliases
+    (e.g. ``GOOGLEMEET`` → ``googlecalendar``).
     """
     prefix = tool_name.split("_", 1)[0] if "_" in tool_name else tool_name
     # Insert underscore before uppercase-to-lowercase transitions
     # GOOGLECALENDAR -> GOOGLE_CALENDAR -> google_calendar
     spaced = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", prefix)
     spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", spaced)
-    return spaced.lower()
+    name = spaced.lower()
+    # Apply aliases: googlemeet -> googlecalendar (same OAuth connection)
+    return _PROVIDER_ALIASES.get(name, name)
 
 
 def _parse_sse_or_json(response) -> dict:

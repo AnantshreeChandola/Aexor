@@ -70,6 +70,16 @@ async def store_plan_endpoint(
         return error_handler.handle_service_errors(e)
 
 
+@router.get("/all")
+async def list_all_plans(
+    service: PlanService = Depends(get_plan_service),
+    limit: int = Query(default=50, ge=1, le=500),
+) -> SuccessResponse:
+    """Return all plans with their latest outcome."""
+    plans = await service.get_all_plans(limit=limit)
+    return SuccessResponse(data=plans)
+
+
 @router.get("/by-intent/{intent_type}")
 async def get_plans_by_intent_endpoint(
     intent_type: str,

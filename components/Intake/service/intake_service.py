@@ -104,7 +104,7 @@ class IntakeService:
 
         # 3. Parse intent via LLM (context includes pending_suggestions
         #    and last_follow_up so the LLM can interpret confirmations)
-        parse_result = await self._safe_parse(message, session)
+        parse_result = await self._safe_parse(message, session, tz)
 
         # 4. Apply confirmed suggestions: if LLM resolved a pending
         #    suggestion, clear it from contact_suggestions
@@ -217,9 +217,10 @@ class IntakeService:
         self,
         message: str,
         session: Session,
+        tz: str = "UTC",
     ) -> ParseResult:
         try:
-            return await self._intent_parser.parse(message, session)
+            return await self._intent_parser.parse(message, session, tz)
         except IntentParserError:
             logger.warning(
                 "intake_parser_failed",
@@ -310,13 +311,18 @@ class IntakeService:
     ) -> None:
         """Check that the user has connected required providers.
 
-        Uses the ToolCatalog to map tool IDs → provider names, then
-        checks connection status via IntegrationManager (cache-first,
-        DB fallback).  Skipped if either dependency is unavailable
+        Re-warms the connection cache from Composio before checking so
+        that connections made mid-session are picked up.  Uses the
+        ToolCatalog to map tool IDs → provider names, then checks
+        connection status via IntegrationManager (cache-first, DB
+        fallback).  Skipped if either dependency is unavailable
         (graceful degradation).
         """
         if self._tool_catalog is None or self._integration_manager is None:
             return
+
+        # Re-warm cache so mid-session connections are reflected
+        await self._warm_connection_cache(user_id)
 
         missing_providers: list[str] = []
         checked: set[str] = set()

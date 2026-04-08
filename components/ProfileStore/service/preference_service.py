@@ -218,7 +218,11 @@ class PreferenceService:
         )
 
     async def get_all_preferences(
-        self, user_id: UUID, context_tier: int, plan_id: str | None = None
+        self,
+        user_id: UUID,
+        context_tier: int,
+        plan_id: str | None = None,
+        include_defaults: bool = True,
     ) -> list[EvidenceItem]:
         """
         Get all preferences for a user as Evidence Items.
@@ -227,6 +231,7 @@ class PreferenceService:
             user_id: User UUID
             context_tier: User's consent tier from auth context
             plan_id: Optional plan ID for correlation logging
+            include_defaults: Whether to include schema defaults for unset keys
 
         Returns:
             List of Evidence Items for all user preferences
@@ -263,23 +268,24 @@ class PreferenceService:
             evidence_items.append(evidence)
 
         # Also include defaults for preferences not explicitly set
-        all_schema_keys = self.schema_registry.list_preference_keys()
-        set_keys = {pref.key for pref in preferences}
+        if include_defaults:
+            all_schema_keys = self.schema_registry.list_preference_keys()
+            set_keys = {pref.key for pref in preferences}
 
-        for key in all_schema_keys:
-            if key not in set_keys:
-                default_value = self.schema_registry.get_default_value(key)
-                if default_value is not None:
-                    evidence = EvidenceItem(
-                        type="preference",
-                        key=key,
-                        value=default_value,
-                        confidence=1.0,
-                        source_ref=f"profilestore:prefs/{key}",
-                        ttl_days=None,
-                        tier=2,
-                    )
-                    evidence_items.append(evidence)
+            for key in all_schema_keys:
+                if key not in set_keys:
+                    default_value = self.schema_registry.get_default_value(key)
+                    if default_value is not None:
+                        evidence = EvidenceItem(
+                            type="preference",
+                            key=key,
+                            value=default_value,
+                            confidence=1.0,
+                            source_ref=f"profilestore:prefs/{key}",
+                            ttl_days=None,
+                            tier=2,
+                        )
+                        evidence_items.append(evidence)
 
         logger.info(
             f"Retrieved {len(evidence_items)} preferences for user {user_id}, plan_id={plan_id}"

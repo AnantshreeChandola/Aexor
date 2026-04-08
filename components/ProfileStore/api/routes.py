@@ -154,6 +154,7 @@ async def delete_preference(
 async def get_all_preferences(
     user_id: UUID,
     request: Request,
+    include_defaults: bool = True,
     auth_context: dict = Depends(get_auth_context),
     service: PreferenceService = Depends(get_preference_service),
 ) -> SuccessResponse:
@@ -161,7 +162,7 @@ async def get_all_preferences(
     Get all preferences for a user.
 
     Returns preferences in Evidence Item format.
-    Includes both explicitly set preferences and schema defaults.
+    Set include_defaults=false to only return explicitly set preferences.
     """
     try:
         # Verify user can only access their own preferences
@@ -172,7 +173,10 @@ async def get_all_preferences(
 
         # Get all preferences via service
         evidence_items = await service.get_all_preferences(
-            user_id=user_id, context_tier=auth_context["context_tier"], plan_id=plan_id
+            user_id=user_id,
+            context_tier=auth_context["context_tier"],
+            plan_id=plan_id,
+            include_defaults=include_defaults,
         )
 
         logger.info(

@@ -62,6 +62,9 @@ class ExecuteApprovalRequest(BaseModel):
     selected_option: dict[str, Any] | None = Field(
         default=None, description="Optional user selection from preview"
     )
+    preview_state: dict[str, Any] | None = Field(
+        default=None, description="Accumulated gate approvals and step results for multi-gate replay"
+    )
 
 
 # ------------------------------------------------------------------
@@ -255,6 +258,7 @@ async def orchestrate_execute(
     from components.ExecuteOrchestrator.domain.models import (
         ApprovalTokenError,
         ExecuteRequest,
+        GateApprovalRequired,
         PlanExpiredError,
     )
 
@@ -320,15 +324,18 @@ async def orchestrate_execute(
             ).model_dump(),
         )
 
-    # 3. Retrieve preview state (best-effort)
-    preview_state: dict[str, Any] | None = None
+    # 3. Build preview_state: merge cached preview + frontend gate approvals
+    preview_state: dict[str, Any] = {}
     if preview_service is not None:
         try:
             cached = await preview_service._cache.get(plan.plan_id, user_id)
             if cached is not None:
-                preview_state = cached
+                preview_state.update(cached)
         except Exception as exc:
             logger.debug("Preview state retrieval failed (non-fatal): %s", exc)
+    # Merge gate approvals and completed step results from the frontend
+    if body.preview_state:
+        preview_state.update(body.preview_state)
 
     # 4. Execute plan
     try:
@@ -337,9 +344,21 @@ async def orchestrate_execute(
             approval_token=approval_token.token,
             user_id=user_id,
             trace_id=plan.trace_id or "",
-            preview_state=preview_state,
+            preview_state=preview_state or None,
         )
         outcome = await execute_service.execute_plan(execute_request)
+    except GateApprovalRequired as exc:
+        return JSONResponse(
+            status_code=status.HTTP_202_ACCEPTED,
+            content={
+                "status": "approval_required",
+                "gate_id": exc.gate_id,
+                "step": exc.step,
+                "message": str(exc),
+                "context_data": exc.context_data,
+                "partial_results": exc.partial_results,
+            },
+        )
     except (ApprovalTokenError, PlanExpiredError) as exc:
         return _handle_domain_error(exc)
     except Exception as exc:

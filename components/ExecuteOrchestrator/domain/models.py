@@ -159,3 +159,20 @@ class CycleDetectedError(ExecuteError):
     def __init__(self, details: str = "cycle in step graph") -> None:
         self.details = details
         super().__init__(f"Cycle detected: {details}")
+
+
+class GateApprovalRequired(ExecuteError):
+    """Execution paused — a gated step requires user approval before continuing."""
+
+    def __init__(
+        self,
+        gate_id: str,
+        step: int,
+        context_data: dict[str, Any] | None = None,
+        partial_results: dict[str, Any] | None = None,
+    ) -> None:
+        self.gate_id = gate_id
+        self.step = step
+        self.context_data = context_data or {}
+        self.partial_results = partial_results or {}
+        super().__init__(f"Approval required for gate {gate_id} at step {step}")

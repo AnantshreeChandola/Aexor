@@ -65,7 +65,7 @@ class DatabaseAdapter:
         """
         async with self.shared_db.get_session() as session:
             async with session.begin():
-                # Insert plan
+                # Insert plan first (FK parent) and flush to satisfy constraints
                 session.add(
                     PlanTable(
                         plan_id=plan.plan_id,
@@ -79,8 +79,9 @@ class DatabaseAdapter:
                         stored_at=plan.stored_at,
                     )
                 )
+                await session.flush()
 
-                # Insert outcome
+                # Insert outcome and metrics (FK children)
                 session.add(
                     PlanOutcomeTable(
                         outcome_id=outcome.outcome_id,
@@ -98,7 +99,6 @@ class DatabaseAdapter:
                     )
                 )
 
-                # Insert metrics
                 session.add(
                     PlanMetricsTable(
                         metrics_id=metrics.metrics_id,
@@ -331,6 +331,27 @@ class DatabaseAdapter:
             rows = result.fetchall()
 
             return {row.intent_type: float(row.success_rate) for row in rows}
+
+    @with_db_error_handling
+    async def get_all_plans(self, limit: int = 100) -> list[dict[str, Any]]:
+        """Return all plans with their latest outcome, ordered by stored_at DESC."""
+        async with self.shared_db.get_session() as session:
+            query = text("""
+                SELECT p.plan_id, p.intent_type, p.step_count, p.stored_at,
+                       o.success, o.error_type, o.execution_start, o.execution_end,
+                       o.total_steps, o.failed_step, o.context_data
+                FROM plans p
+                LEFT JOIN LATERAL (
+                    SELECT * FROM plan_outcomes po
+                    WHERE po.plan_id = p.plan_id
+                    ORDER BY po.execution_start DESC LIMIT 1
+                ) o ON true
+                ORDER BY p.stored_at DESC
+                LIMIT :limit
+            """)
+            result = await session.execute(query, {"limit": limit})
+            rows = result.fetchall()
+            return [dict(row._mapping) for row in rows]
 
     async def health_check(self) -> bool:
         """Check database connectivity using shared adapter."""

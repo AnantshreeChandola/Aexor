@@ -81,24 +81,31 @@ class AnthropicReasoningAdapter:
             "messages": messages,
         }
 
-        if trust_level == "untrusted_input":
-            # Tier 1: no tools, strict output schema
-            kwargs["tools"] = []
-        elif trust_level == "trusted":
+        if trust_level == "trusted":
             # Tier 2: enable spawn tool
             kwargs["tools"] = self._build_spawn_tools()
+        # Tier 1 (untrusted_input): no tools — omit 'tools' key entirely
+        # (Anthropic API rejects tools=[])
 
         response = await self._client.messages.create(**kwargs)
         return self._parse_response(response, trust_level)
 
     def _build_messages(self, context: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Build message list from step context."""
+        """Build message list from step context.
+
+        Each step result is capped at ~12K chars to stay well within
+        Anthropic's per-minute input token limits on lower-tier plans.
+        """
+        _MAX_RESULT_CHARS = 12_000
         messages: list[dict[str, Any]] = []
         for ctx in context:
+            result_str = str(ctx.get("result", {}))
+            if len(result_str) > _MAX_RESULT_CHARS:
+                result_str = result_str[:_MAX_RESULT_CHARS] + "... [truncated]"
             messages.append(
                 {
                     "role": "user",
-                    "content": f"Step {ctx.get('step', '?')} result: {ctx.get('result', {})}",
+                    "content": f"Step {ctx.get('step', '?')} result: {result_str}",
                 }
             )
         if not messages:

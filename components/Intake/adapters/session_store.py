@@ -40,7 +40,7 @@ class RedisSessionStore:
     def __init__(
         self,
         redis_client: redis.asyncio.Redis,
-        ttl_seconds: int = 3600,
+        ttl_seconds: int = 86400,
     ) -> None:
         self._redis = redis_client
         self._ttl = ttl_seconds

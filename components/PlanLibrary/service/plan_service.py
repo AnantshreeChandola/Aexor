@@ -9,7 +9,7 @@ Reference: LLD.md, tasks.md T200
 
 import logging
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -136,9 +136,15 @@ class PlanService:
         meta = plan.get("meta", {})
         intent_type = meta.get("intent_type", "unknown")
         created_at_str = meta.get("created_at")
-        created_at = datetime.fromisoformat(created_at_str) if created_at_str else datetime.utcnow()
+        if created_at_str:
+            created_at = datetime.fromisoformat(created_at_str)
+            # Strip tzinfo for TIMESTAMP WITHOUT TIME ZONE columns
+            if created_at.tzinfo is not None:
+                created_at = created_at.replace(tzinfo=None)
+        else:
+            created_at = datetime.now(UTC).replace(tzinfo=None)
 
-        now = datetime.utcnow()
+        now = datetime.now(UTC).replace(tzinfo=None)
 
         # Build domain models
         plan_db = PlanDB(
@@ -153,14 +159,21 @@ class PlanService:
             stored_at=now,
         )
 
+        exec_start = datetime.fromisoformat(outcome["execution_start"])
+        exec_end = datetime.fromisoformat(outcome["execution_end"])
+        if exec_start.tzinfo is not None:
+            exec_start = exec_start.replace(tzinfo=None)
+        if exec_end.tzinfo is not None:
+            exec_end = exec_end.replace(tzinfo=None)
+
         outcome_db = PlanOutcomeDB(
             outcome_id=uuid4(),
             plan_id=plan_id,
             success=outcome.get("success", False),
             error_type=outcome.get("error_type"),
             error_details=outcome.get("error_details"),
-            execution_start=datetime.fromisoformat(outcome["execution_start"]),
-            execution_end=datetime.fromisoformat(outcome["execution_end"]),
+            execution_start=exec_start,
+            execution_end=exec_end,
             total_steps=outcome.get("total_steps", step_count),
             failed_step=outcome.get("failed_step"),
             context_data=outcome.get("context_data"),
@@ -252,6 +265,10 @@ class PlanService:
         )
 
         return evidence_items
+
+    async def get_all_plans(self, limit: int = 100) -> list[dict[str, Any]]:
+        """Return all plans with their latest outcome."""
+        return await self.db.get_all_plans(limit=limit)
 
     async def get_plan_by_id(self, plan_id: str) -> PlanDB | None:
         """

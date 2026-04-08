@@ -1,4 +1,4 @@
-# Personal-agent Development Guidelines
+# Aexor Development Guidelines
 
 Auto-generated from all feature plans. Last updated: 2026-03-26
 

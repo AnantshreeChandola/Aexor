@@ -9,6 +9,7 @@ Reference: LLD SS6.4
 from __future__ import annotations
 
 import json
+import zoneinfo
 from datetime import UTC, datetime
 from typing import Any
 
@@ -91,20 +92,35 @@ Return ONLY a valid JSON object (no markdown, no code fences) matching this sche
    - Total graph size must stay ≤ 100 steps
 11. Return raw JSON only. No explanation, no markdown wrapping.
 12. Plan structure pattern — always follow this ordering:
-    a. Fetcher step(s): Read-only data retrieval first (e.g., check calendar availability, list events)
-    b. Reasoner step: Analyze fetched data and decide if action is safe (type="llm_reasoning", can_spawn=true, trust_level="trusted"). The Reasoner serves as the conflict-detection and recovery handler.
-    c. Booker step: Execute the write action with CONCRETE values from the intent (e.g., create event at the requested time). MUST have role="Booker" and gate_id for HITL approval.
-    d. Notifier step: Send notifications (e.g., email attendees) after the write action succeeds.
+    a. Fetcher step(s): Read-only data retrieval first (e.g., check calendar availability, list events). type="api".
+    b. Reasoner step: Analyze fetched data and decide the best action (type="llm_reasoning", can_spawn=true, trust_level="trusted"). The Reasoner outputs structured JSON with a recommended action (e.g., {"recommended_time": "...", "has_conflict": true}). context_from must include the Fetcher step. The Reasoner serves as the conflict-detection, rescheduling, and recovery handler — all dynamic logic lives here, NOT hardcoded.
+    c. Resolver step (if user confirmation needed): Present the Reasoner's recommendation to the user (role="Resolver", gate_id required). This is a HITL gate — execution pauses until the user approves.
+    d. Booker step: Execute the write action using template references to the Reasoner's output (e.g., start_datetime = "{{step_2.result.recommended_time}}"). MUST have role="Booker" and gate_id for HITL approval.
+    e. Notifier step: Send notifications using template references for actual values from the Reasoner or Booker output.
 13. Recovery Reasoner requirements:
     - The Reasoner step MUST have can_spawn=true and max_spawned_steps=3
     - The Reasoner step MUST have trust_level="trusted" (so it can spawn steps)
     - The `uses` field on llm_reasoning steps should describe the reasoning context (e.g., "calendar_conflict_resolver") — it does NOT need to be a catalog tool
+    - The Reasoner's reasoning_config.system_prompt_ref MUST instruct it to output structured JSON with known field names so downstream steps can use {{step_N.result.field}} template references
     - If a Booker step fails (e.g., time conflict), the system routes the error to this Reasoner, which spawns a new Booker step with corrected args (e.g., a different time slot)
 14. Write operations (create, update, delete, send) MUST use role="Booker" with a gate_id.
 15. When the intent involves attendees or recipients, ALWAYS include a Notifier step with the appropriate email/notification tool.
 16. Conflict detection — for scheduling intents the Fetcher step MUST query existing events for the target date/time range so the Reasoner can detect overlaps. Use a tool that returns events (e.g., GOOGLECALENDAR_FIND_EVENT, GOOGLECALENDAR_EVENTS_LIST_ALL_CALENDARS) — NOT a metadata-only tool like GOOGLECALENDAR_GET_CALENDAR which returns no event data. Pass the target date range in the Fetcher args (timeMin/timeMax or equivalent).
-17. Template references — step args may reference earlier step results using {{step_N.result.field}} syntax. ONLY reference API step results (Fetcher, Booker), NEVER reference Reasoner (llm_reasoning) step results — Reasoner output is free-form text, not structured data. Booker step args MUST use concrete values derived from the intent, not templates referencing Reasoner output.
-18. IMPORTANT: The Notifier step's email body should reference the ACTUAL time/date from the Booker step args, not template references. Use concrete values from the intent entities."""
+17. Template references — EXACT syntax is {{step_N.result.field}} with DOUBLE curly braces, underscore after "step", and ".result." segment. Examples:
+    CORRECT:   "{{step_2.result.recommended_time}}"
+    CORRECT:   "{{step_1.result.events}}"
+    WRONG:     "{step2.recommended_time}" — missing double braces, underscore, .result.
+    WRONG:     "{{step2.recommended_time}}" — missing underscore and .result.
+    WRONG:     "{step_2.resolved_time}" — missing double braces and .result.
+    You MUST use the Reasoner's step number (NOT the Resolver step number) when referencing Reasoner output fields like recommended_time. When referencing Reasoner output, you MUST set the Reasoner's reasoning_config.system_prompt_ref to instruct it to return structured JSON with known field names (e.g., {"recommended_time": "...", "has_conflict": true, "conflicts": [...]}). This allows downstream steps to reliably use {{step_N.result.recommended_time}} etc.
+18. IMPORTANT: Booker and Notifier steps should use template references to the Reasoner's structured output for dynamic values (e.g., {{step_2.result.recommended_time}}) rather than hardcoding values from the intent. This lets the Reasoner adjust values based on conflict analysis at runtime. Always reference the REASONER step number, not any other step.
+19. Conflict resolution with user interaction — for scheduling intents the plan MUST include a Resolver step (role="Resolver", gate_id required) between the Reasoner and Booker steps. The expected plan pattern is:
+    a. Fetcher: Query existing events for the target date/time range (type="api")
+    b. Reasoner: Analyze fetched events for overlaps with the requested time. Use type="llm_reasoning" with a reasoning_config that instructs the LLM to output structured JSON: {"recommended_time": "<ISO datetime>", "has_conflict": <bool>, "conflicts": [...], "free_slots": [{"start": "<ISO>", "end": "<ISO>", "label": "<human-readable>"}], "reason": "<why this time was chosen>"}. If has_conflict=true, free_slots MUST contain 3-5 nearest available time slots during work hours. If has_conflict=false, free_slots should be an empty array. context_from must include the Fetcher step number.
+    c. Resolver: Present the Reasoner's recommendation to the user for confirmation (role="Resolver", type="api", gate_id required). Use a pass-through tool name like "system.confirm" or "confirm_action" (does NOT need to be in the catalog). MUST include "context_from": [<Reasoner step number>] so the system forwards the Reasoner's recommendation fields. The gate_id triggers HITL approval so the user can review the Reasoner's recommendation before proceeding.
+    d. Booker: Create the event using the Reasoner's recommended_time via template reference: start_datetime = "{{step_N.result.recommended_time}}" where N is the Reasoner step number (NOT the Resolver step number). MUST have gate_id for HITL approval. The field name MUST be "recommended_time" — do NOT use "resolved_time", "start_time", or other names.
+    e. Notifier: Send notifications using template references for the actual scheduled time: "{{step_N.result.recommended_time}}" where N is the Reasoner step number.
+20. Date resolution — ALWAYS resolve relative dates (e.g., "Friday", "next Tuesday", "tomorrow") using the LOCAL date/time provided in the user's timezone, NOT the UTC timestamp. The "Current Local Date/Time" field is the authoritative reference for what day it is for the user."""
 
     def build_user_prompt(
         self,
@@ -144,12 +160,32 @@ Return ONLY a valid JSON object (no markdown, no code fences) matching this sche
                 tools_info.append(tool_entry)
         catalog_json = json.dumps(tools_info, indent=2)
 
-        now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S%z")
+        now_utc = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S%z")
         user_tz = intent.tz or "UTC"
+        try:
+            tz = zoneinfo.ZoneInfo(user_tz)
+            now_local_dt = datetime.now(tz)
+            now_local = now_local_dt.strftime("%Y-%m-%dT%H:%M:%S%z (%A)")
+            # Build explicit week calendar to prevent day-of-week miscalculation
+            from datetime import timedelta
+            week_lines = []
+            start_of_week = now_local_dt - timedelta(days=now_local_dt.weekday())  # Monday
+            for i in range(7):
+                d = start_of_week + timedelta(days=i)
+                marker = " <-- TODAY" if d.date() == now_local_dt.date() else ""
+                week_lines.append(f"  {d.strftime('%A')} = {d.strftime('%Y-%m-%d')}{marker}")
+            week_calendar = "\n".join(week_lines)
+        except (KeyError, Exception):
+            now_local = now_utc
+            week_calendar = ""
+
+        week_section = f"\n\nThis week's calendar:\n{week_calendar}" if week_calendar else ""
 
         return f"""## Current Date/Time
-Now: {now} (user timezone: {user_tz})
-Resolve all relative dates (e.g. "tomorrow", "next Tuesday") relative to this timestamp.
+UTC: {now_utc}
+Current Local Date/Time ({user_tz}): {now_local}{week_section}
+
+Resolve all relative dates (e.g. "tomorrow", "next Friday") using the calendar above. Match day names to their exact dates.
 
 ## User Intent
 {intent_json}
