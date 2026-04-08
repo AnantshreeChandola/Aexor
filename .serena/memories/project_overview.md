@@ -1,7 +1,7 @@
 # Aexor - Project Overview
 
 <p align="center">
-  <img src="../../aexor-logo.png" alt="Aexor Logo" width="200">
+  <img src="../../static/aexor-logo.png" alt="Aexor Logo" width="200">
 </p>
 
 ## Purpose
