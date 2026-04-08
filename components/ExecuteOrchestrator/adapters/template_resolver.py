@@ -9,7 +9,7 @@ Reference: LLD.md Section 6.6
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, ClassVar
 
 from ..domain.models import StepResult
 
@@ -155,7 +155,7 @@ class TemplateResolver:
         return self._traverse_path(data, field_path, f"preview_step_{step_num}")
 
     # Common field name aliases the LLM might use interchangeably
-    _FIELD_ALIASES: dict[str, list[str]] = {
+    _FIELD_ALIASES: ClassVar[dict[str, list[str]]] = {
         "resolved_time": ["recommended_time", "start_time", "start_datetime", "time"],
         "recommended_time": ["resolved_time", "start_time", "start_datetime", "time"],
         "start_time": ["recommended_time", "resolved_time", "start_datetime", "time"],

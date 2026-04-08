@@ -385,11 +385,7 @@ class PlannerService:
         try:
             # a) Per-user cached tools (survives container restarts via Redis)
             user_tools = await self._tool_catalog.get_user_tools(intent.user_id)
-            if user_tools:
-                tools = user_tools
-            else:
-                # b) Global in-memory catalog (populated at startup)
-                tools = self._tool_catalog.get_all_tools()
+            tools = user_tools if user_tools else self._tool_catalog.get_all_tools()
 
             # c) If both empty, try live refresh for this user
             if not tools:

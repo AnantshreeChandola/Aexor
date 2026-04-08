@@ -703,8 +703,6 @@ class ExecuteService:
         request: ExecuteRequest,
     ) -> dict[str, Any]:
         """Execute an LLM reasoning step with trust enforcement."""
-        import json as _json
-
         # 1. Gather context from context_from steps (summarized to fit token budget).
         #    If context_from is empty, use ALL prior completed steps — the Planner
         #    LLM often omits context_from for Reasoner steps.
