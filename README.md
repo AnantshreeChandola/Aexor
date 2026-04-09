@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="static/aexor-logo-cropped-tight.png" alt="Aexor Logo" width="200">
+  <img src="static/aexor-logo-top-cropped.png" alt="Aexor Logo" width="200">
 </p>
 
 <h1 align="center">Aexor</h1>
