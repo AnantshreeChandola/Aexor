@@ -198,8 +198,4 @@ git checkout -b feat/<short-name>
 3. Each component follows the structure: `SPEC.md`, `LLD.md`, `schemas/`, `tests/`, code
 4. Create branch `feat/<short-name>`, ensure CI passes, open PR
 
----
 
-## License
-
-MIT — see [pyproject.toml](pyproject.toml)
