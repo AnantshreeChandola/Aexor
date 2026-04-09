@@ -169,11 +169,13 @@ class TestFailureRecovery:
         execute_service._retry = RetryPolicy(max_retries=3, backoff_base_s=0)
         call_count = 0
 
-        _tool_results = {
-            "list_events": {"status": "ok", "events": [{"id": "e1"}]},
-            "get_contact": {"status": "ok", "name": "Alice"},
-            "find_slot": {"status": "ok", "slot": "2026-04-01T15:00"},
-            "create_event": {"status": "ok", "id": "evt-001"},
+        # Superset result — every field any step might template-reference
+        _default_result = {
+            "status": "ok",
+            "events": [{"id": "e1"}],
+            "name": "Alice",
+            "slot": "2026-04-01T15:00",
+            "id": "evt-001",
         }
 
         async def fail_then_succeed(server, tool, args, **kwargs):
@@ -181,7 +183,7 @@ class TestFailureRecovery:
             call_count += 1
             if call_count <= 2:
                 raise MCPInvocationError("srv", "tool", "503")
-            return _tool_results.get(tool, {"status": "ok"})
+            return _default_result
 
         execute_service._mcp.invoke = AsyncMock(side_effect=fail_then_succeed)
         outcome = await execute_service.execute_plan(sample_execute_request)

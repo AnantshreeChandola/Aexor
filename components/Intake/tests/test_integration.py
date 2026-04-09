@@ -102,11 +102,16 @@ class TestMultiTurnIntegration:
                 # Turn 2
                 ParseResult(
                     intent="schedule_meeting",
-                    entities={"time": "10 AM", "date": "Tuesday", "duration_min": 30},
+                    entities={
+                        "attendee_email": "alice@example.com",
+                        "time": "10 AM",
+                        "date": "Tuesday",
+                        "duration": "30m",
+                    },
                 ),
             ],
             planner_responses=[
-                # Turn 1: missing time, duration_min
+                # Turn 1: missing several fields
                 RequiredEntitiesResult(
                     intent_type="schedule_meeting",
                     resolved_tools=["google.calendar"],
@@ -114,7 +119,7 @@ class TestMultiTurnIntegration:
                         EntityRequirement(name="attendee", description="Who?"),
                         EntityRequirement(name="time", description="When?"),
                         EntityRequirement(
-                            name="duration_min",
+                            name="duration",
                             description="How long?",
                             default_preference_key="default_meeting_duration",
                         ),
@@ -122,20 +127,22 @@ class TestMultiTurnIntegration:
                     missing_entities=[
                         EntityRequirement(name="time", description="When?"),
                         EntityRequirement(
-                            name="duration_min",
+                            name="duration",
                             description="How long?",
                             default_preference_key="default_meeting_duration",
                         ),
                     ],
                 ),
-                # Turn 2: nothing missing
+                # Turn 2: nothing missing from Planner's perspective
                 RequiredEntitiesResult(
                     intent_type="schedule_meeting",
                     resolved_tools=["google.calendar"],
                     required_entities=[
                         EntityRequirement(name="attendee", description="Who?"),
+                        EntityRequirement(name="attendee_email", description="Email?"),
+                        EntityRequirement(name="date", description="Date?"),
                         EntityRequirement(name="time", description="When?"),
-                        EntityRequirement(name="duration_min", description="How long?"),
+                        EntityRequirement(name="duration", description="How long?"),
                     ],
                     missing_entities=[],
                 ),
@@ -157,7 +164,7 @@ class TestMultiTurnIntegration:
         # Turn 2 (same session)
         r2 = await svc.process_message(
             user_id=USER_ID,
-            message="Tuesday at 10 AM, 30 min",
+            message="Tuesday at 10 AM, 30 min, alice@example.com",
             context_tier=2,
             session_id=r1.session_id,
         )

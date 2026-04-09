@@ -195,25 +195,21 @@ class TestPromptBuilder:
         assert "true" in prompt.lower()
 
     def test_user_prompt_contains_intent_and_evidence(self):
-        from .conftest import SAMPLE_EVIDENCE, _make_catalog_response, _make_tool_model
+        from .conftest import SAMPLE_EVIDENCE, _make_tool_definition
 
-        tools = [_make_tool_model("system.echo", "Echo")]
-        catalog = _make_catalog_response(tools)
-        prompt = self.builder.build_user_prompt(SAMPLE_INTENT, list(SAMPLE_EVIDENCE), catalog)
+        tools = [_make_tool_definition("system.echo", "Echo")]
+        prompt = self.builder.build_user_prompt(SAMPLE_INTENT, list(SAMPLE_EVIDENCE), tools)
         assert "schedule_meeting" in prompt
         assert "meeting_duration_min" in prompt
 
     def test_user_prompt_truncates_long_intent(self):
-        from .conftest import _make_catalog_response
-
         long_intent = Intent(
             intent="x" * 20_000,
             entities={},
             constraints={},
             user_id="test-user",
         )
-        catalog = _make_catalog_response([])
-        prompt = self.builder.build_user_prompt(long_intent, [], catalog)
+        prompt = self.builder.build_user_prompt(long_intent, [], [])
         assert "[truncated]" in prompt
 
 
@@ -228,7 +224,7 @@ class TestPlanValidator:
         self.registry.validate_plan_tools = AsyncMock(
             return_value=MagicMock(valid=True, current_version=1, issues=[])
         )
-        self.validator = PlanValidator(registry_service=self.registry)
+        self.validator = PlanValidator()
         self.tool_ids = {"google.calendar", "system.echo"}
 
     # Layer 1: JSON parse

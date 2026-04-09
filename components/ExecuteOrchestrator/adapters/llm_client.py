@@ -10,11 +10,15 @@ Reference: LLD.md Section 6.2
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, Literal, Protocol, runtime_checkable
 
 from shared.schemas.policy import ReasoningConfig
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_MODEL = os.environ.get("REASONING_MODEL", "claude-haiku-4-5-20251001")
+_ANTHROPIC_PREFIXES = ("claude-",)
 
 
 @runtime_checkable
@@ -60,32 +64,48 @@ class AnthropicReasoningAdapter:
         """
         messages = self._build_messages(context)
 
+        # Guard: reject non-Anthropic model names from Planner output
+        model = config.model
+        if not model.startswith(_ANTHROPIC_PREFIXES):
+            logger.warning(
+                "non_anthropic_model_overridden",
+                extra={"requested": model, "using": _DEFAULT_MODEL},
+            )
+            model = _DEFAULT_MODEL
+
         kwargs: dict[str, Any] = {
-            "model": config.model,
+            "model": model,
             "max_tokens": config.max_tokens,
             "temperature": config.temperature,
             "system": config.system_prompt_ref,
             "messages": messages,
         }
 
-        if trust_level == "untrusted_input":
-            # Tier 1: no tools, strict output schema
-            kwargs["tools"] = []
-        elif trust_level == "trusted":
+        if trust_level == "trusted":
             # Tier 2: enable spawn tool
             kwargs["tools"] = self._build_spawn_tools()
+        # Tier 1 (untrusted_input): no tools — omit 'tools' key entirely
+        # (Anthropic API rejects tools=[])
 
         response = await self._client.messages.create(**kwargs)
         return self._parse_response(response, trust_level)
 
     def _build_messages(self, context: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Build message list from step context."""
+        """Build message list from step context.
+
+        Each step result is capped at ~12K chars to stay well within
+        Anthropic's per-minute input token limits on lower-tier plans.
+        """
+        _MAX_RESULT_CHARS = 12_000
         messages: list[dict[str, Any]] = []
         for ctx in context:
+            result_str = str(ctx.get("result", {}))
+            if len(result_str) > _MAX_RESULT_CHARS:
+                result_str = result_str[:_MAX_RESULT_CHARS] + "... [truncated]"
             messages.append(
                 {
                     "role": "user",
-                    "content": f"Step {ctx.get('step', '?')} result: {ctx.get('result', {})}",
+                    "content": f"Step {ctx.get('step', '?')} result: {result_str}",
                 }
             )
         if not messages:

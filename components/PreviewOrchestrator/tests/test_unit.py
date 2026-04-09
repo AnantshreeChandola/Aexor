@@ -14,6 +14,9 @@ from unittest.mock import AsyncMock
 import pytest
 
 from components.ExecuteOrchestrator.domain.models import MCPInvocationError
+from components.PreviewOrchestrator.adapters.previewability_checker import (
+    PreviewabilityChecker,
+)
 from components.PreviewOrchestrator.domain.models import (
     PreviewError,
     PreviewRequest,
@@ -99,14 +102,14 @@ class TestPreviewableDispatch:
             args_dict = call.kwargs.get("args", call[1].get("args", {}))
             assert args_dict.get("dry_run") is True
 
-    async def test_mcp_invoked_with_credentials_none(
+    async def test_mcp_invoked_with_user_credentials(
         self, preview_service, sample_plan, mock_mcp_client
     ):
-        """FR-004: MCP invocations pass credentials=None."""
+        """FR-004: MCP invocations pass user_id in credentials."""
         await preview_service.preview(_req(sample_plan))
         for call in mock_mcp_client.invoke.call_args_list:
             creds = call.kwargs.get("credentials", call[1].get("credentials"))
-            assert creds is None
+            assert creds == {"user_id": SAMPLE_USER_ID}
 
 
 class TestParallelExecution:
@@ -389,3 +392,145 @@ class TestEdgeCases:
         """SC-003: Zero MCP calls for non-previewable steps."""
         await preview_service.preview(_req(empty_previewable_plan))
         mock_mcp_client.invoke.assert_not_called()
+
+
+class TestWriteActionDeferral:
+    """Write actions are deferred with a summary, not dispatched."""
+
+    async def test_write_action_deferred_not_dispatched(self, preview_service, mock_mcp_client):
+        """Ungated CREATE step is deferred as write_action, MCP not called."""
+        plan = Plan(
+            plan_id=SAMPLE_PLAN_ID,
+            intent=_intent(),
+            graph=[
+                PlanStep(
+                    step=1,
+                    mode="interactive",
+                    role="Booker",
+                    uses="google.calendar",
+                    call="create_event",
+                    args={"summary": "Test"},
+                    after=[],
+                ),
+            ],
+            meta=_plan_meta(),
+        )
+        result = await preview_service.preview(_req(plan))
+        assert result.normalized["steps"][0]["status"] == "deferred"
+        assert result.normalized["steps"][0]["reason"] == "write_action"
+        mock_mcp_client.invoke.assert_not_called()
+
+    async def test_write_action_has_summary(self, preview_service):
+        """Deferred write steps include action summary in result."""
+        plan = Plan(
+            plan_id=SAMPLE_PLAN_ID,
+            intent=_intent(),
+            graph=[
+                PlanStep(
+                    step=1,
+                    mode="interactive",
+                    role="Booker",
+                    uses="GOOGLECALENDAR_CREATE_EVENT",
+                    call="GOOGLECALENDAR_CREATE_EVENT",
+                    args={"summary": "Meeting", "attendees": ["alice@co.com"]},
+                    after=[],
+                ),
+            ],
+            meta=_plan_meta(),
+        )
+        result = await preview_service.preview(_req(plan))
+        step_data = result.normalized["steps"][0]
+        assert step_data["result"] is not None
+        assert "summary" in step_data["result"]
+        assert "GOOGLECALENDAR_CREATE_EVENT" in step_data["result"]["summary"]
+
+    async def test_read_action_still_dispatched(self, preview_service, mock_mcp_client):
+        """LIST/GET steps are still dispatched via MCP."""
+        plan = Plan(
+            plan_id=SAMPLE_PLAN_ID,
+            intent=_intent(),
+            graph=[
+                PlanStep(
+                    step=1,
+                    mode="interactive",
+                    role="Fetcher",
+                    uses="google.calendar",
+                    call="list_events",
+                    args={},
+                    after=[],
+                ),
+            ],
+            meta=_plan_meta(),
+        )
+        result = await preview_service.preview(_req(plan))
+        assert result.normalized["steps"][0]["status"] == "completed"
+        mock_mcp_client.invoke.assert_called_once()
+
+    async def test_composio_write_detected(self, preview_service, mock_mcp_client):
+        """Composio-style SEND/DELETE/UPDATE verbs detected as write."""
+        plan = Plan(
+            plan_id=SAMPLE_PLAN_ID,
+            intent=_intent(),
+            graph=[
+                PlanStep(
+                    step=1,
+                    mode="interactive",
+                    role="Notifier",
+                    uses="GMAIL_SEND_EMAIL",
+                    call="GMAIL_SEND_EMAIL",
+                    args={"to": "alice@co.com"},
+                    after=[],
+                ),
+            ],
+            meta=_plan_meta(),
+        )
+        result = await preview_service.preview(_req(plan))
+        assert result.normalized["steps"][0]["status"] == "deferred"
+        assert result.normalized["steps"][0]["reason"] == "write_action"
+        mock_mcp_client.invoke.assert_not_called()
+
+    async def test_downstream_of_write_deferred(self, preview_service, mock_mcp_client):
+        """Steps depending on a deferred write are dependency_deferred."""
+        plan = Plan(
+            plan_id=SAMPLE_PLAN_ID,
+            intent=_intent(),
+            graph=[
+                PlanStep(
+                    step=1,
+                    mode="interactive",
+                    role="Booker",
+                    uses="google.calendar",
+                    call="create_event",
+                    args={},
+                    after=[],
+                ),
+                PlanStep(
+                    step=2,
+                    mode="interactive",
+                    role="Notifier",
+                    uses="system.notifier",
+                    call="send_notification",
+                    args={},
+                    after=[1],
+                ),
+            ],
+            meta=_plan_meta(),
+        )
+        result = await preview_service.preview(_req(plan))
+        sbn = {s["step"]: s for s in result.normalized["steps"]}
+        assert sbn[1]["reason"] == "write_action"
+        assert sbn[2]["reason"] == "dependency_deferred"
+
+    async def test_is_write_action_unit(self):
+        """Unit test for is_write_action detection."""
+        assert PreviewabilityChecker.is_write_action(
+            "GOOGLECALENDAR_CREATE_EVENT", "GOOGLECALENDAR_CREATE_EVENT"
+        )
+        assert PreviewabilityChecker.is_write_action("GMAIL_SEND_EMAIL", "GMAIL_SEND_EMAIL")
+        assert PreviewabilityChecker.is_write_action("google.calendar", "create_event")
+        assert PreviewabilityChecker.is_write_action("google.calendar", "delete_event")
+        assert not PreviewabilityChecker.is_write_action("google.calendar", "list_events")
+        assert not PreviewabilityChecker.is_write_action(
+            "GOOGLECALENDAR_FIND_EVENT", "GOOGLECALENDAR_FIND_EVENT"
+        )
+        assert not PreviewabilityChecker.is_write_action("system.echo", "echo")

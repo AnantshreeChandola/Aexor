@@ -36,7 +36,10 @@ def ready_service(
         resolved_tools=["google.calendar"],
         required_entities=[
             EntityRequirement(name="attendee", description="Who?"),
+            EntityRequirement(name="attendee_email", description="Email?"),
+            EntityRequirement(name="date", description="Date?"),
             EntityRequirement(name="time", description="When?"),
+            EntityRequirement(name="duration", description="How long?"),
         ],
         missing_entities=[],
     )
@@ -44,7 +47,13 @@ def ready_service(
     parser.parse = AsyncMock(
         return_value=ParseResult(
             intent="schedule_meeting",
-            entities={"attendee": "Alice", "time": "10 AM"},
+            entities={
+                "attendee": "Alice",
+                "attendee_email": "alice@example.com",
+                "date": "Tuesday",
+                "time": "10 AM",
+                "duration": "30m",
+            },
         )
     )
     store = AsyncMock()

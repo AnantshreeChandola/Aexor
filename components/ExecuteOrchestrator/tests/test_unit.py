@@ -398,58 +398,53 @@ class TestRetryPolicy:
 
 
 class TestMCPClient:
-    async def test_invoke_success(self):
+    """Tests for the rewritten MCPClientAdapter using config + session manager."""
+
+    def _make_adapter(self, mock_http, session_id="ses-1"):
+
+        from shared.mcp.config import MCPConfigRegistry, MCPServerConfig
+        from shared.mcp.session import MCPSession, MCPSessionManager
+
         from ..adapters.mcp_client import MCPClientAdapter
 
-        registry = AsyncMock()
-        client = MCPClientAdapter(registry)
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {"result": {"id": "x"}}
+        cfg = MCPServerConfig(name="srv", url="http://srv.test/mcp", api_key="k")
+        registry = MCPConfigRegistry({"srv": cfg})
+        mgr = AsyncMock(spec=MCPSessionManager)
+        mgr.get_session = AsyncMock(
+            return_value=MCPSession(server_name="srv", session_id=session_id)
+        )
+        return MCPClientAdapter(config=registry, http_client=mock_http, session_manager=mgr)
 
-        with patch("httpx.AsyncClient") as mock_httpx:
-            mock_ctx = AsyncMock()
-            mock_ctx.post = AsyncMock(return_value=mock_response)
-            mock_httpx.return_value.__aenter__ = AsyncMock(return_value=mock_ctx)
-            mock_httpx.return_value.__aexit__ = AsyncMock(return_value=False)
+    async def test_invoke_success(self):
+        import httpx
 
-            result = await client.invoke("http://srv", "tool", {"a": 1})
-            assert result == {"id": "x"}
+        mock_http = AsyncMock(spec=httpx.AsyncClient)
+        mock_http.post = AsyncMock(
+            return_value=httpx.Response(
+                200, json={"jsonrpc": "2.0", "id": 1, "result": {"id": "x"}}
+            )
+        )
+        client = self._make_adapter(mock_http)
+        result = await client.invoke("srv", "tool", {"a": 1})
+        assert result == {"id": "x"}
 
     async def test_invoke_http_error(self):
-        from ..adapters.mcp_client import MCPClientAdapter
+        import httpx
 
-        registry = AsyncMock()
-        client = MCPClientAdapter(registry)
-        mock_response = MagicMock()
-        mock_response.status_code = 503
-        mock_response.json.return_value = {}
-
-        with patch("httpx.AsyncClient") as mock_httpx:
-            mock_ctx = AsyncMock()
-            mock_ctx.post = AsyncMock(return_value=mock_response)
-            mock_httpx.return_value.__aenter__ = AsyncMock(return_value=mock_ctx)
-            mock_httpx.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            with pytest.raises(MCPInvocationError):
-                await client.invoke("http://srv", "tool", {})
+        mock_http = AsyncMock(spec=httpx.AsyncClient)
+        mock_http.post = AsyncMock(return_value=httpx.Response(503, text="Service Unavailable"))
+        client = self._make_adapter(mock_http)
+        with pytest.raises(MCPInvocationError):
+            await client.invoke("srv", "tool", {})
 
     async def test_invoke_timeout(self):
         import httpx
 
-        from ..adapters.mcp_client import MCPClientAdapter
-
-        registry = AsyncMock()
-        client = MCPClientAdapter(registry)
-
-        with patch("httpx.AsyncClient") as mock_httpx:
-            mock_ctx = AsyncMock()
-            mock_ctx.post = AsyncMock(side_effect=httpx.TimeoutException("timeout"))
-            mock_httpx.return_value.__aenter__ = AsyncMock(return_value=mock_ctx)
-            mock_httpx.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            with pytest.raises(MCPInvocationError, match="timeout"):
-                await client.invoke("http://srv", "tool", {})
+        mock_http = AsyncMock(spec=httpx.AsyncClient)
+        mock_http.post = AsyncMock(side_effect=httpx.TimeoutException("timeout"))
+        client = self._make_adapter(mock_http)
+        with pytest.raises(MCPInvocationError, match="timeout"):
+            await client.invoke("srv", "tool", {})
 
 
 # ======================================================================

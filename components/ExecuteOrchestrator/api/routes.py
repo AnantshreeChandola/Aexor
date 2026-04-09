@@ -17,6 +17,7 @@ from shared.dependencies import get_execute_service
 from ..domain.models import (
     ApprovalTokenError,
     ExecuteRequest,
+    GateApprovalRequired,
     PlanExpiredError,
 )
 
@@ -54,6 +55,18 @@ async def execute_plan(
     """Execute an approved plan."""
     try:
         return await service.execute_plan(request)
+    except GateApprovalRequired as exc:
+        return JSONResponse(
+            status_code=status.HTTP_202_ACCEPTED,
+            content={
+                "status": "approval_required",
+                "gate_id": exc.gate_id,
+                "step": exc.step,
+                "message": str(exc),
+                "context_data": exc.context_data,
+                "partial_results": exc.partial_results,
+            },
+        )
     except (
         ApprovalTokenError,
         PlanExpiredError,

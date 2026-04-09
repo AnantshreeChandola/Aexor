@@ -254,20 +254,12 @@ def mock_policy_service() -> AsyncMock:
 
 
 @pytest.fixture()
-def mock_registry_service() -> AsyncMock:
-    svc = AsyncMock()
+def mock_registry_service() -> MagicMock:
+    """Mock ToolCatalog. get_tool() returns a ToolDefinition-like object (sync)."""
+    svc = MagicMock()
     tool_mock = MagicMock()
-    tool_mock.mcp_server = "http://mcp.test:8080"
-    tool_mock.operations = {
-        "list_events": MagicMock(n8n_node="list_events", compensation=None),
-        "get_contact": MagicMock(n8n_node="get_contact", compensation=None),
-        "find_slot": MagicMock(n8n_node="find_slot", compensation=None),
-        "create_event": MagicMock(n8n_node="create_event", compensation="delete_event"),
-        "analyze": MagicMock(n8n_node="analyze", compensation=None),
-        "reason": MagicMock(n8n_node="reason", compensation=None),
-        "send_email": MagicMock(n8n_node="send_email", compensation=None),
-    }
-    svc.get_tool = AsyncMock(return_value=tool_mock)
+    tool_mock.server_name = "http://mcp.test:8080"
+    svc.get_tool = MagicMock(return_value=tool_mock)
     return svc
 
 
@@ -284,19 +276,25 @@ def mock_mcp_client() -> AsyncMock:
     client = AsyncMock()
 
     async def _dynamic_invoke(server, tool, args, **kwargs):
-        """Return results that match what downstream templates expect."""
-        results = {
-            "list_events": {"status": "ok", "events": [{"id": "e1", "time": "3pm"}]},
-            "get_contact": {"status": "ok", "name": "Alice", "email": "alice@example.com"},
-            "find_slot": {"status": "ok", "slot": "2026-04-01T15:00:00"},
-            "create_event": {"status": "ok", "id": "evt-123"},
-            "delete_event": {"status": "ok", "deleted": True},
-            "analyze": {"status": "ok", "analysis": "Available slot found"},
-            "reason": {"status": "ok", "content": "Reasoning complete"},
-            "send_email": {"status": "ok", "message_id": "msg-001"},
-            "search": {"status": "ok", "results": []},
+        """Return results that match what downstream templates expect.
+
+        In the MCP model, ``tool`` is ``step.uses`` (e.g. "google.calendar"),
+        not the old ``step.call`` (e.g. "list_events"). Return a superset dict
+        so template resolution finds every field it needs.
+        """
+        return {
+            "status": "ok",
+            "events": [{"id": "e1", "time": "3pm"}],
+            "name": "Alice",
+            "email": "alice@example.com",
+            "slot": "2026-04-01T15:00:00",
+            "id": "evt-123",
+            "deleted": True,
+            "analysis": "Available slot found",
+            "content": "Reasoning complete",
+            "message_id": "msg-001",
+            "results": [],
         }
-        return results.get(tool, {"status": "ok", "id": "rslt-001"})
 
     client.invoke = AsyncMock(side_effect=_dynamic_invoke)
     return client
@@ -347,7 +345,7 @@ def execute_service(
     """Fully wired ExecuteService with all mocked dependencies."""
     return ExecuteService(
         policy_service=mock_policy_service,
-        registry_service=mock_registry_service,
+        tool_catalog=mock_registry_service,
         plan_writer_service=mock_plan_writer_service,
         mcp_client=mock_mcp_client,
         llm_client=mock_llm_client,

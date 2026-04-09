@@ -214,6 +214,16 @@ class ApprovalService:
             },
         )
 
+        # Audit: approval_granted (fire-and-forget)
+        await self._emit_audit(
+            "approval_granted",
+            plan_id=request.plan_id,
+            user_id=request.user_id,
+            gate_id=request.gate_id,
+            scopes=request.scopes,
+            token_id=token_id,
+        )
+
         return approval_token
 
     async def validate_token(self, token: str, plan_id: str, gate_id: str | None = None) -> dict:
@@ -323,6 +333,37 @@ class ApprovalService:
             selected_option=gate_data.get("selected_option"),
             approved_at=gate_data.get("approved_at", ""),
         )
+
+    # ------------------------------------------------------------------
+    # Audit integration (fire-and-forget)
+    # ------------------------------------------------------------------
+
+    async def _emit_audit(
+        self,
+        event_type: str,
+        plan_id: str,
+        user_id: str | None = None,
+        **extra: Any,
+    ) -> None:
+        """Fire-and-forget audit event. Never raises."""
+        audit = getattr(self, "_audit", None)
+        if audit is None:
+            return
+        try:
+            import ulid as _ulid
+
+            from components.Audit.domain.models import AuditEvent, AuditEventType
+
+            event = AuditEvent(
+                event_id=_ulid.new().str,
+                event_type=AuditEventType(event_type),
+                plan_id=plan_id,
+                user_id=user_id,
+                event_data=extra,
+            )
+            await audit.record(event)
+        except Exception:
+            pass  # fire-and-forget
 
     # ------------------------------------------------------------------
     # Private helpers

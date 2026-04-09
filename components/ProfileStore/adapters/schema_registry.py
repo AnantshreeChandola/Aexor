@@ -12,7 +12,7 @@ from typing import Any
 
 from shared.schemas.preference_registry import get_preference_registry
 
-from ..domain.models import UnknownPreferenceError, ValidationError
+from ..domain.models import ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -40,16 +40,9 @@ class SchemaRegistryAdapter:
 
         Returns:
             JSON schema dictionary
-
-        Raises:
-            UnknownPreferenceError: If preference key not found in registry
         """
-        try:
-            definition = self.registry.get_preference_definition(preference_key)
-            return definition.get_json_schema()
-        except KeyError:
-            logger.warning(f"Unknown preference key: {preference_key}")
-            raise UnknownPreferenceError(preference_key)
+        definition = self.registry.get_preference_definition(preference_key)
+        return definition.get_json_schema()
 
     def validate_value(self, preference_key: str, value: Any) -> bool:
         """
@@ -63,15 +56,11 @@ class SchemaRegistryAdapter:
             True if validation passes
 
         Raises:
-            UnknownPreferenceError: If preference key not found
             ValidationError: If value fails schema validation
         """
         try:
             self.registry.validate_value(preference_key, value)
             return True
-        except KeyError:
-            logger.warning(f"Unknown preference key: {preference_key}")
-            raise UnknownPreferenceError(preference_key)
         except ValueError as e:
             logger.warning(f"Validation failed for {preference_key}: {e!s}")
             raise ValidationError(preference_key=preference_key, value=value, reason=str(e))
@@ -84,16 +73,9 @@ class SchemaRegistryAdapter:
             preference_key: Preference key
 
         Returns:
-            Default value from registry
-
-        Raises:
-            UnknownPreferenceError: If preference key not found
+            Default value from registry, or None for user-defined keys
         """
-        try:
-            return self.registry.get_default_value(preference_key)
-        except KeyError:
-            logger.warning(f"Unknown preference key: {preference_key}")
-            raise UnknownPreferenceError(preference_key)
+        return self.registry.get_default_value(preference_key)
 
     def is_sensitive(self, preference_key: str) -> bool:
         """
@@ -103,20 +85,13 @@ class SchemaRegistryAdapter:
             preference_key: Preference key
 
         Returns:
-            True if preference is marked as sensitive
-
-        Raises:
-            UnknownPreferenceError: If preference key not found
+            True if preference is marked as sensitive, False for user-defined keys
         """
-        try:
-            return self.registry.is_sensitive(preference_key)
-        except KeyError:
-            logger.warning(f"Unknown preference key: {preference_key}")
-            raise UnknownPreferenceError(preference_key)
+        return self.registry.is_sensitive(preference_key)
 
     def list_preference_keys(self) -> list[str]:
         """
-        Get list of all available preference keys.
+        Get list of all registered preference keys.
 
         Returns:
             List of preference keys in registry
@@ -132,25 +107,18 @@ class SchemaRegistryAdapter:
 
         Returns:
             Dictionary with preference info
-
-        Raises:
-            UnknownPreferenceError: If preference key not found
         """
-        try:
-            definition = self.registry.get_preference_definition(preference_key)
-            return {
-                "key": preference_key,
-                "type": definition.value_type,
-                "default": definition.default,
-                "sensitive": definition.sensitive,
-                "description": definition.description,
-                "examples": definition.examples,
-                "category": definition.category,
-                "validation": definition.validation,
-            }
-        except KeyError:
-            logger.warning(f"Unknown preference key: {preference_key}")
-            raise UnknownPreferenceError(preference_key)
+        definition = self.registry.get_preference_definition(preference_key)
+        return {
+            "key": preference_key,
+            "type": definition.value_type,
+            "default": definition.default,
+            "sensitive": definition.sensitive,
+            "description": definition.description,
+            "examples": definition.examples,
+            "category": definition.category,
+            "validation": definition.validation,
+        }
 
 
 # Singleton instance

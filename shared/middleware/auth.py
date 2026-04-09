@@ -24,6 +24,7 @@ JWT_ALGORITHM = "HS256"
 # Paths that bypass authentication entirely
 _BYPASS_PATHS = frozenset(
     [
+        "/",
         "/health",
         "/docs",
         "/redoc",
@@ -32,6 +33,9 @@ _BYPASS_PATHS = frozenset(
         "/auth/register",
     ]
 )
+
+# Path prefixes that bypass authentication
+_BYPASS_PREFIXES = ("/static",)
 
 
 def _get_jwt_secret() -> str:
@@ -55,6 +59,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         # Skip auth for public endpoints
         if request.url.path in _BYPASS_PATHS:
+            return await call_next(request)
+
+        # Skip auth for static file paths
+        if request.url.path.startswith(_BYPASS_PREFIXES):
             return await call_next(request)
 
         # Also bypass component-level health endpoints

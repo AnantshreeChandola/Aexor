@@ -42,12 +42,14 @@ class MonitorService:
         poll_interval_s: int = DEFAULT_POLL_INTERVAL_S,
         stuck_timeout_minutes: int = DEFAULT_STUCK_TIMEOUT_MINUTES,
         max_execution_minutes: int = DEFAULT_MAX_EXECUTION_MINUTES,
+        audit: Any | None = None,
     ) -> None:
         self._db = tracker_db
         self._notifier = notifier or LogNotifier()
         self._poll_interval_s = poll_interval_s
         self._stuck_timeout_minutes = stuck_timeout_minutes
         self._max_execution_minutes = max_execution_minutes
+        self._audit = audit
         self._running = False
 
     async def run(self) -> None:
@@ -117,6 +119,34 @@ class MonitorService:
         elapsed_minutes = (now - started).total_seconds() / 60
         return elapsed_minutes > self._max_execution_minutes
 
+    async def _emit_audit(
+        self,
+        event_type: str,
+        plan_id: str,
+        user_id: str | None = None,
+        trace_id: str | None = None,
+        **extra: Any,
+    ) -> None:
+        """Fire-and-forget audit event. Never raises."""
+        if self._audit is None:
+            return
+        try:
+            import ulid as _ulid
+
+            from components.Audit.domain.models import AuditEvent, AuditEventType
+
+            event = AuditEvent(
+                event_id=_ulid.new().str,
+                event_type=AuditEventType(event_type),
+                plan_id=plan_id,
+                user_id=user_id,
+                trace_id=trace_id,
+                event_data=extra,
+            )
+            await self._audit.record(event)
+        except Exception:
+            pass  # fire-and-forget
+
     async def _handle_stuck(self, record: TrackerRecord) -> None:
         """Mark execution as stuck and notify user."""
         logger.warning(
@@ -130,6 +160,18 @@ class MonitorService:
                 "total_steps": record.total_steps,
                 "last_progress_at": str(record.last_progress_at),
             },
+        )
+
+        # Audit: execution_stuck
+        await self._emit_audit(
+            "execution_stuck",
+            plan_id=record.plan_id,
+            user_id=record.user_id,
+            trace_id=record.trace_id,
+            detection_reason="No progress for 5+ minutes",
+            elapsed_time=str(record.last_progress_at),
+            completed_steps=record.completed_steps,
+            total_steps=record.total_steps,
         )
 
         await self._db.mark_terminal(
@@ -177,6 +219,18 @@ class MonitorService:
                 "total_steps": record.total_steps,
                 "started_at": str(record.started_at),
             },
+        )
+
+        # Audit: execution_timeout
+        await self._emit_audit(
+            "execution_timeout",
+            plan_id=record.plan_id,
+            user_id=record.user_id,
+            trace_id=record.trace_id,
+            detection_reason="Exceeded 60-minute time budget",
+            started_at=str(record.started_at),
+            completed_steps=record.completed_steps,
+            total_steps=record.total_steps,
         )
 
         await self._db.mark_terminal(

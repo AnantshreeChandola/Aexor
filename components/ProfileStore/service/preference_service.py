@@ -21,7 +21,6 @@ from ..domain.models import (
     ConsentDeniedError,
     DeleteResponse,
     PreferenceResponse,
-    UnknownPreferenceError,
     ValidationError,
 )
 
@@ -73,19 +72,11 @@ class PreferenceService:
         Raises:
             ConsentDeniedError: If context_tier < 2
             UserNotFoundError: If user_id does not exist
-            UnknownPreferenceError: If preference_key not in schema registry
         """
         # Consent enforcement: ProfileStore requires Tier 2+
         if context_tier < 2:
             logger.warning(f"Consent denied for user {user_id}: required=2, current={context_tier}")
             raise ConsentDeniedError(user_id, required_tier=2, current_tier=context_tier)
-
-        # Validate preference key exists in schema
-        try:
-            self.schema_registry.get_schema(preference_key)
-        except UnknownPreferenceError:
-            logger.warning(f"Unknown preference key: {preference_key}")
-            raise
 
         # Try to get preference from database
         preference = await self.db.get_preference(user_id, preference_key)
@@ -146,16 +137,8 @@ class PreferenceService:
 
         Raises:
             UserNotFoundError: If user_id does not exist
-            UnknownPreferenceError: If preference_key not in schema registry
             ValidationError: If preference_value fails schema validation
         """
-        # Validate preference key exists and get schema
-        try:
-            self.schema_registry.get_schema(preference_key)
-        except UnknownPreferenceError:
-            logger.warning(f"Unknown preference key: {preference_key}")
-            raise
-
         # Check if preference should be sensitive based on schema
         schema_sensitive = self.schema_registry.is_sensitive(preference_key)
         if schema_sensitive and not sensitive:
@@ -213,15 +196,7 @@ class PreferenceService:
 
         Raises:
             UserNotFoundError: If user_id does not exist
-            UnknownPreferenceError: If preference_key not in schema registry
         """
-        # Validate preference key exists in schema
-        try:
-            self.schema_registry.get_schema(preference_key)
-        except UnknownPreferenceError:
-            logger.warning(f"Unknown preference key: {preference_key}")
-            raise
-
         # Delete from database (soft delete)
         deleted = await self.db.delete_preference(user_id, preference_key)
 
@@ -243,7 +218,11 @@ class PreferenceService:
         )
 
     async def get_all_preferences(
-        self, user_id: UUID, context_tier: int, plan_id: str | None = None
+        self,
+        user_id: UUID,
+        context_tier: int,
+        plan_id: str | None = None,
+        include_defaults: bool = True,
     ) -> list[EvidenceItem]:
         """
         Get all preferences for a user as Evidence Items.
@@ -252,6 +231,7 @@ class PreferenceService:
             user_id: User UUID
             context_tier: User's consent tier from auth context
             plan_id: Optional plan ID for correlation logging
+            include_defaults: Whether to include schema defaults for unset keys
 
         Returns:
             List of Evidence Items for all user preferences
@@ -288,23 +268,24 @@ class PreferenceService:
             evidence_items.append(evidence)
 
         # Also include defaults for preferences not explicitly set
-        all_schema_keys = self.schema_registry.list_preference_keys()
-        set_keys = {pref.key for pref in preferences}
+        if include_defaults:
+            all_schema_keys = self.schema_registry.list_preference_keys()
+            set_keys = {pref.key for pref in preferences}
 
-        for key in all_schema_keys:
-            if key not in set_keys:
-                default_value = self.schema_registry.get_default_value(key)
-                if default_value is not None:
-                    evidence = EvidenceItem(
-                        type="preference",
-                        key=key,
-                        value=default_value,
-                        confidence=1.0,
-                        source_ref=f"profilestore:prefs/{key}",
-                        ttl_days=None,
-                        tier=2,
-                    )
-                    evidence_items.append(evidence)
+            for key in all_schema_keys:
+                if key not in set_keys:
+                    default_value = self.schema_registry.get_default_value(key)
+                    if default_value is not None:
+                        evidence = EvidenceItem(
+                            type="preference",
+                            key=key,
+                            value=default_value,
+                            confidence=1.0,
+                            source_ref=f"profilestore:prefs/{key}",
+                            ttl_days=None,
+                            tier=2,
+                        )
+                        evidence_items.append(evidence)
 
         logger.info(
             f"Retrieved {len(evidence_items)} preferences for user {user_id}, plan_id={plan_id}"

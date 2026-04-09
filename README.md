@@ -1,10 +1,18 @@
-# Personal Agent
+<p align="center">
+  <img src="static/aexor-logo-top-cropped.png" alt="Aexor Logo" width="200">
+</p>
 
-**Status:** Architecture & Scaffolding Phase
+<h1 align="center">Aexor</h1>
+
+<p align="center">
+  <strong>Preview-first personal assistant with deterministic planning and adaptive execution</strong>
+</p>
+
+**Status:** All 15 components implemented
 **Architecture:** HLD v6.1 / GLOBAL_SPEC v3.0
 **Deployment:** Self-hosted, single-tenant, multi-user
 
-A preview-first personal assistant with deterministic planning and adaptive execution. The system produces immutable plan DAGs (revision 0) where LLM Reasoner steps can spawn bounded new steps at runtime, creating versioned revisions with PolicyEngine attestations. All execution runs through a pure Python/FastAPI runtime with MCP tool invocations — no external workflow engines.
+Aexor produces immutable plan DAGs (revision 0) where LLM Reasoner steps can spawn bounded new steps at runtime, creating versioned revisions with PolicyEngine attestations. All execution runs through a pure Python/FastAPI runtime with MCP tool invocations — no external workflow engines.
 
 ---
 
@@ -43,25 +51,26 @@ User Request → Understand → Plan → Preview → Approve → Execute → Lea
 **Layer 2 — Domain Services** (all implemented)
 | Component | Purpose |
 |-----------|---------|
-| Intake | Multi-turn intent collection with LLM parsing |
+| Intake | Multi-turn intent collection with LLM parsing and Redis sessions |
 | ContextRAG | Tiered evidence gathering from Memory Layer (≤2KB) |
-| Planner | Deterministic plan generation via Anthropic Claude API |
+| Planner | Deterministic plan generation via Anthropic Claude API with 4-level fallback |
 | PolicyEngine | Policy rule evaluation, attestations, HITL enforcement |
 | PluginRegistry | Tool catalog with scope verification and credential resolution |
 | PlanWriter | Outcome persistence with fact derivation |
 
-**Layer 3 — Orchestration** (not yet implemented)
+**Layer 3 — Orchestration** (all implemented)
 | Component | Purpose |
 |-----------|---------|
-| PreviewOrchestrator | Side-effect-free plan preview |
-| ApprovalGate | HITL approval workflow with JWT tokens |
-| ExecuteOrchestrator | Pure agentic runtime — MCP dispatch, two-tier LLM, spawning |
+| PreviewOrchestrator | Side-effect-free plan preview with dry-run MCP and Redis cache |
+| ApprovalGate | HITL approval workflow with JWT tokens, single-use, multi-gate support |
+| ExecuteOrchestrator | Pure agentic DAG execution — MCP dispatch, two-tier LLM, spawning |
 | ExecutionMonitor | Stuck execution detection and timeout enforcement |
 
-**Layer 4 — Platform** (not yet implemented)
+**Layer 4 — Platform** (all implemented)
 | Component | Purpose |
 |-----------|---------|
-| Audit | Full audit trail for debugging and analytics |
+| Audit | Append-only audit trail for all plan/execution/approval events |
+| IntegrationManager | User-provider connection status, Composio OAuth, per-user MCP tools |
 
 ### Key Architectural Principles
 
@@ -88,9 +97,10 @@ User Request → Understand → Plan → Preview → Approve → Execute → Lea
 | Backend | Python 3.11+, FastAPI, Pydantic v2 | Async, type hints |
 | Database | PostgreSQL 16 + pgvector | Relational + vector + credential vault |
 | Cache | Redis 7 with hiredis | Sessions, idempotency, approval gates |
-| AI/LLM | **Anthropic Claude (sole paid external dependency)** | Planning + intent parsing + runtime reasoning |
+| AI/LLM | Anthropic Claude + OpenAI (optional fallback) | Planning + intent parsing + runtime reasoning |
 | Embeddings | ONNX Runtime (all-MiniLM-L6-v2, 384-dim) | Fully local CPU inference, zero API cost |
 | Credentials | AES-256-GCM vault in PostgreSQL | Master key from env; LLM never sees plaintext |
+| Tools | MCP protocol (Composio, custom servers) | All external tool invocations |
 | Testing | pytest, ruff, mypy | Async support, strict type checking |
 | CI/CD | GitHub Actions | Lint, test, type-check |
 
@@ -99,8 +109,8 @@ User Request → Understand → Plan → Preview → Approve → Execute → Lea
 | Purpose | Default Model | Env Var |
 |---------|--------------|---------|
 | Planning (primary) | `claude-sonnet-4-5-20250929` | `PLANNER_PRIMARY_MODEL` |
-| Planning (fallback) | `claude-haiku-4-5-20251001` | `PLANNER_FALLBACK_MODEL` |
-| Intent parsing | `claude-haiku-4-5-20251001` | `INTAKE_PARSER_MODEL` |
+| Planning (fallback) | `claude-sonnet-4-5-20250929` | `PLANNER_FALLBACK_MODEL` |
+| Intent parsing | `claude-sonnet-4-5-20250929` | `INTAKE_PARSER_MODEL` |
 | Runtime reasoning | Per-step via `reasoning_config.model` | Set in plan by Planner |
 | Embeddings | `all-MiniLM-L6-v2` (ONNX, local) | Bundled, no API |
 
@@ -109,7 +119,7 @@ User Request → Understand → Plan → Preview → Approve → Execute → Lea
 ## Project Structure
 
 ```
-Personal-agent/
+Aexor/
 ├── components/           # Self-contained component packages
 │   ├── Intake/           # Multi-turn intent collection
 │   ├── ContextRAG/       # Evidence gathering
@@ -120,19 +130,26 @@ Personal-agent/
 │   ├── ProfileStore/     # User preferences
 │   ├── History/          # Past action facts
 │   ├── PlanLibrary/      # Plan storage
-│   └── VectorIndex/      # Hybrid search
+│   ├── VectorIndex/      # Hybrid search
+│   ├── ExecuteOrchestrator/  # Agentic DAG execution
+│   ├── PreviewOrchestrator/  # Dry-run preview
+│   ├── ApprovalGate/     # HITL approval workflow
+│   ├── ExecutionMonitor/ # Timeout and stuck detection
+│   ├── Audit/            # Append-only audit log
+│   └── IntegrationManager/  # Provider connections
 ├── shared/               # Cross-component infrastructure
 │   ├── schemas/          # Pydantic models (Intent, Plan, Evidence, Policy)
 │   ├── database/         # SQLAlchemy models, session management
+│   ├── mcp/              # MCP client, tool catalog, session manager
 │   ├── middleware/        # Auth middleware
 │   ├── security/         # Encryption utilities
-│   ├── api/              # Shared error handlers
+│   ├── api/              # Shared error handlers, orchestration routes
 │   ├── app.py            # FastAPI app factory with DI wiring
 │   └── dependencies.py   # Dependency injection (get_*_service)
 ├── docs/
 │   └── architecture/     # GLOBAL_SPEC, Project_HLD, QUICK_REFERENCE
-├── specs/                # Feature specifications
 ├── tests/                # Shared acceptance and contract tests
+├── docker-compose.yml    # Full local stack (PostgreSQL, Redis, app)
 ├── .github/workflows/    # CI pipeline
 └── pyproject.toml        # Dependencies, ruff, mypy, pytest config
 ```
@@ -143,26 +160,25 @@ Personal-agent/
 
 ### Prerequisites
 - Python 3.11+
-- PostgreSQL 16 with pgvector extension
-- Redis 7
+- Docker & Docker Compose (recommended)
 - Anthropic API key (`ANTHROPIC_API_KEY`)
+- OpenAI API key (`OPENAI_API_KEY`, optional — for fallback)
 
 ### Getting Started
 
 ```bash
 # Clone and setup
 git clone <repo-url>
-cd Personal-agent
+cd Aexor
+
+# Option 1: Docker (recommended)
+cp .env.example .env  # Add ANTHROPIC_API_KEY
+docker compose up --build -d
+
+# Option 2: Local
 python -m venv venv && source venv/bin/activate
 pip install -e ".[dev]"
-
-# Configure environment
-cp .env.example .env  # Add ANTHROPIC_API_KEY, database URLs
-
-# Run tests
 pytest components/ tests/
-
-# Lint
 ruff check .
 ```
 

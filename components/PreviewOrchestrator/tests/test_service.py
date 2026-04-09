@@ -107,31 +107,31 @@ class TestPreviewCacheAdapter:
 
 
 class TestPreviewabilityChecker:
-    """Tests for PreviewabilityChecker PluginRegistry integration."""
+    """Tests for PreviewabilityChecker ToolCatalog integration."""
 
-    async def test_previewable_operation_returns_true(self, mock_registry_service):
-        """Returns True for previewable operations."""
+    async def test_tool_in_catalog_returns_true(self, mock_registry_service):
+        """Any tool present in the catalog is previewable (MCP dry-run)."""
         checker = PreviewabilityChecker(mock_registry_service)
         result = await checker.is_previewable("google.calendar", "list_events")
         assert result is True
 
-    async def test_non_previewable_operation_returns_false(self, mock_registry_service):
-        """Returns False for non-previewable operations."""
+    async def test_tool_in_catalog_any_operation_returns_true(self, mock_registry_service):
+        """Operation id is ignored; previewability depends only on tool presence."""
         checker = PreviewabilityChecker(mock_registry_service)
         result = await checker.is_previewable("google.calendar", "create_event")
-        assert result is False
+        assert result is True
 
     async def test_tool_not_found_returns_false(self, mock_registry_service):
-        """Returns False when get_tool() raises ToolNotFoundError."""
+        """Returns False when tool is not in the catalog."""
         checker = PreviewabilityChecker(mock_registry_service)
         result = await checker.is_previewable("nonexistent.tool", "any_op")
         assert result is False
 
-    async def test_operation_not_found_returns_false(self, mock_registry_service):
-        """Returns False when operation_id not in tool.operations."""
+    async def test_unknown_operation_still_previewable(self, mock_registry_service):
+        """Unknown operation on a known tool still returns True."""
         checker = PreviewabilityChecker(mock_registry_service)
         result = await checker.is_previewable("google.calendar", "nonexistent_op")
-        assert result is False
+        assert result is True
 
 
 # ---------------------------------------------------------------------------
@@ -228,7 +228,7 @@ class TestFactory:
 
         service = create_preview_service(
             mcp_client=mock_mcp_client,
-            registry_service=mock_registry_service,
+            tool_catalog=mock_registry_service,
             redis_client=None,
         )
         assert isinstance(service, PreviewService)
@@ -238,7 +238,7 @@ class TestFactory:
         monkeypatch.setenv("PREVIEW_CACHE_TTL_S", "300")
         service = create_preview_service(
             mcp_client=mock_mcp_client,
-            registry_service=mock_registry_service,
+            tool_catalog=mock_registry_service,
             redis_client=None,
         )
         assert service._cache._ttl_s == 300

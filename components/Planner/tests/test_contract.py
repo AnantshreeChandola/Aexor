@@ -78,7 +78,7 @@ class TestHITLGateInsertion:
     async def test_readonly_plan_no_gate_id_required(
         self,
         mock_context_rag_service,
-        mock_registry_service,
+        mock_tool_catalog,
         mock_plan_service,
     ):
         """Plan with only Fetcher/Analyzer steps doesn't require gate_id."""
@@ -137,11 +137,11 @@ class TestHITLGateInsertion:
 
         svc = PlannerService(
             context_rag_service=mock_context_rag_service,
-            registry_service=mock_registry_service,
+            tool_catalog=mock_tool_catalog,
             plan_service=mock_plan_service,
             llm_adapter=adapter,
             prompt_builder=PromptBuilder(),
-            validator=PlanValidator(registry_service=mock_registry_service),
+            validator=PlanValidator(),
             primary_breaker=CircuitBreaker(model_name="p"),
             fallback_breaker=CircuitBreaker(model_name="f"),
             primary_model="test-primary",

@@ -1,0 +1,1406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<title>Aexor</title>
+<style>
+:root {
+  --bg: #222;
+  --card-bg: #222;
+  --header-bg: #151520;
+  --primary: #4a8ec2;
+  --primary-hover: #3d7aab;
+  --danger: #5c3d7a;
+  --success: #7b5ea7;
+  --warning: #9b6fbf;
+  --text: #e0e0e0;
+  --text-muted: #9e9e9e;
+  --border: #444;
+  --radius: 10px;
+  --shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+header { background: var(--header-bg); color: #fff; padding: 0 1.5rem; height: 56px; display: flex; align-items: center; justify-content: space-between; }
+header h1 { font-size: 1.1rem; font-weight: 600; }
+header button { background: transparent; border: 1px solid rgba(255,255,255,0.2); color: #fff; padding: 6px 14px; border-radius: var(--radius); cursor: pointer; font-size: 0.85rem; }
+header button:hover { background: rgba(255,255,255,0.08); }
+.container { max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
+.card { background: var(--card-bg); padding: 1.75rem; }
+.view { display: none; }
+.view.active { display: block; }
+h2 { font-size: 1.2rem; margin-bottom: 1.25rem; text-align: center; color: var(--text-muted); font-weight: 500; }
+label { display: block; font-size: 0.85rem; font-weight: 500; margin-bottom: 4px; color: var(--text-muted); }
+input[type="text"], input[type="email"], input[type="password"] {
+  width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius);
+  font-size: 0.95rem; margin-bottom: 1rem; outline: none; transition: border-color 0.2s;
+  background: #2a2a2a; color: var(--text);
+}
+input:focus { border-color: var(--primary); }
+select { background: #2a2a2a; color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; font-size: 0.95rem; width: 100%; outline: none; }
+.btn {
+  display: inline-block; padding: 10px 20px; border: none; border-radius: var(--radius);
+  font-size: 0.92rem; font-weight: 500; cursor: pointer; transition: all 0.2s;
+}
+.btn-primary { background: var(--primary); color: #fff; }
+.btn-primary:hover { background: var(--primary-hover); }
+.btn-primary:disabled { background: #2e5a7a; cursor: not-allowed; opacity: 0.6; }
+.btn-success { background: var(--success); color: #fff; }
+.btn-success:hover { background: #6a4f92; }
+.btn-danger { background: var(--danger); color: #fff; }
+.btn-danger:hover { background: #4e3268; }
+.btn-block { width: 100%; }
+.toggle-link { text-align: center; margin-top: 1rem; font-size: 0.9rem; }
+.toggle-link a { color: #5ea0d0; cursor: pointer; text-decoration: none; }
+.toggle-link a:hover { text-decoration: underline; }
+
+/* Chat */
+.chat-messages { max-height: 420px; overflow-y: auto; margin-bottom: 1rem; display: flex; flex-direction: column; gap: 0.6rem; }
+.msg { padding: 10px 14px; border-radius: 16px; max-width: 85%; font-size: 0.93rem; line-height: 1.5; word-wrap: break-word; }
+.msg-user { background: var(--primary); color: #fff; align-self: flex-end; border-bottom-right-radius: 4px; }
+.msg-assistant { background: #2e2e2e; color: var(--text); align-self: flex-start; border-bottom-left-radius: 4px; }
+.chat-input { display: flex; gap: 0.5rem; }
+.chat-input input { flex: 1; margin-bottom: 0; border-radius: 20px; padding-left: 16px; }
+.chat-input .btn { border-radius: 20px; padding: 10px 18px; }
+
+/* Timeline steps */
+.timeline { position: relative; padding-left: 28px; }
+.timeline::before { content: ''; position: absolute; left: 10px; top: 8px; bottom: 8px; width: 2px; background: var(--border); }
+.timeline-step { position: relative; margin-bottom: 1rem; padding: 0.75rem 1rem; background: #222; border-radius: var(--radius); }
+.timeline-step::before { content: ''; position: absolute; left: -22px; top: 14px; width: 10px; height: 10px; border-radius: 50%; background: var(--border); border: 2px solid var(--card-bg); }
+.timeline-step.done::before { background: var(--success); }
+.timeline-step.active::before { background: var(--primary); box-shadow: 0 0 6px var(--primary); }
+.timeline-step.waiting::before { background: var(--warning); }
+.timeline-step .step-title { font-size: 0.92rem; font-weight: 500; margin-bottom: 2px; }
+.timeline-step .step-desc { font-size: 0.82rem; color: var(--text-muted); }
+
+/* Approval */
+.approval-card { background: #1a1a2e; border: 1px solid var(--primary); border-radius: var(--radius); padding: 1.25rem; margin-bottom: 1rem; }
+.approval-card h3 { font-size: 1rem; margin-bottom: 0.5rem; }
+.slot-grid { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.75rem 0; }
+.slot-btn { background: #2a2a40; border: 1px solid var(--success); color: var(--text); padding: 8px 14px; border-radius: var(--radius); cursor: pointer; font-size: 0.88rem; transition: all 0.2s; }
+.slot-btn:hover { background: var(--success); color: #fff; }
+.action-row { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 1rem; }
+
+/* Result */
+.result-icon { text-align: center; font-size: 2.5rem; margin-bottom: 0.75rem; }
+.result-summary { text-align: center; font-size: 1.05rem; margin-bottom: 1.5rem; line-height: 1.5; }
+
+/* Spinner & Toast */
+.spinner { display: none; text-align: center; padding: 1.5rem; color: var(--text-muted); font-size: 0.9rem; }
+.spinner.active { display: block; }
+.spinner::after { content: ''; display: inline-block; width: 20px; height: 20px; border: 2px solid #555; border-top-color: var(--primary); border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: middle; margin-right: 8px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.toast { position: fixed; top: 1rem; right: 1rem; background: var(--danger); color: #fff; padding: 12px 20px; border-radius: var(--radius); font-size: 0.9rem; z-index: 1000; opacity: 0; transition: opacity 0.3s; max-width: 400px; word-wrap: break-word; pointer-events: none; }
+.toast.show { opacity: 1; pointer-events: auto; }
+.toast.success { background: var(--success); }
+
+/* Settings */
+.settings-section { border: 1px solid var(--border); border-radius: var(--radius); padding: 1.25rem; margin-bottom: 1.25rem; background: #151515; }
+.settings-section h3 { font-size: 1rem; margin-bottom: 1rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border); }
+.profile-info { display: grid; grid-template-columns: auto 1fr; gap: 0.4rem 1rem; font-size: 0.9rem; }
+.profile-info dt { font-weight: 600; color: var(--text-muted); }
+.profile-info dd { word-break: break-all; }
+.pref-row { display: flex; align-items: center; gap: 0.75rem; padding: 8px 0; border-bottom: 1px solid #2a2a2a; font-size: 0.9rem; }
+.pref-row:last-child { border-bottom: none; }
+.pref-row .pref-key { font-weight: 600; min-width: 160px; }
+.pref-row .pref-value { flex: 1; word-break: break-all; color: var(--text-muted); }
+.pref-row .btn { padding: 4px 10px; font-size: 0.8rem; }
+.pref-form { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: flex-end; }
+.pref-form > div { flex: 1; min-width: 140px; }
+.pref-form .sensitive-label { display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; cursor: pointer; margin-bottom: 1rem; }
+
+/* Users / Plans */
+.user-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.9rem; }
+.user-table thead th { text-align: left; padding: 0.6rem 1rem; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); border-bottom: 1px solid var(--border); }
+.user-table tbody tr { transition: background 0.15s; }
+.user-table tbody tr:hover { background: rgba(255,255,255,0.03); }
+.user-table td { padding: 0.75rem 1rem; border-bottom: 1px solid #2a2a2a; }
+.user-table td:first-child { font-weight: 500; }
+.user-table .user-email { color: var(--text-muted); font-size: 0.85rem; }
+.tier-pill { display: inline-block; font-size: 0.75rem; font-weight: 500; padding: 2px 10px; border-radius: 12px; cursor: help; }
+.tier-pill.t1 { background: #2a2a2a; color: var(--text-muted); }
+.tier-pill.t2 { background: rgba(74,142,194,0.15); color: var(--primary); }
+.tier-pill.t3 { background: rgba(123,94,167,0.15); color: var(--success); }
+.tier-pill.t4 { background: rgba(155,111,191,0.15); color: var(--warning); }
+.tier-info-icon { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; border: 1px solid var(--text-muted); font-size: 0.68rem; font-style: italic; font-weight: 600; color: var(--text-muted); cursor: help; vertical-align: middle; margin-left: 4px; line-height: 1; }
+.tier-info-icon:hover + .tier-info-popup, .tier-info-icon:focus + .tier-info-popup, .tier-info-popup:hover { display: block; }
+.tier-info-popup { display: none; position: absolute; top: 100%; right: 0; z-index: 100; background: #1e1e1e; border: 1px solid var(--border); border-radius: var(--radius); padding: 0.75rem; width: 320px; box-shadow: 0 4px 16px rgba(0,0,0,0.5); font-weight: 400; }
+.tier-info-row { font-size: 0.8rem; color: var(--text); margin-bottom: 0.5rem; line-height: 1.4; text-transform: none; letter-spacing: 0; }
+.tier-info-row:last-child { margin-bottom: 0; }
+.tier-info-row strong { color: var(--primary); font-size: 0.82rem; }
+.plan-card { background: #222; border-radius: var(--radius); padding: 1rem; margin-bottom: 0.75rem; cursor: pointer; transition: background 0.2s; }
+.plan-card:hover { background: #2a2a2a; }
+.plan-card-header { display: flex; align-items: center; gap: 0.75rem; }
+.plan-card-body { display: none; margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border); }
+.plan-card.expanded .plan-card-body { display: block; }
+.role-explain { font-size: 0.78rem; color: var(--text-muted); font-style: italic; }
+.toggle-details { display: inline-block; margin-top: 0.75rem; font-size: 0.88rem; color: var(--primary); cursor: pointer; }
+.toggle-details:hover { text-decoration: underline; }
+
+/* Tool icons */
+.tool-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 0.78rem; padding: 2px 8px; border-radius: 12px; background: #2a2a2a; border: 1px solid #333; vertical-align: middle; }
+.tool-badge svg, .tool-badge img { flex-shrink: 0; }
+
+/* Integrations */
+.integ-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 0.75rem; }
+.integ-card { background: #222; border-radius: var(--radius); padding: 1.25rem; border: 1px solid #333; transition: border-color 0.2s; }
+.integ-card.connected { border-color: var(--success); }
+.integ-card-head { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem; }
+.integ-card-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.integ-card-name { font-weight: 600; font-size: 0.95rem; }
+.integ-card-desc { font-size: 0.82rem; color: var(--text-muted); margin-bottom: 0.75rem; }
+.integ-card-status { font-size: 0.82rem; margin-bottom: 0.75rem; }
+.integ-card .btn { font-size: 0.82rem; padding: 6px 14px; }
+
+/* Audit */
+.audit-filters { display: flex; gap: 0.75rem; margin-bottom: 1rem; }
+.audit-filters select, .audit-filters input { flex: 1; margin-bottom: 0; }
+.audit-event { background: #222; border-radius: var(--radius); padding: 0.75rem 1rem; margin-bottom: 0.5rem; border-left: 3px solid var(--border); cursor: pointer; transition: background 0.2s; }
+.audit-event:hover { background: #2a2a2a; }
+.audit-event.type-success { border-left-color: var(--success); }
+.audit-event.type-fail { border-left-color: #c0392b; }
+.audit-event.type-approval { border-left-color: var(--primary); }
+.audit-event.type-policy { border-left-color: var(--warning); }
+.audit-event-header { display: flex; align-items: center; gap: 0.5rem; }
+.audit-event-type { font-size: 0.82rem; font-weight: 600; }
+.audit-event-time { font-size: 0.78rem; color: var(--text-muted); margin-left: auto; }
+.audit-event-meta { font-size: 0.8rem; color: var(--text-muted); margin-top: 4px; }
+.audit-event-data { display: none; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #333; font-size: 0.8rem; color: var(--text-muted); white-space: pre-wrap; word-break: break-all; max-height: 200px; overflow-y: auto; }
+.audit-event.expanded .audit-event-data { display: block; }
+.audit-count { font-size: 0.82rem; color: var(--text-muted); margin-bottom: 0.75rem; }
+</style>
+</head>
+<body>
+
+<header>
+  <div style="display:flex;align-items:center;gap:8px;cursor:pointer" onclick="if(token)showView('chatView')">
+    <div style="width:36px;height:36px;border-radius:50%;overflow:hidden;flex-shrink:0;position:relative">
+      <img src="/static/aexor-logo-top-cropped.png" alt="Aexor" style="position:absolute;width:170%;height:170%;top:50%;left:50%;transform:translate(-51%,-46%)">
+    </div>
+    <h1>Aexor</h1>
+  </div>
+  <div>
+    <button id="usersBtn" style="display:none" onclick="showView('usersView')">Users</button>
+    <button id="plansBtn" style="display:none" onclick="showView('plansView')">Plans</button>
+    <button id="integrationsBtn" style="display:none" onclick="showView('integrationsView')">Integrations</button>
+    <button id="auditBtn" style="display:none" onclick="showView('auditView')">Audit</button>
+    <button id="settingsBtn" style="display:none" onclick="showView('settingsView')">Settings</button>
+    <button id="logoutBtn" style="display:none" onclick="logout()">Logout</button>
+  </div>
+</header>
+
+<div class="container">
+  <!-- Auth View -->
+  <div id="authView" class="view active">
+    <div class="card">
+      <h2 id="authTitle">Welcome back</h2>
+      <form id="loginForm" onsubmit="handleLogin(event)">
+        <label for="loginEmail">Email</label>
+        <input type="email" id="loginEmail" required autocomplete="email">
+        <label for="loginPassword">Password</label>
+        <input type="password" id="loginPassword" required autocomplete="current-password">
+        <button type="submit" class="btn btn-primary btn-block">Sign in</button>
+      </form>
+      <form id="registerForm" style="display:none" onsubmit="handleRegister(event)">
+        <label for="regName">Full Name</label>
+        <input type="text" id="regName" autocomplete="name">
+        <label for="regEmail">Email</label>
+        <input type="email" id="regEmail" required autocomplete="email">
+        <label for="regPassword">Password</label>
+        <input type="password" id="regPassword" required minlength="6" autocomplete="new-password">
+        <label for="regTier">Data Access</label>
+        <select id="regTier" style="margin-bottom:1rem">
+          <option value="1">Session only</option>
+          <option value="2" selected>Save preferences</option>
+          <option value="3">Remember history</option>
+          <option value="4">Full access</option>
+        </select>
+        <button type="submit" class="btn btn-primary btn-block">Create account</button>
+      </form>
+      <div class="toggle-link">
+        <span id="toggleText">New here? </span>
+        <a id="toggleAuth" onclick="toggleAuthForm()">Create an account</a>
+      </div>
+      <div id="authSpinner" class="spinner">Signing in...</div>
+    </div>
+  </div>
+
+  <!-- Chat View -->
+  <div id="chatView" class="view">
+    <div class="card">
+      <div id="chatMessages" class="chat-messages"></div>
+      <div id="chatSpinner" class="spinner">Thinking...</div>
+      <div class="chat-input">
+        <input type="text" id="chatInput" placeholder="What would you like to do?" onkeydown="if(event.key==='Enter')sendMessage()">
+        <button class="btn btn-primary" onclick="sendMessage()" id="sendBtn">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Plan & Execution View -->
+  <div id="planView" class="view">
+    <div class="card">
+      <h2 id="planTitle">Preparing your request</h2>
+      <div id="planSteps"></div>
+      <div id="planSpinner" class="spinner">Working on it...</div>
+      <div id="planActions" class="action-row">
+        <button class="btn btn-success" id="executeBtn" onclick="executePlan()">Looks good, go ahead</button>
+        <button class="btn btn-danger" onclick="showView('chatView')">Back</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Result View -->
+  <div id="resultView" class="view">
+    <div class="card">
+      <div id="resultIcon" class="result-icon"></div>
+      <div id="resultSummary" class="result-summary"></div>
+      <div id="resultDetails"></div>
+      <button class="btn btn-primary btn-block" style="margin-top:1.5rem" onclick="newConversation()">Start a new request</button>
+    </div>
+  </div>
+
+  <!-- Settings View -->
+  <div id="settingsView" class="view">
+    <div class="card">
+      <h2>Settings</h2>
+
+      <div class="settings-section">
+        <h3>Profile</h3>
+        <dl id="profileInfo" class="profile-info"></dl>
+        <div style="margin-top:1rem;display:flex;gap:0.75rem;align-items:flex-end">
+          <div style="flex:1">
+            <label for="tierSelect">Data Access</label>
+            <select id="tierSelect">
+              <option value="1">Session only</option>
+              <option value="2">Preferences</option>
+              <option value="3">History</option>
+              <option value="4">Full access</option>
+            </select>
+          </div>
+          <button class="btn btn-primary" onclick="updateContextTier()" style="margin-bottom:0">Update</button>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h3>Preferences</h3>
+        <div id="prefSpinner" class="spinner">Loading...</div>
+        <div id="prefList"></div>
+      </div>
+
+      <div class="settings-section">
+        <h3>Set Preference</h3>
+        <div class="pref-form">
+          <div>
+            <label for="prefKey">Key</label>
+            <select id="prefKey">
+              <option value="" disabled selected>Select...</option>
+              <option value="meeting_duration_min">Meeting duration</option>
+              <option value="work_hours">Work hours</option>
+              <option value="timezone">Timezone</option>
+              <option value="theme">Theme</option>
+              <option value="language">Language</option>
+              <option value="notification_settings">Notifications</option>
+            </select>
+          </div>
+          <div>
+            <label for="prefValue">Value</label>
+            <input type="text" id="prefValue" placeholder="Enter value..." style="margin-bottom:0">
+          </div>
+        </div>
+        <label class="sensitive-label" style="margin-top:0.5rem">
+          <input type="checkbox" id="prefSensitive"> Sensitive
+        </label>
+        <button class="btn btn-primary" onclick="setPreference()">Save</button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Users View -->
+  <div id="usersView" class="view">
+    <div class="card">
+      <h2>Users</h2>
+      <div id="usersSpinner" class="spinner">Loading...</div>
+      <div id="usersContainer"></div>
+    </div>
+  </div>
+
+  <!-- Plans View -->
+  <div id="plansView" class="view">
+    <div class="card">
+      <h2>Executed Plans</h2>
+      <div id="plansSpinner" class="spinner">Loading...</div>
+      <div id="plansContainer"></div>
+    </div>
+  </div>
+
+  <!-- Integrations View -->
+  <div id="integrationsView" class="view">
+    <div class="card">
+      <h2>Integrations</h2>
+      <div id="integSpinner" class="spinner">Loading...</div>
+      <div id="integGrid" class="integ-grid"></div>
+    </div>
+  </div>
+
+  <!-- Audit View -->
+  <div id="auditView" class="view">
+    <div class="card">
+      <h2>Audit Log</h2>
+      <div class="audit-filters">
+        <select id="auditTypeFilter" onchange="loadAuditView()">
+          <option value="">All events</option>
+          <option value="execution_started">Execution Started</option>
+          <option value="step_completed">Step Completed</option>
+          <option value="step_failed">Step Failed</option>
+          <option value="execution_completed">Execution Completed</option>
+          <option value="execution_failed">Execution Failed</option>
+          <option value="approval_granted">Approval Granted</option>
+          <option value="approval_expired">Approval Expired</option>
+          <option value="policy_attestation">Policy Attestation</option>
+          <option value="policy_denial">Policy Denial</option>
+          <option value="execution_stuck">Execution Stuck</option>
+          <option value="execution_timeout">Execution Timeout</option>
+        </select>
+        <input type="text" id="auditPlanFilter" placeholder="Filter by plan ID..." style="margin-bottom:0" oninput="clearTimeout(window._auditDebounce); window._auditDebounce=setTimeout(()=>loadAuditView(),400)">
+      </div>
+      <div id="auditSpinner" class="spinner">Loading...</div>
+      <div id="auditContainer"></div>
+      <button id="auditLoadMore" class="btn btn-primary btn-block" style="display:none;margin-top:0.75rem" onclick="loadMoreAudit()">Load more</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+/* ------------------------------------------------------------------ */
+/* State                                                               */
+/* ------------------------------------------------------------------ */
+let token = sessionStorage.getItem('jwt') || null;
+let sessionId = null;
+let currentPlan = null;
+let currentPreview = null;
+let currentIntent = null;
+
+/* ------------------------------------------------------------------ */
+/* Helpers                                                             */
+/* ------------------------------------------------------------------ */
+const API = '';
+
+function showView(id) {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  const show = token ? '' : 'none';
+  document.getElementById('logoutBtn').style.display = show;
+  document.getElementById('settingsBtn').style.display = show;
+  document.getElementById('usersBtn').style.display = show;
+  document.getElementById('plansBtn').style.display = show;
+  document.getElementById('integrationsBtn').style.display = show;
+  document.getElementById('auditBtn').style.display = show;
+  if (id === 'settingsView') { loadProfile(); loadPreferences(); }
+  if (id === 'usersView') { loadUsersView(); }
+  if (id === 'plansView') { loadPlansView(); }
+  if (id === 'integrationsView') { loadIntegrations(); }
+  if (id === 'auditView') { loadAuditView(); }
+}
+
+function showToast(msg, type) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (type === 'success' ? ' success' : '');
+  setTimeout(() => { t.className = 'toast'; }, 4000);
+}
+
+function spinner(id, on) {
+  document.getElementById(id).classList.toggle('active', on);
+}
+
+async function api(method, path, body, isForm) {
+  const headers = {};
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  if (isForm) {
+    headers['Content-Type'] = 'application/x-www-form-urlencoded';
+  } else {
+    headers['Content-Type'] = 'application/json';
+  }
+  headers['X-Timezone'] = Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Chicago';
+  const opts = { method, headers };
+  if (body) opts.body = isForm ? body.toString() : JSON.stringify(body);
+  let res;
+  try { res = await fetch(API + path, opts); } catch (e) { throw new Error('Unable to reach the server'); }
+  let data;
+  const text = await res.text();
+  try { data = JSON.parse(text); } catch (e) { throw new Error(res.ok ? 'Invalid response' : 'Server error'); }
+  if (!res.ok) {
+    if (res.status === 401 && path !== '/auth/token') { logout(); throw new Error('Session expired. Please sign in again.'); }
+    let msg;
+    if (Array.isArray(data.detail)) { msg = data.detail.map(d => d.msg || JSON.stringify(d)).join('; '); }
+    else { msg = data.detail || data.message || data.error_code || 'Something went wrong'; }
+    throw new Error(msg);
+  }
+  return data;
+}
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+/* ------------------------------------------------------------------ */
+/* Human-friendly helpers                                              */
+/* ------------------------------------------------------------------ */
+function _humanizeRole(role, uses) {
+  const r = (role || '').toLowerCase();
+  const u = (uses || '').toLowerCase();
+  if (r === 'fetcher') {
+    if (u.includes('calendar') || u.includes('event')) return 'Checking your calendar';
+    if (u.includes('email') || u.includes('gmail')) return 'Reading your emails';
+    return 'Gathering information';
+  }
+  if (r === 'reasoner') return 'Analyzing for conflicts';
+  if (r === 'resolver') return 'Waiting for your input';
+  if (r === 'booker') {
+    if (u.includes('calendar') || u.includes('event')) return 'Creating the event';
+    if (u.includes('email') || u.includes('gmail')) return 'Sending the email';
+    return 'Making changes';
+  }
+  if (r === 'notifier') return 'Sending notification';
+  if (r === 'analyzer') return 'Processing data';
+  if (r === 'watcher') return 'Monitoring';
+  return role || 'Processing';
+}
+
+function _humanizeStatus(status) {
+  switch (status) {
+    case 'completed': return 'Done';
+    case 'deferred': return 'Will run on execution';
+    case 'dependency_deferred': return 'Waiting for previous step';
+    case 'pending': return 'Ready';
+    case 'failed': return 'Failed';
+    case 'skipped': return 'Skipped';
+    default: return status || '';
+  }
+}
+
+function _formatDateTime(isoStr) {
+  try {
+    const d = new Date(isoStr);
+    return d.toLocaleString(undefined, {
+      weekday: 'long', month: 'long', day: 'numeric',
+      hour: '2-digit', minute: '2-digit'
+    });
+  } catch (e) { return isoStr; }
+}
+
+function _formatDateTimeShort(isoStr) {
+  try {
+    const d = new Date(isoStr);
+    return d.toLocaleString(undefined, {
+      weekday: 'short', month: 'short', day: 'numeric',
+      hour: '2-digit', minute: '2-digit'
+    });
+  } catch (e) { return isoStr; }
+}
+
+function _describeEntities(entities) {
+  if (!entities || !Object.keys(entities).length) return '';
+  const parts = [];
+  if (entities.title || entities.summary) parts.push(entities.title || entities.summary);
+  if (entities.date) parts.push(entities.date);
+  if (entities.time || entities.start_time) parts.push('at ' + (entities.time || entities.start_time));
+  if (entities.duration) parts.push('for ' + entities.duration);
+  if (entities.attendees) {
+    const a = Array.isArray(entities.attendees) ? entities.attendees : [entities.attendees];
+    if (a.length) parts.push('with ' + a.join(', '));
+  }
+  return parts.length ? parts.join(' ') : '';
+}
+
+/* ------------------------------------------------------------------ */
+/* Auth                                                                */
+/* ------------------------------------------------------------------ */
+let isLogin = true;
+
+function toggleAuthForm() {
+  isLogin = !isLogin;
+  document.getElementById('loginForm').style.display = isLogin ? '' : 'none';
+  document.getElementById('registerForm').style.display = isLogin ? 'none' : '';
+  document.getElementById('authTitle').textContent = isLogin ? 'Welcome back' : 'Create your account';
+  document.getElementById('toggleText').textContent = isLogin ? 'New here? ' : 'Already have an account? ';
+  document.getElementById('toggleAuth').textContent = isLogin ? 'Create an account' : 'Sign in';
+}
+
+async function handleLogin(e) {
+  e.preventDefault();
+  spinner('authSpinner', true);
+  try {
+    const form = new URLSearchParams();
+    form.append('username', document.getElementById('loginEmail').value);
+    form.append('password', document.getElementById('loginPassword').value);
+    const data = await api('POST', '/auth/token', form, true);
+    token = data.access_token;
+    sessionStorage.setItem('jwt', token);
+    sessionId = null;
+    showView('chatView');
+  } catch (err) { showToast(err.message); }
+  finally { spinner('authSpinner', false); }
+}
+
+async function handleRegister(e) {
+  e.preventDefault();
+  spinner('authSpinner', true);
+  try {
+    await api('POST', '/auth/register', {
+      email: document.getElementById('regEmail').value,
+      password: document.getElementById('regPassword').value,
+      full_name: document.getElementById('regName').value || null,
+      context_tier: parseInt(document.getElementById('regTier').value, 10),
+    });
+    showToast('Account created! Please sign in.', 'success');
+    toggleAuthForm();
+  } catch (err) { showToast(err.message); }
+  finally { spinner('authSpinner', false); }
+}
+
+function logout() {
+  token = null; sessionStorage.removeItem('jwt');
+  sessionId = null; currentPlan = null; currentPreview = null; currentIntent = null;
+  document.getElementById('chatMessages').innerHTML = '';
+  showView('authView');
+}
+
+/* ------------------------------------------------------------------ */
+/* Chat / Intake                                                       */
+/* ------------------------------------------------------------------ */
+function addMsg(role, text) {
+  const el = document.createElement('div');
+  el.className = 'msg msg-' + role;
+  el.textContent = text;
+  const box = document.getElementById('chatMessages');
+  box.appendChild(el);
+  box.scrollTop = box.scrollHeight;
+}
+
+async function sendMessage() {
+  const input = document.getElementById('chatInput');
+  const msg = input.value.trim();
+  if (!msg) return;
+  input.value = '';
+  addMsg('user', msg);
+  document.getElementById('sendBtn').disabled = true;
+  spinner('chatSpinner', true);
+  try {
+    const body = { message: msg };
+    if (sessionId) body.session_id = sessionId;
+    const data = await api('POST', '/intake/message', body);
+    sessionId = data.session_id;
+    if (data.status === 'collecting') {
+      if (data.follow_up) addMsg('assistant', data.follow_up);
+    } else if (data.status === 'ready') {
+      currentIntent = data.intent;
+      const desc = _describeEntities(data.collected_entities);
+      addMsg('assistant', 'Got it' + (desc ? ' — ' + desc : '') + '. Let me prepare a plan for you.');
+      // Auto-generate plan
+      setTimeout(() => generatePlan(), 300);
+    }
+  } catch (err) { showToast(err.message); }
+  finally { spinner('chatSpinner', false); document.getElementById('sendBtn').disabled = false; }
+}
+
+function newConversation() {
+  sessionId = null; currentPlan = null; currentPreview = null; currentIntent = null;
+  document.getElementById('chatMessages').innerHTML = '';
+  document.getElementById('chatInput').disabled = false;
+  document.getElementById('sendBtn').disabled = false;
+  showView('chatView');
+}
+
+/* ------------------------------------------------------------------ */
+/* Plan & Preview                                                      */
+/* ------------------------------------------------------------------ */
+async function generatePlan() {
+  if (!currentIntent) { showToast('No request ready'); return; }
+  showView('planView');
+  spinner('planSpinner', true);
+  document.getElementById('planSteps').innerHTML = '';
+  document.getElementById('executeBtn').disabled = true;
+  document.getElementById('planActions').style.display = 'none';
+
+  try {
+    const data = await api('POST', '/orchestrate/plan', { intent: currentIntent });
+    currentPlan = data.plan;
+    currentPreview = data.preview;
+    renderPlan();
+    document.getElementById('executeBtn').disabled = false;
+    document.getElementById('planActions').style.display = '';
+  } catch (err) { showToast('Could not create a plan: ' + err.message); showView('chatView'); }
+  finally { spinner('planSpinner', false); }
+}
+
+function renderPlan() {
+  if (!currentPlan) return;
+  const steps = currentPlan.graph || [];
+  const container = document.getElementById('planSteps');
+  container.innerHTML = '';
+
+  document.getElementById('planTitle').textContent = "Here's the plan";
+
+  // Build preview map
+  const previewSteps = {};
+  if (currentPreview && currentPreview.step_results) {
+    for (const sr of currentPreview.step_results) { previewSteps[sr.step] = sr; }
+  }
+
+  const timeline = document.createElement('div');
+  timeline.className = 'timeline';
+
+  steps.forEach(step => {
+    const preview = previewSteps[step.step] || {};
+    const status = preview.status || 'pending';
+    const cls = status === 'completed' ? 'done' : (status === 'deferred' ? 'waiting' : '');
+
+    const div = document.createElement('div');
+    div.className = 'timeline-step ' + cls;
+
+    const title = _humanizeRole(step.role, step.uses);
+    const statusText = _humanizeStatus(status);
+    const badge = _toolBadge(step.uses);
+
+    let html = '<div class="step-title">' + esc(title) + (badge ? ' ' + badge : '') + '</div>';
+    html += '<div class="step-desc">' + esc(statusText) + '</div>';
+
+    div.innerHTML = html;
+    timeline.appendChild(div);
+  });
+
+  container.appendChild(timeline);
+}
+
+/* ------------------------------------------------------------------ */
+/* Execute                                                             */
+/* ------------------------------------------------------------------ */
+let gateState = {};
+
+async function executePlan() {
+  if (!currentPlan) { showToast('No plan available'); return; }
+  document.getElementById('executeBtn').disabled = true;
+  document.getElementById('planActions').style.display = 'none';
+  spinner('planSpinner', true);
+  gateState = {};
+
+  const scopes = (currentPlan.constraints && currentPlan.constraints.scopes) || [];
+  try {
+    const data = await api('POST', '/orchestrate/execute', {
+      plan: currentPlan,
+      scopes: scopes.length ? scopes : ['default'],
+    });
+    if (data.status === 'approval_required') {
+      _accumulatePartialResults(data.partial_results);
+      spinner('planSpinner', false);
+      renderGateApproval(data);
+      return;
+    }
+    renderResult(data);
+    showView('resultView');
+  } catch (err) {
+    showToast(err.message);
+    document.getElementById('executeBtn').disabled = false;
+    document.getElementById('planActions').style.display = '';
+  } finally { spinner('planSpinner', false); }
+}
+
+function _accumulatePartialResults(partial) {
+  if (!partial) return;
+  for (const [key, sr] of Object.entries(partial)) {
+    if (sr.status === 'completed' && key.startsWith('step_')) {
+      gateState['completed_step_' + key.replace('step_', '')] = sr.result;
+    }
+  }
+}
+
+function _extractReasonerRecommendation(partial) {
+  if (!partial) return null;
+  for (const [key, sr] of Object.entries(partial)) {
+    if (sr.status === 'completed' && sr.result) {
+      const r = sr.result;
+      if (r.recommended_time || r.has_conflict !== undefined || r.reason) return r;
+    }
+  }
+  return null;
+}
+
+function renderGateApproval(data) {
+  const container = document.getElementById('planSteps');
+  container.innerHTML = '';
+  document.getElementById('planActions').style.display = 'none';
+
+  const partial = data.partial_results || {};
+  const ctx = data.context_data || {};
+  const isResolver = ctx.role === 'Resolver';
+  const rec = _extractReasonerRecommendation(partial);
+
+  let html = '';
+
+  if (isResolver && rec) {
+    html += '<div class="approval-card">';
+    if (rec.has_conflict === true) {
+      html += '<h3>Scheduling conflict found</h3>';
+      if (rec.conflicts && Array.isArray(rec.conflicts) && rec.conflicts.length) {
+        rec.conflicts.forEach(c => {
+          const desc = typeof c === 'string' ? c : (c.summary || c.title || 'Existing event');
+          html += '<div style="font-size:0.88rem;color:var(--text-muted);margin:4px 0">- ' + esc(desc) + '</div>';
+        });
+      }
+      // Free slot picker
+      const hasSlots = rec.free_slots && Array.isArray(rec.free_slots) && rec.free_slots.length;
+      if (hasSlots) {
+        html += '<div style="margin-top:0.75rem;font-size:0.92rem;font-weight:500">Pick an available time:</div>';
+        html += '<div class="slot-grid">';
+        rec.free_slots.forEach(slot => {
+          html += '<button class="slot-btn" onclick="resolveGate(\'' + esc(data.gate_id) + '\', \'' + esc(slot.start) + '\')">' + esc(slot.label) + '</button>';
+        });
+        html += '</div>';
+      }
+      html += '<div class="action-row">';
+      if (!hasSlots) {
+        html += '<button class="btn btn-success" onclick="resolveGate(\'' + esc(data.gate_id) + '\', \'reschedule\')">Find a free slot</button>';
+      }
+      html += '<button class="btn btn-primary" onclick="resolveGate(\'' + esc(data.gate_id) + '\', \'override\')">Book anyway</button>';
+      html += '<button class="btn btn-danger" onclick="cancelExecution()">Cancel</button>';
+      html += '</div>';
+    } else {
+      // No conflict
+      html += '<h3>Time slot is available</h3>';
+      if (rec.recommended_time) {
+        html += '<div style="font-size:1.05rem;margin:0.5rem 0">' + esc(_formatDateTime(rec.recommended_time)) + '</div>';
+      }
+      if (rec.reason) html += '<div style="font-size:0.88rem;color:var(--text-muted)">' + esc(rec.reason) + '</div>';
+      html += '<div class="action-row">';
+      html += '<button class="btn btn-success" onclick="resolveGate(\'' + esc(data.gate_id) + '\', \'approved\')">Confirm</button>';
+      html += '<button class="btn btn-danger" onclick="cancelExecution()">Cancel</button>';
+      html += '</div>';
+    }
+    html += '</div>';
+  } else {
+    // Booker or generic gate — final confirmation
+    html += '<div class="approval-card">';
+    if (rec && rec.recommended_time) {
+      html += '<h3>Ready to book</h3>';
+      html += '<div style="font-size:1.05rem;margin:0.5rem 0">' + esc(_formatDateTime(rec.recommended_time)) + '</div>';
+    } else {
+      html += '<h3>Confirm this action</h3>';
+    }
+    html += '<div style="font-size:0.88rem;color:var(--text-muted);margin-bottom:0.75rem">This will modify your calendar. Approve to continue.</div>';
+    html += '<div class="action-row">';
+    html += '<button class="btn btn-success" onclick="resolveGate(\'' + esc(data.gate_id) + '\', \'approved\')">Approve</button>';
+    html += '<button class="btn btn-danger" onclick="cancelExecution()">Cancel</button>';
+    html += '</div>';
+    html += '</div>';
+  }
+
+  container.innerHTML = html;
+  document.getElementById('planTitle').textContent = 'Your approval needed';
+}
+
+async function resolveGate(gateId, choice) {
+  if (!currentPlan) return;
+  spinner('planSpinner', true);
+  gateState[gateId] = choice;
+  const scopes = (currentPlan.constraints && currentPlan.constraints.scopes) || [];
+  try {
+    const data = await api('POST', '/orchestrate/execute', {
+      plan: currentPlan,
+      scopes: scopes.length ? scopes : ['default'],
+      preview_state: gateState,
+    });
+    if (data.status === 'approval_required') {
+      _accumulatePartialResults(data.partial_results);
+      spinner('planSpinner', false);
+      renderGateApproval(data);
+      return;
+    }
+    renderResult(data);
+    showView('resultView');
+  } catch (err) { showToast(err.message); }
+  finally {
+    spinner('planSpinner', false);
+    document.getElementById('planActions').style.display = '';
+    document.getElementById('executeBtn').disabled = false;
+  }
+}
+
+function cancelExecution() {
+  gateState = {};
+  document.getElementById('planActions').style.display = '';
+  document.getElementById('executeBtn').disabled = false;
+  showView('chatView');
+}
+
+/* ------------------------------------------------------------------ */
+/* Tool icons                                                          */
+/* ------------------------------------------------------------------ */
+const TOOL_DEFS = {
+  gmail: {
+    label: 'Gmail', color: '#EA4335', bg: '#2a1a1a',
+    desc: 'Read and send emails via your Google account',
+    svg: '<img src="/static/gmail-logo.png" width="18" height="18" alt="Gmail" style="object-fit:contain">',
+    bigSvg: '<img src="/static/gmail-logo.png" width="28" height="28" alt="Gmail" style="object-fit:contain">',
+  },
+  googlecalendar: {
+    label: 'Google Calendar', color: '#4285F4', bg: '#1a1a2a',
+    desc: 'View and create events on your Google Calendar',
+    svg: '<img src="/static/gcalendar-logo.png" width="18" height="18" alt="Google Calendar" style="object-fit:contain">',
+    bigSvg: '<img src="/static/gcalendar-logo.png" width="28" height="28" alt="Google Calendar" style="object-fit:contain">',
+  },
+  slack: {
+    label: 'Slack', color: '#4A154B', bg: '#1f1a22',
+    desc: 'Send and read messages in Slack channels',
+    svg: '<svg width="18" height="18" viewBox="0 0 128 128"><path d="M26.8 80.1a13.4 13.4 0 1 1-13.4-13.4h13.4v13.4z" fill="#E01E5A"/><path d="M33.5 80.1a13.4 13.4 0 0 1 26.8 0v33.5a13.4 13.4 0 1 1-26.8 0V80.1z" fill="#E01E5A"/><path d="M46.9 26.8a13.4 13.4 0 1 1 13.4-13.4v13.4H46.9z" fill="#36C5F0"/><path d="M46.9 33.5a13.4 13.4 0 0 1 0 26.8H13.4a13.4 13.4 0 1 1 0-26.8h33.5z" fill="#36C5F0"/><path d="M100.2 46.9a13.4 13.4 0 1 1 13.4 13.4h-13.4V46.9z" fill="#2EB67D"/><path d="M93.5 46.9a13.4 13.4 0 0 1-26.8 0V13.4a13.4 13.4 0 0 1 26.8 0v33.5z" fill="#2EB67D"/><path d="M80.1 100.2a13.4 13.4 0 1 1-13.4 13.4v-13.4h13.4z" fill="#ECB22E"/><path d="M80.1 93.5a13.4 13.4 0 0 1 0-26.8h33.5a13.4 13.4 0 1 1 0 26.8H80.1z" fill="#ECB22E"/></svg>',
+    bigSvg: '<svg width="28" height="28" viewBox="0 0 128 128"><path d="M26.8 80.1a13.4 13.4 0 1 1-13.4-13.4h13.4v13.4z" fill="#E01E5A"/><path d="M33.5 80.1a13.4 13.4 0 0 1 26.8 0v33.5a13.4 13.4 0 1 1-26.8 0V80.1z" fill="#E01E5A"/><path d="M46.9 26.8a13.4 13.4 0 1 1 13.4-13.4v13.4H46.9z" fill="#36C5F0"/><path d="M46.9 33.5a13.4 13.4 0 0 1 0 26.8H13.4a13.4 13.4 0 1 1 0-26.8h33.5z" fill="#36C5F0"/><path d="M100.2 46.9a13.4 13.4 0 1 1 13.4 13.4h-13.4V46.9z" fill="#2EB67D"/><path d="M93.5 46.9a13.4 13.4 0 0 1-26.8 0V13.4a13.4 13.4 0 0 1 26.8 0v33.5z" fill="#2EB67D"/><path d="M80.1 100.2a13.4 13.4 0 1 1-13.4 13.4v-13.4h13.4z" fill="#ECB22E"/><path d="M80.1 93.5a13.4 13.4 0 0 1 0-26.8h33.5a13.4 13.4 0 1 1 0 26.8H80.1z" fill="#ECB22E"/></svg>',
+  },
+  github: {
+    label: 'GitHub', color: '#fff', bg: '#1a1a1a',
+    desc: 'Access repositories and create issues',
+    svg: '<svg width="18" height="18" viewBox="0 0 98 96"><path fill-rule="evenodd" clip-rule="evenodd" d="M48.854 0C21.839 0 0 22 0 49.217c0 21.756 13.993 40.172 33.405 46.69 2.427.49 3.316-1.059 3.316-2.362 0-1.141-.08-5.052-.08-9.127-13.59 2.934-16.42-5.867-16.42-5.867-2.184-5.704-5.42-7.17-5.42-7.17-4.448-3.015.324-3.015.324-3.015 4.934.326 7.523 5.052 7.523 5.052 4.367 7.496 11.404 5.378 14.235 4.074.404-3.178 1.699-5.378 3.074-6.6C29.304 70.23 17.9 65.997 17.9 46.933c0-5.541 2.022-10.103 5.18-13.608-.567-1.223-2.265-6.438.486-13.445 0 0 4.125-1.304 13.426 5.052a46.97 46.97 0 0 1 12.214-1.63c4.125 0 8.33.571 12.213 1.63 9.302-6.356 13.427-5.052 13.427-5.052 2.67 7.007 1.053 12.222.486 13.445 3.24 3.505 5.18 8.067 5.18 13.608 0 19.064-11.485 23.216-22.411 24.44 1.78 1.548 3.316 4.481 3.316 9.126 0 6.6-.08 11.897-.08 13.526 0 1.304.89 2.853 3.316 2.364 19.412-6.52 33.405-24.935 33.405-46.691C97.707 22 75.788 0 48.854 0z" fill="#fff"/></svg>',
+    bigSvg: '<svg width="28" height="28" viewBox="0 0 98 96"><path fill-rule="evenodd" clip-rule="evenodd" d="M48.854 0C21.839 0 0 22 0 49.217c0 21.756 13.993 40.172 33.405 46.69 2.427.49 3.316-1.059 3.316-2.362 0-1.141-.08-5.052-.08-9.127-13.59 2.934-16.42-5.867-16.42-5.867-2.184-5.704-5.42-7.17-5.42-7.17-4.448-3.015.324-3.015.324-3.015 4.934.326 7.523 5.052 7.523 5.052 4.367 7.496 11.404 5.378 14.235 4.074.404-3.178 1.699-5.378 3.074-6.6C29.304 70.23 17.9 65.997 17.9 46.933c0-5.541 2.022-10.103 5.18-13.608-.567-1.223-2.265-6.438.486-13.445 0 0 4.125-1.304 13.426 5.052a46.97 46.97 0 0 1 12.214-1.63c4.125 0 8.33.571 12.213 1.63 9.302-6.356 13.427-5.052 13.427-5.052 2.67 7.007 1.053 12.222.486 13.445 3.24 3.505 5.18 8.067 5.18 13.608 0 19.064-11.485 23.216-22.411 24.44 1.78 1.548 3.316 4.481 3.316 9.126 0 6.6-.08 11.897-.08 13.526 0 1.304.89 2.853 3.316 2.364 19.412-6.52 33.405-24.935 33.405-46.691C97.707 22 75.788 0 48.854 0z" fill="#fff"/></svg>',
+  },
+};
+
+// Map various provider name formats to our canonical keys
+function _canonicalTool(name) {
+  const n = (name || '').toLowerCase().replace(/[^a-z]/g, '');
+  if (n.includes('gmail') || n.includes('email')) return 'gmail';
+  if (n.includes('calendar') || n.includes('gcal') || n.includes('googlecalendar')) return 'googlecalendar';
+  if (n.includes('slack')) return 'slack';
+  if (n.includes('github')) return 'github';
+  return null;
+}
+
+function _toolBadge(usesStr) {
+  const key = _canonicalTool(usesStr);
+  if (!key || !TOOL_DEFS[key]) return '';
+  const t = TOOL_DEFS[key];
+  return '<span class="tool-badge">' + t.svg + ' ' + esc(t.label) + '</span>';
+}
+
+/* ------------------------------------------------------------------ */
+/* Role explanations                                                   */
+/* ------------------------------------------------------------------ */
+const ROLE_EXPLANATIONS = {
+  fetcher: 'Read-only data retrieval from your connected services',
+  reasoner: 'AI analysis to find the best option and detect conflicts',
+  resolver: 'Paused for your approval before making changes',
+  booker: 'Executed the action (created event, sent email, etc.)',
+  notifier: 'Sent notifications to relevant people',
+  analyzer: 'Processed and analyzed the retrieved data',
+  watcher: 'Monitored for changes or conditions',
+};
+
+function _getRoleExplanation(role) {
+  return ROLE_EXPLANATIONS[(role || '').toLowerCase()] || '';
+}
+
+/* ------------------------------------------------------------------ */
+/* Result                                                              */
+/* ------------------------------------------------------------------ */
+function renderResult(outcome) {
+  const isSuccess = outcome.success === true;
+  document.getElementById('resultIcon').textContent = isSuccess ? '\u2705' : '\u274C';
+
+  // Try to build a human-readable summary
+  let summary = '';
+  if (isSuccess) {
+    // Look for the booked time in context_data
+    const ctx = outcome.context_data || {};
+    let bookedTime = null;
+    for (const key of Object.keys(ctx).sort()) {
+      const sr = ctx[key];
+      if (sr && sr.result && typeof sr.result === 'object') {
+        if (sr.result.recommended_time) bookedTime = sr.result.recommended_time;
+      }
+    }
+    if (bookedTime) {
+      summary = 'Your event has been scheduled for<br><strong>' + esc(_formatDateTime(bookedTime)) + '</strong>';
+    } else {
+      summary = 'All done! Your request has been completed successfully.';
+    }
+  } else {
+    const errMsg = outcome.error_details && outcome.error_details.message
+      ? outcome.error_details.message
+      : (outcome.error_type || 'Unknown error');
+    summary = 'Something went wrong.<br><span style="color:var(--text-muted);font-size:0.9rem">' + esc(errMsg) + '</span>';
+  }
+  document.getElementById('resultSummary').innerHTML = summary;
+
+  // Collapsible step timeline
+  const details = document.getElementById('resultDetails');
+  details.innerHTML = '';
+  const ctx = outcome.context_data || {};
+  const stepKeys = Object.keys(ctx).filter(k => k.startsWith('step_')).sort((a, b) => parseInt(a.split('_')[1]) - parseInt(b.split('_')[1]));
+  if (stepKeys.length) {
+    const planSteps = (currentPlan && currentPlan.graph) || [];
+    const roleMap = {};
+    planSteps.forEach(s => { roleMap[s.step] = s; });
+
+    const timeline = document.createElement('div');
+    timeline.className = 'timeline';
+    timeline.style.display = 'none';
+
+    stepKeys.forEach(key => {
+      const stepNum = parseInt(key.split('_')[1]);
+      const stepData = ctx[key];
+      const planStep = roleMap[stepNum];
+      const status = stepData.status || 'unknown';
+      const cls = status === 'completed' ? 'done' : (status === 'failed' ? '' : '');
+
+      const div = document.createElement('div');
+      div.className = 'timeline-step ' + cls;
+      const title = planStep ? _humanizeRole(planStep.role, planStep.uses) : ('Step ' + stepNum);
+      const explanation = planStep ? _getRoleExplanation(planStep.role) : '';
+      const badge = planStep ? _toolBadge(planStep.uses) : '';
+      let html = '<div class="step-title">' + esc(title) + (badge ? ' ' + badge : '') + '</div>';
+      html += '<div class="step-desc">' + esc(_humanizeStatus(status));
+      if (stepData.latency_ms) html += ' &middot; ' + stepData.latency_ms + 'ms';
+      html += '</div>';
+      if (explanation) html += '<div class="role-explain">' + esc(explanation) + '</div>';
+      div.innerHTML = html;
+      timeline.appendChild(div);
+    });
+
+    const toggle = document.createElement('span');
+    toggle.className = 'toggle-details';
+    toggle.textContent = 'Show details';
+    toggle.onclick = function () {
+      const visible = timeline.style.display !== 'none';
+      timeline.style.display = visible ? 'none' : 'block';
+      toggle.textContent = visible ? 'Show details' : 'Hide details';
+    };
+
+    details.appendChild(toggle);
+    details.appendChild(timeline);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Users                                                               */
+/* ------------------------------------------------------------------ */
+async function loadUsersView() {
+  spinner('usersSpinner', true);
+  try {
+    const users = await api('GET', '/auth/users');
+    renderUsers(users);
+  } catch (err) {
+    showToast('Users: ' + err.message);
+  } finally {
+    spinner('usersSpinner', false);
+  }
+}
+
+async function loadPlansView() {
+  spinner('plansSpinner', true);
+  try {
+    const plansRes = await api('GET', '/plans/all');
+    renderPlans(plansRes.data || plansRes, document.getElementById('plansContainer'));
+  } catch (err) {
+    showToast('Plans: ' + err.message);
+  } finally {
+    spinner('plansSpinner', false);
+  }
+}
+
+function renderUsers(users) {
+  const container = document.getElementById('usersContainer');
+  if (!users || !users.length) {
+    container.innerHTML = '<div style="color:var(--text-muted);font-size:0.9rem">No users found.</div>';
+    return;
+  }
+  const tierLabels = { 1: 'Session only', 2: 'Preferences', 3: 'History', 4: 'Full access' };
+  const tierTips = {
+    1: 'Current conversation only. Nothing persisted.',
+    2: 'Preferences stored across sessions. Sensitive data encrypted.',
+    3: 'Past interactions retained with 30-day TTL.',
+    4: 'Real-time data fetched on-demand from external APIs.',
+  };
+  let html = '<table class="user-table"><thead><tr><th>Name</th><th>Email</th><th style="position:relative">Access '
+    + '<span class="tier-info-icon" tabindex="0">i</span>'
+    + '<div class="tier-info-popup">';
+  for (const k of [1, 2, 3, 4]) {
+    html += '<div class="tier-info-row"><strong>' + esc(tierLabels[k]) + '</strong><br>' + esc(tierTips[k]) + '</div>';
+  }
+  html += '</div></th></tr></thead><tbody>';
+  users.forEach(u => {
+    const name = u.full_name || u.email.split('@')[0];
+    const tier = u.context_tier || 1;
+    const tip = tierTips[tier] || '';
+    html += '<tr>';
+    html += '<td>' + esc(name) + '</td>';
+    html += '<td class="user-email">' + esc(u.email) + '</td>';
+    html += '<td><span class="tier-pill t' + tier + '" title="' + esc(tip) + '">' + esc(tierLabels[tier] || 'Tier ' + tier) + '</span></td>';
+    html += '</tr>';
+  });
+  html += '</tbody></table>';
+  container.innerHTML = html;
+}
+
+function renderPlans(plans, container) {
+  if (!container) container = document.getElementById('plansContainer');
+  if (!plans || !plans.length) {
+    container.innerHTML = '<div style="color:var(--text-muted);font-size:0.9rem">No executed plans yet.</div>';
+    return;
+  }
+  container.innerHTML = '';
+  plans.forEach((p, idx) => {
+    const card = document.createElement('div');
+    card.className = 'plan-card';
+    card.onclick = function () { card.classList.toggle('expanded'); };
+
+    const isSuccess = p.success === true;
+    const icon = p.success === null || p.success === undefined ? '\u2796' : (isSuccess ? '\u2705' : '\u274C');
+    const intentLabel = (p.intent_type || 'unknown').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    const dateStr = p.execution_start ? _formatDateTimeShort(p.execution_start) : (p.stored_at ? _formatDateTimeShort(p.stored_at) : '');
+
+    let headerHtml = '<div class="plan-card-header">';
+    headerHtml += '<span style="font-size:1.2rem">' + icon + '</span>';
+    headerHtml += '<div style="flex:1"><div style="font-weight:500">' + esc(intentLabel) + '</div>';
+    headerHtml += '<div style="font-size:0.82rem;color:var(--text-muted)">' + esc(dateStr);
+    if (p.step_count) headerHtml += ' &middot; ' + p.step_count + ' steps';
+    headerHtml += '</div></div></div>';
+
+    let bodyHtml = '<div class="plan-card-body">';
+    const ctxData = p.context_data || {};
+    const stepKeys = Object.keys(ctxData).filter(k => k.startsWith('step_')).sort((a, b) => parseInt(a.split('_')[1]) - parseInt(b.split('_')[1]));
+    if (stepKeys.length) {
+      bodyHtml += '<div class="timeline">';
+      stepKeys.forEach(key => {
+        const stepData = ctxData[key];
+        const status = stepData.status || 'unknown';
+        const cls = status === 'completed' ? 'done' : (status === 'failed' ? '' : '');
+        const role = stepData.role || '';
+        const title = role ? _humanizeRole(role, stepData.uses || '') : key.replace('_', ' ');
+        const explanation = _getRoleExplanation(role);
+        const badge = _toolBadge(stepData.uses || '');
+        bodyHtml += '<div class="timeline-step ' + cls + '">';
+        bodyHtml += '<div class="step-title">' + esc(title) + (badge ? ' ' + badge : '') + '</div>';
+        bodyHtml += '<div class="step-desc">' + esc(_humanizeStatus(status));
+        if (stepData.latency_ms) bodyHtml += ' &middot; ' + stepData.latency_ms + 'ms';
+        bodyHtml += '</div>';
+        if (explanation) bodyHtml += '<div class="role-explain">' + esc(explanation) + '</div>';
+        bodyHtml += '</div>';
+      });
+      bodyHtml += '</div>';
+    } else {
+      // No step-level data — show summary info only
+      if (p.total_steps) {
+        bodyHtml += '<div style="font-size:0.88rem;color:var(--text-muted)">Steps: ' + p.total_steps;
+        if (p.failed_step != null) bodyHtml += ' (failed at step ' + p.failed_step + ')';
+        bodyHtml += '</div>';
+      }
+      if (p.error_type) {
+        bodyHtml += '<div style="font-size:0.88rem;color:var(--text-muted);margin-top:4px">Error: ' + esc(p.error_type) + '</div>';
+      }
+      if (p.execution_start && p.execution_end) {
+        const dur = Math.round((new Date(p.execution_end) - new Date(p.execution_start)) / 1000);
+        bodyHtml += '<div style="font-size:0.82rem;color:var(--text-muted);margin-top:4px">Duration: ' + dur + 's</div>';
+      }
+    }
+    bodyHtml += '</div>';
+
+    card.innerHTML = headerHtml + bodyHtml;
+    container.appendChild(card);
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Integrations                                                        */
+/* ------------------------------------------------------------------ */
+async function loadIntegrations() {
+  spinner('integSpinner', true);
+  const grid = document.getElementById('integGrid');
+  grid.innerHTML = '';
+  try {
+    // Fetch user connections and available providers in parallel
+    const [connRes, provRes] = await Promise.allSettled([
+      api('GET', '/api/integrations'),
+      api('GET', '/api/integrations/available'),
+    ]);
+
+    const connections = connRes.status === 'fulfilled' ? (connRes.value.connections || []) : [];
+    const availableProviders = provRes.status === 'fulfilled' ? (provRes.value.providers || []) : [];
+
+    // Build a connected map
+    const connMap = {};
+    connections.forEach(c => { connMap[c.provider_name.toLowerCase()] = c; });
+
+    // Merge: show all known tools + any additional from available providers
+    const allKeys = new Set(Object.keys(TOOL_DEFS));
+    availableProviders.forEach(p => {
+      const key = _canonicalTool(p);
+      if (key) allKeys.add(key);
+    });
+
+    if (allKeys.size === 0) {
+      grid.innerHTML = '<div style="color:var(--text-muted);font-size:0.9rem">No integrations available.</div>';
+      return;
+    }
+
+    allKeys.forEach(key => {
+      const def = TOOL_DEFS[key] || { label: key, color: '#888', bg: '#222', desc: '', svg: '', bigSvg: '' };
+      // Check connection status — try multiple name formats
+      const conn = connMap[key] || connMap[def.label.toLowerCase()] || connMap[def.label.toLowerCase().replace(/\s/g, '')];
+      const isConnected = conn ? conn.is_connected : false;
+      const connDate = conn && conn.connected_at ? _formatDateTimeShort(conn.connected_at) : null;
+
+      const card = document.createElement('div');
+      card.className = 'integ-card' + (isConnected ? ' connected' : '');
+
+      let html = '<div class="integ-card-head">';
+      html += '<div class="integ-card-icon" style="background:' + def.bg + '">' + (def.bigSvg || def.svg) + '</div>';
+      html += '<div><div class="integ-card-name">' + esc(def.label) + '</div>';
+      html += '<div class="integ-card-status">';
+      if (isConnected) {
+        html += '<span style="color:var(--success)">Connected</span>';
+        if (connDate) html += '<span style="color:var(--text-muted);font-size:0.78rem"> &middot; ' + esc(connDate) + '</span>';
+      } else {
+        html += '<span style="color:var(--text-muted)">Not connected</span>';
+      }
+      html += '</div></div></div>';
+      html += '<div class="integ-card-desc">' + esc(def.desc) + '</div>';
+
+      if (isConnected) {
+        html += '<button class="btn btn-danger" onclick="disconnectProvider(\'' + esc(key) + '\')">Disconnect</button>';
+      } else {
+        html += '<button class="btn btn-primary" onclick="connectProvider(\'' + esc(key) + '\')">Connect</button>';
+      }
+
+      card.innerHTML = html;
+      grid.appendChild(card);
+    });
+  } catch (err) {
+    grid.innerHTML = '<div style="color:var(--text-muted);font-size:0.9rem">Unable to load integrations.</div>';
+    showToast('Integrations: ' + err.message);
+  } finally {
+    spinner('integSpinner', false);
+  }
+}
+
+async function connectProvider(providerName) {
+  try {
+    const data = await api('POST', '/api/integrations/connect', { provider_name: providerName });
+    if (data.redirect_url) {
+      window.open(data.redirect_url, '_blank', 'width=600,height=700');
+      showToast('Complete the connection in the popup window', 'success');
+    } else {
+      showToast('Connection initiated', 'success');
+    }
+    // Reload after a short delay to check status
+    setTimeout(() => loadIntegrations(), 3000);
+  } catch (err) {
+    showToast(err.message);
+  }
+}
+
+async function disconnectProvider(providerName) {
+  try {
+    await api('DELETE', '/api/integrations/' + encodeURIComponent(providerName));
+    showToast('Disconnected', 'success');
+    loadIntegrations();
+  } catch (err) {
+    showToast(err.message);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Audit                                                               */
+/* ------------------------------------------------------------------ */
+let auditNextCursor = null;
+
+const AUDIT_TYPE_CONFIG = {
+  execution_started:    { label: 'Execution Started',    icon: '\u25B6\uFE0F', cls: 'type-success' },
+  step_completed:       { label: 'Step Completed',       icon: '\u2705',       cls: 'type-success' },
+  step_failed:          { label: 'Step Failed',          icon: '\u274C',       cls: 'type-fail' },
+  execution_completed:  { label: 'Execution Completed',  icon: '\u2705',       cls: 'type-success' },
+  execution_failed:     { label: 'Execution Failed',     icon: '\u274C',       cls: 'type-fail' },
+  approval_granted:     { label: 'Approval Granted',     icon: '\uD83D\uDD13', cls: 'type-approval' },
+  approval_expired:     { label: 'Approval Expired',     icon: '\u23F0',       cls: 'type-fail' },
+  policy_attestation:   { label: 'Policy Attestation',   icon: '\uD83D\uDCDC', cls: 'type-policy' },
+  policy_denial:        { label: 'Policy Denial',        icon: '\uD83D\uDEAB', cls: 'type-policy' },
+  execution_stuck:      { label: 'Execution Stuck',      icon: '\u26A0\uFE0F', cls: 'type-fail' },
+  execution_timeout:    { label: 'Execution Timeout',    icon: '\u23F1\uFE0F', cls: 'type-fail' },
+};
+
+async function loadAuditView() {
+  auditNextCursor = null;
+  spinner('auditSpinner', true);
+  document.getElementById('auditContainer').innerHTML = '';
+  document.getElementById('auditLoadMore').style.display = 'none';
+  try {
+    let path = '/audit/events?limit=50';
+    const typeFilter = document.getElementById('auditTypeFilter').value;
+    const planFilter = document.getElementById('auditPlanFilter').value.trim();
+    if (typeFilter) path += '&event_type=' + encodeURIComponent(typeFilter);
+    if (planFilter) path += '&plan_id=' + encodeURIComponent(planFilter);
+    const data = await api('GET', path);
+    renderAuditEvents(data.events || [], false);
+    auditNextCursor = data.next_cursor || null;
+    if (data.total_count != null) {
+      document.getElementById('auditContainer').insertAdjacentHTML('afterbegin',
+        '<div class="audit-count">' + data.total_count + ' event' + (data.total_count !== 1 ? 's' : '') + ' found</div>');
+    }
+    document.getElementById('auditLoadMore').style.display = auditNextCursor ? '' : 'none';
+  } catch (err) { showToast('Audit: ' + err.message); }
+  finally { spinner('auditSpinner', false); }
+}
+
+async function loadMoreAudit() {
+  if (!auditNextCursor) return;
+  spinner('auditSpinner', true);
+  try {
+    let path = '/audit/events?limit=50&cursor=' + encodeURIComponent(auditNextCursor);
+    const typeFilter = document.getElementById('auditTypeFilter').value;
+    const planFilter = document.getElementById('auditPlanFilter').value.trim();
+    if (typeFilter) path += '&event_type=' + encodeURIComponent(typeFilter);
+    if (planFilter) path += '&plan_id=' + encodeURIComponent(planFilter);
+    const data = await api('GET', path);
+    renderAuditEvents(data.events || [], true);
+    auditNextCursor = data.next_cursor || null;
+    document.getElementById('auditLoadMore').style.display = auditNextCursor ? '' : 'none';
+  } catch (err) { showToast('Audit: ' + err.message); }
+  finally { spinner('auditSpinner', false); }
+}
+
+function renderAuditEvents(events, append) {
+  const container = document.getElementById('auditContainer');
+  if (!append) {
+    const countDiv = container.querySelector('.audit-count');
+    container.innerHTML = '';
+    if (countDiv) container.appendChild(countDiv);
+  }
+  if (!events.length && !append) {
+    container.insertAdjacentHTML('beforeend', '<div style="color:var(--text-muted);font-size:0.9rem">No audit events found.</div>');
+    return;
+  }
+  events.forEach(evt => {
+    const cfg = AUDIT_TYPE_CONFIG[evt.event_type] || { label: evt.event_type, icon: '', cls: '' };
+    const div = document.createElement('div');
+    div.className = 'audit-event ' + cfg.cls;
+    div.onclick = function() { div.classList.toggle('expanded'); };
+
+    let html = '<div class="audit-event-header">';
+    html += '<span style="font-size:1rem">' + cfg.icon + '</span>';
+    html += '<span class="audit-event-type">' + esc(cfg.label) + '</span>';
+    html += '<span class="audit-event-time">' + esc(_formatDateTimeShort(evt.created_at)) + '</span>';
+    html += '</div>';
+
+    const meta = [];
+    if (evt.plan_id) meta.push('Plan: ' + evt.plan_id.substring(0, 10) + '...');
+    if (evt.step_number != null) meta.push('Step ' + evt.step_number);
+    if (evt.user_id) meta.push('User: ' + evt.user_id.substring(0, 10) + '...');
+    if (meta.length) html += '<div class="audit-event-meta">' + esc(meta.join(' \u00B7 ')) + '</div>';
+
+    const dataStr = evt.event_data && Object.keys(evt.event_data).length
+      ? JSON.stringify(evt.event_data, null, 2)
+      : 'No additional data';
+    html += '<div class="audit-event-data">' + esc(dataStr) + '</div>';
+
+    div.innerHTML = html;
+    container.appendChild(div);
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Settings / Preferences                                              */
+/* ------------------------------------------------------------------ */
+function decodeJwt(t) {
+  try { const payload = t.split('.')[1]; return JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/'))); }
+  catch { return null; }
+}
+
+function loadProfile() {
+  const claims = decodeJwt(token);
+  if (!claims) return;
+  const dl = document.getElementById('profileInfo');
+  dl.innerHTML =
+    '<dt>Email</dt><dd>' + esc(claims.email || 'N/A') + '</dd>' +
+    '<dt>User ID</dt><dd style="font-size:0.8rem">' + esc(claims.sub || 'N/A') + '</dd>';
+  const sel = document.getElementById('tierSelect');
+  if (sel) sel.value = String(claims.context_tier || 1);
+}
+
+async function updateContextTier() {
+  const newTier = parseInt(document.getElementById('tierSelect').value, 10);
+  try {
+    const data = await api('PATCH', '/auth/profile', { context_tier: newTier });
+    token = data.access_token;
+    sessionStorage.setItem('jwt', token);
+    showToast('Updated', 'success');
+    loadProfile(); loadPreferences();
+  } catch (err) { showToast(err.message); }
+}
+
+async function loadPreferences() {
+  const claims = decodeJwt(token);
+  if (!claims || !claims.sub) return;
+  spinner('prefSpinner', true);
+  try {
+    const data = await api('GET', '/preferences/' + claims.sub + '?include_defaults=false');
+    renderPreferences(Array.isArray(data) ? data : (data.data || []));
+  } catch (err) {
+    document.getElementById('prefList').innerHTML = '<div style="color:var(--text-muted);font-size:0.9rem">Unable to load preferences.</div>';
+  } finally { spinner('prefSpinner', false); }
+}
+
+function renderPreferences(items) {
+  const container = document.getElementById('prefList');
+  if (!items.length) { container.innerHTML = '<div style="color:var(--text-muted);font-size:0.9rem">No preferences set.</div>'; return; }
+  container.innerHTML = '';
+  items.forEach(p => {
+    const row = document.createElement('div');
+    row.className = 'pref-row';
+    row.innerHTML =
+      '<span class="pref-key">' + esc(p.preference_key || p.key) + '</span>' +
+      '<span class="pref-value">' + esc(p.sensitive ? '******' : String(p.preference_value ?? p.value ?? '')) + '</span>' +
+      '<button class="btn btn-danger" onclick="deletePreference(\'' + esc(p.preference_key || p.key) + '\')">Delete</button>';
+    container.appendChild(row);
+  });
+}
+
+async function setPreference() {
+  const claims = decodeJwt(token);
+  if (!claims || !claims.sub) { showToast('Not signed in'); return; }
+  const key = document.getElementById('prefKey').value;
+  if (!key) { showToast('Please select a preference'); return; }
+  const value = document.getElementById('prefValue').value.trim();
+  if (!value) { showToast('Please enter a value'); return; }
+  try {
+    await api('POST', '/preferences/' + claims.sub, {
+      preference_key: key, preference_value: value,
+      sensitive: document.getElementById('prefSensitive').checked,
+    });
+    document.getElementById('prefValue').value = '';
+    document.getElementById('prefSensitive').checked = false;
+    showToast('Saved', 'success');
+    await loadPreferences();
+  } catch (err) { showToast(err.message); }
+}
+
+async function deletePreference(key) {
+  const claims = decodeJwt(token);
+  if (!claims || !claims.sub) return;
+  try {
+    await api('DELETE', '/preferences/' + claims.sub + '/' + key);
+    showToast('Deleted', 'success');
+    await loadPreferences();
+  } catch (err) { showToast(err.message); }
+}
+
+/* ------------------------------------------------------------------ */
+/* Init                                                                */
+/* ------------------------------------------------------------------ */
+if (token) { showView('chatView'); } else { showView('authView'); }
+</script>
+</body>
+</html>

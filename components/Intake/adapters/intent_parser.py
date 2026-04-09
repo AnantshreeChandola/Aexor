@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from datetime import datetime
 from typing import Protocol, runtime_checkable
 
 from components.Intake.domain.models import (
@@ -35,6 +36,19 @@ SYSTEM_PROMPT = (
     "- constraints: user preferences or limits (e.g. {'prefer_morning': true}).\n"
     "- If intent cannot be determined, return intent: null.\n"
     "- If context is provided, merge: new values override old.\n"
+    "- DATE/TIME RESOLUTION: When the user provides relative dates or times "
+    "(e.g. 'Friday', 'tomorrow', 'next week', '2pm'), resolve them to "
+    "absolute ISO 8601 datetime strings using the current date/time provided "
+    "in the prompt context. For example, if today is Wednesday 2026-04-08 and "
+    "the user says 'Friday 2:00 am', resolve to '2026-04-10T02:00:00'. "
+    "Always use the user's timezone if provided. Never leave dates as "
+    "relative strings like 'Friday' or 'tomorrow'.\n"
+    "- IMPORTANT: If pending_suggestions is provided in the context, it means "
+    "the system previously suggested a value for an entity (e.g. an email). "
+    "If the user confirms (says 'yes', 'correct', 'that's right', etc.), "
+    "emit the suggested value as the entity value — NOT the word 'yes'. "
+    'For example, if pending_suggestions has {"attendee_email": "alice@x.com"} '
+    'and the user says \'yes\', return {"attendee_email": "alice@x.com"}.\n'
     "- Return ONLY valid JSON, no explanation."
 )
 
@@ -47,6 +61,7 @@ class IntentParser(Protocol):
         self,
         message: str,
         context: Session | None = None,
+        tz: str = "UTC",
     ) -> ParseResult: ...
 
 
@@ -62,7 +77,7 @@ class LLMBasedParser:
         self._llm = llm_adapter
         self._model = model or os.environ.get(
             "INTAKE_PARSER_MODEL",
-            "claude-haiku-4-5-20251001",
+            "claude-sonnet-4-5-20250929",
         )
         self._max_tokens = max_tokens
 
@@ -70,9 +85,10 @@ class LLMBasedParser:
         self,
         message: str,
         context: Session | None = None,
+        tz: str = "UTC",
     ) -> ParseResult:
         """Extract intent, entities, constraints from a user message."""
-        user_prompt = self._build_user_prompt(message, context)
+        user_prompt = self._build_user_prompt(message, context, tz)
 
         try:
             raw = await self._llm.generate(
@@ -89,14 +105,33 @@ class LLMBasedParser:
             raise IntentParserError(str(exc)) from exc
 
     @staticmethod
-    def _build_user_prompt(message: str, context: Session | None) -> str:
-        parts = [f"User message: {message}"]
+    def _build_user_prompt(message: str, context: Session | None, tz: str = "UTC") -> str:
+        parts: list[str] = []
+
+        # Current date/time context for resolving relative dates
+        now = datetime.now()
+        parts.append(f"Current date/time: {now.strftime('%A, %Y-%m-%d %H:%M')} (timezone: {tz})")
+
+        if context and context.turns:
+            # Replay conversation history so the LLM sees the full
+            # back-and-forth — just like Claude Chat would.
+            parts.append("\nConversation so far:")
+            for turn in context.turns:
+                parts.append(f"  User: {turn.message}")
+                if turn.assistant_response:
+                    parts.append(f"  Assistant: {turn.assistant_response}")
+
+        # Current state
         if context and (context.detected_intent or context.extracted_entities):
-            parts.append("\nPrior context:")
+            parts.append("\nCurrent state:")
             if context.detected_intent:
                 parts.append(f"  detected_intent: {context.detected_intent}")
             if context.extracted_entities:
                 parts.append(f"  extracted_entities: {json.dumps(context.extracted_entities)}")
+            if context.contact_suggestions:
+                parts.append(f"  pending_suggestions: {json.dumps(context.contact_suggestions)}")
+
+        parts.append(f"\nNew user message: {message}")
         return "\n".join(parts)
 
     @staticmethod

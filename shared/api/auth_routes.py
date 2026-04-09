@@ -13,11 +13,11 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from jose import jwt
 from passlib.context import CryptContext
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,7 +30,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 JWT_SECRET: str = os.environ.get("JWT_SECRET", "")
 JWT_ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "60"))
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "1440"))
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -52,6 +52,7 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str
     full_name: str | None = None
+    context_tier: int = Field(default=1, ge=1, le=4)
 
 
 class TokenResponse(BaseModel):
@@ -60,6 +61,13 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     expires_in: int  # seconds
+
+
+class UpdateProfileRequest(BaseModel):
+    """Request body for updating user profile."""
+
+    context_tier: int | None = Field(default=None, ge=1, le=4)
+    full_name: str | None = None
 
 
 class UserResponse(BaseModel):
@@ -120,6 +128,29 @@ async def get_db_session() -> AsyncIterator[AsyncSession]:
 # --- Routes ---
 
 
+@router.get("/users", response_model=list[UserResponse])
+async def list_users(
+    session: AsyncSession = Depends(get_db_session),
+) -> list[UserResponse]:
+    """List all active (non-deleted) users. Demo/admin endpoint."""
+    stmt = (
+        select(UserTable)
+        .where(UserTable.deleted_at.is_(None))
+        .order_by(UserTable.created_at.desc())
+    )
+    result = await session.execute(stmt)
+    users = result.scalars().all()
+    return [
+        UserResponse(
+            user_id=u.user_id,
+            email=u.email,
+            full_name=u.full_name,
+            context_tier=u.context_tier,
+        )
+        for u in users
+    ]
+
+
 @router.post(
     "/register",
     response_model=UserResponse,
@@ -155,6 +186,7 @@ async def register(
         email=body.email,
         password_hash=hashed,
         full_name=body.full_name,
+        context_tier=body.context_tier,
     )
     session.add(user)
     await session.commit()
@@ -216,6 +248,60 @@ async def login(
     logger.info(
         "Issued token",
         extra={"user_id": str(user.user_id), "email": user.email},
+    )
+
+    return TokenResponse(
+        access_token=token,
+        token_type="bearer",
+        expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    )
+
+
+@router.patch("/profile", response_model=TokenResponse)
+async def update_profile(
+    body: UpdateProfileRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+) -> TokenResponse:
+    """
+    Update authenticated user's profile and return a fresh JWT.
+
+    Allows updating context_tier and full_name.
+    Returns a new JWT so the client immediately reflects updated claims.
+    """
+    user_id = request.state.user_id
+
+    stmt = select(UserTable).where(
+        UserTable.user_id == user_id,
+        UserTable.deleted_at.is_(None),
+    )
+    result = await session.execute(stmt)
+    user = result.scalar_one_or_none()
+
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    if body.context_tier is not None:
+        user.context_tier = body.context_tier
+    if body.full_name is not None:
+        user.full_name = body.full_name
+
+    await session.commit()
+    await session.refresh(user)
+
+    # Issue a fresh JWT with updated claims
+    token = JWTService.create_access_token(
+        user_id=user.user_id,
+        email=user.email,
+        context_tier=user.context_tier,
+    )
+
+    logger.info(
+        "Profile updated",
+        extra={"user_id": str(user.user_id), "context_tier": user.context_tier},
     )
 
     return TokenResponse(

@@ -48,14 +48,14 @@ class PreviewService:
         mcp_client: MCPClient,
         checker: PreviewabilityChecker,
         cache: PreviewCacheAdapter,
-        registry_service: Any,
+        tool_catalog: Any,
     ) -> None:
         self._dag_resolver = dag_resolver
         self._template_resolver = template_resolver
         self._mcp = mcp_client
         self._checker = checker
         self._cache = cache
-        self._registry = registry_service
+        self._tool_catalog = tool_catalog
 
     # ------------------------------------------------------------------
     # Public API
@@ -177,8 +177,11 @@ class PreviewService:
             classification, reason = await self._classify_step(step, deferred_steps, failed_steps)
 
             if classification == "deferred":
+                result_data = None
+                if reason == "write_action":
+                    result_data = {"summary": self._build_action_summary(step)}
                 step_results[step.step] = PreviewStepResult(
-                    step=step.step, status="deferred", reason=reason
+                    step=step.step, status="deferred", result=result_data, reason=reason
                 )
                 deferred_steps.add(step.step)
                 logger.info(
@@ -275,10 +278,14 @@ class PreviewService:
         if step.gate_id is not None:
             return ("deferred", "gated")
 
-        # 5. Check previewability via PluginRegistry
+        # 5. Check previewability via ToolCatalog
         previewable = await self._checker.is_previewable(step.uses, step.call)
         if not previewable:
             return ("deferred", "non_previewable")
+
+        # 5.5 Write actions — defer (don't execute mutations in preview)
+        if self._checker.is_write_action(step.uses, step.call):
+            return ("deferred", "write_action")
 
         # 6. Previewable -- dispatch via MCP
         return ("dispatch", None)
@@ -317,18 +324,17 @@ class PreviewService:
         # Add dry_run flag
         resolved_args["dry_run"] = True
 
-        # Resolve tool info from PluginRegistry
-        tool = await self._registry.get_tool(step.uses)
-        mcp_server = getattr(tool, "mcp_server", step.uses)
-        op = tool.operations.get(step.call)
-        mcp_tool = getattr(op, "n8n_node", step.call) if op else step.call
+        # Resolve tool info from ToolCatalog
+        tool_def = self._tool_catalog.get_tool(step.uses)
+        mcp_server = tool_def.server_name if tool_def else step.uses
+        mcp_tool = step.uses  # In MCP model, tool name IS the operation
 
-        # Invoke MCP (no credentials -- read-only)
+        # Invoke MCP — pass user_id so Composio resolves the per-user account
         result = await self._mcp.invoke(
             server=mcp_server,
             tool=mcp_tool,
             args=resolved_args,
-            credentials=None,
+            credentials={"user_id": request.user_id},
             timeout_s=step.timeout_s,
         )
 
@@ -354,6 +360,17 @@ class PreviewService:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_action_summary(step: PlanStep) -> str:
+        """Build human-readable summary for a deferred write action."""
+        parts = [f"Action: {step.uses}"]
+        if step.args:
+            for key, value in step.args.items():
+                if key == "dry_run":
+                    continue
+                parts.append(f"  {key}: {value}")
+        return "\n".join(parts)
 
     @staticmethod
     def _to_exec_step_results(
@@ -388,7 +405,7 @@ class PreviewService:
 
 def create_preview_service(
     mcp_client: MCPClient,
-    registry_service: Any,
+    tool_catalog: Any,
     redis_client: Any | None = None,
 ) -> PreviewService:
     """Create PreviewService with all dependencies.
@@ -399,7 +416,7 @@ def create_preview_service(
     dag_resolver = DAGResolver()
     template_resolver = TemplateResolver()
     cache = PreviewCacheAdapter(redis_client, ttl_s=ttl_s)
-    checker = PreviewabilityChecker(registry_service)
+    checker = PreviewabilityChecker(tool_catalog)
 
     return PreviewService(
         dag_resolver=dag_resolver,
@@ -407,5 +424,5 @@ def create_preview_service(
         mcp_client=mcp_client,
         checker=checker,
         cache=cache,
-        registry_service=registry_service,
+        tool_catalog=tool_catalog,
     )
