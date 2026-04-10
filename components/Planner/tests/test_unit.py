@@ -212,6 +212,52 @@ class TestPromptBuilder:
         prompt = self.builder.build_user_prompt(long_intent, [], [])
         assert "[truncated]" in prompt
 
+    # -- T1100/T1101: Trust boundary prompt builder additions --
+
+    def test_system_prompt_contains_guard_role(self):
+        """Guard role should be listed in schema and role assignments."""
+        prompt = self.builder.build_system_prompt()
+        assert "Guard" in prompt
+
+    def test_system_prompt_contains_sanitizer_type(self):
+        """Sanitizer step type should be listed in schema and step types."""
+        prompt = self.builder.build_system_prompt()
+        assert "sanitizer" in prompt
+
+    def test_system_prompt_contains_trust_filter_scan(self):
+        """trust_filter.scan pseudo-tool should be mentioned."""
+        prompt = self.builder.build_system_prompt()
+        assert "trust_filter.scan" in prompt
+
+    def test_system_prompt_contains_sanitizer_insertion_rule(self):
+        """Rule 21 instructs mandatory sanitizer insertion."""
+        prompt = self.builder.build_system_prompt()
+        assert "MANDATORY SANITIZER STEPS" in prompt
+        assert "trust_filter.scan" in prompt
+        assert "load_bearing_fields" in prompt
+
+    def test_system_prompt_contains_tier1_reasoner_rules(self):
+        """Rule 22 describes Tier 1 reasoner requirements."""
+        prompt = self.builder.build_system_prompt()
+        assert "output_schema_ref" in prompt
+        assert "slot_proposal_v1" in prompt
+
+    def test_system_prompt_contains_sanitizer_example_pattern(self):
+        """Rule 24 shows example pipeline patterns."""
+        prompt = self.builder.build_system_prompt()
+        assert "sanitizer(step 2, context_from=[1])" in prompt
+        assert "reasoner(step 3, context_from=[2])" in prompt
+
+    def test_system_prompt_pure_api_plans_exempt(self):
+        """Prompt should note that pure-API plans do not need sanitizers."""
+        prompt = self.builder.build_system_prompt()
+        assert "Pure-API plans" in prompt
+
+    def test_system_prompt_updated_plan_structure_pattern(self):
+        """Rule 12 mentions Guard step between Fetcher and Reasoner."""
+        prompt = self.builder.build_system_prompt()
+        assert "Guard step" in prompt
+
 
 # ===========================
 # T503: Plan Validator Tests
@@ -518,6 +564,7 @@ class TestPlanValidator:
 
     @pytest.mark.asyncio
     async def test_layer3_valid_reasoner_step_passes(self):
+        """Reasoner step with proper sanitizer in between passes all rules."""
         import json
         from datetime import datetime
 
@@ -540,18 +587,33 @@ class TestPlanValidator:
                 {
                     "step": 2,
                     "mode": "interactive",
+                    "role": "Guard",
+                    "type": "sanitizer",
+                    "uses": "trust_filter.scan",
+                    "call": "scan",
+                    "args": {},
+                    "after": [1],
+                    "context_from": [1],
+                    "timeout_s": 30,
+                    "dry_run": True,
+                },
+                {
+                    "step": 3,
+                    "mode": "interactive",
                     "role": "Reasoner",
                     "uses": "system.echo",
                     "call": "analyze",
                     "type": "llm_reasoning",
+                    "trust_level": "untrusted_input",
                     "args": {},
-                    "after": [1],
-                    "context_from": [1],
+                    "after": [2],
+                    "context_from": [2],
                     "timeout_s": 60,
                     "dry_run": True,
                     "policy_ref": "policy-flight-analysis",
                     "reasoning_config": {
                         "system_prompt_ref": "reasoner.flight_analysis",
+                        "output_schema_ref": "slot_proposal_v1",
                     },
                 },
             ],
@@ -562,10 +624,12 @@ class TestPlanValidator:
                 "canonical_hash": "a" * 64,
             },
         }
-        plan = await self.validator.validate(json.dumps(data), SAMPLE_INTENT, 1, self.tool_ids)
+        plan = await self.validator.validate(
+            json.dumps(data), SAMPLE_INTENT, 1, self.tool_ids
+        )
         assert isinstance(plan, Plan)
-        assert plan.graph[1].role == "Reasoner"
-        assert plan.graph[1].type == "llm_reasoning"
+        assert plan.graph[2].role == "Reasoner"
+        assert plan.graph[2].type == "llm_reasoning"
 
     @pytest.mark.asyncio
     async def test_layer3_existing_api_steps_default_type(self):
@@ -579,8 +643,8 @@ class TestPlanValidator:
     # --- v6.1 trust boundary & spawning rules ---
 
     @pytest.mark.asyncio
-    async def test_layer3_trust_boundary_tier2_direct_api_ref_raises(self):
-        """Rule A: Tier 2 Reasoner referencing API step via context_from is rejected."""
+    async def test_layer3_trust_boundary_no_sanitizer_raises(self):
+        """Rule F: llm_reasoning referencing API step without intervening sanitizer is rejected."""
         import json
         from datetime import datetime
 
@@ -630,11 +694,11 @@ class TestPlanValidator:
         with pytest.raises(PlanValidationError) as exc_info:
             await self.validator.validate(json.dumps(data), SAMPLE_INTENT, 1, self.tool_ids)
         assert exc_info.value.layer == "business_rules"
-        assert "trust boundary" in exc_info.value.message.lower()
+        assert "Rule F" in exc_info.value.message
 
     @pytest.mark.asyncio
-    async def test_layer3_trust_boundary_tier1_sanitizer_passes(self):
-        """Rule A: Tier 2 Reasoner referencing Tier 1 sanitizer (not API) passes."""
+    async def test_layer3_trust_boundary_with_sanitizer_passes(self):
+        """Rule F: llm_reasoning referencing API via sanitizer passes."""
         import json
         from datetime import datetime
 
@@ -658,32 +722,46 @@ class TestPlanValidator:
                 {
                     "step": 2,
                     "mode": "interactive",
-                    "role": "Reasoner",
-                    "type": "llm_reasoning",
-                    "trust_level": "untrusted_input",
+                    "role": "Guard",
+                    "type": "sanitizer",
                     "context_from": [1],
-                    "uses": "system.echo",
-                    "call": "sanitize",
+                    "uses": "trust_filter.scan",
+                    "call": "scan",
                     "args": {},
                     "after": [1],
-                    "timeout_s": 60,
+                    "timeout_s": 30,
                     "dry_run": True,
-                    "policy_ref": "policy-sanitize",
-                    "reasoning_config": {
-                        "system_prompt_ref": "sanitize.prompt",
-                    },
                 },
                 {
                     "step": 3,
                     "mode": "interactive",
                     "role": "Reasoner",
                     "type": "llm_reasoning",
-                    "trust_level": "trusted",
+                    "trust_level": "untrusted_input",
                     "context_from": [2],
                     "uses": "system.echo",
                     "call": "analyze",
                     "args": {},
                     "after": [2],
+                    "timeout_s": 60,
+                    "dry_run": True,
+                    "policy_ref": "policy-sanitize",
+                    "reasoning_config": {
+                        "system_prompt_ref": "sanitize.prompt",
+                        "output_schema_ref": "slot_proposal_v1",
+                    },
+                },
+                {
+                    "step": 4,
+                    "mode": "interactive",
+                    "role": "Reasoner",
+                    "type": "llm_reasoning",
+                    "trust_level": "trusted",
+                    "context_from": [3],
+                    "uses": "system.echo",
+                    "call": "plan",
+                    "args": {},
+                    "after": [3],
                     "timeout_s": 60,
                     "dry_run": True,
                     "policy_ref": "policy-analyze",
@@ -699,8 +777,10 @@ class TestPlanValidator:
                 "canonical_hash": "a" * 64,
             },
         }
-        plan = await self.validator.validate(json.dumps(data), SAMPLE_INTENT, 1, self.tool_ids)
-        assert plan.graph[2].trust_level == "trusted"
+        plan = await self.validator.validate(
+            json.dumps(data), SAMPLE_INTENT, 1, self.tool_ids
+        )
+        assert plan.graph[3].trust_level == "trusted"
 
     @pytest.mark.asyncio
     async def test_layer3_no_recursive_spawning_raises(self):
@@ -779,7 +859,7 @@ class TestPlanValidator:
 
     @pytest.mark.asyncio
     async def test_layer3_spawning_step_tool_not_in_plugins_raises(self):
-        """Rule C: Step with can_spawn using tool not in plugins is rejected."""
+        """Rule C: API step with can_spawn using tool not in plugins is rejected."""
         import json
         from datetime import datetime
 
@@ -791,20 +871,16 @@ class TestPlanValidator:
                 {
                     "step": 1,
                     "mode": "interactive",
-                    "role": "Reasoner",
-                    "type": "llm_reasoning",
+                    "role": "Fetcher",
+                    "type": "api",
                     "uses": "google.calendar",
-                    "call": "analyze",
+                    "call": "list_events",
                     "args": {},
                     "after": [],
                     "timeout_s": 60,
                     "dry_run": True,
                     "can_spawn": True,
                     "max_spawned_steps": 3,
-                    "policy_ref": "policy-test",
-                    "reasoning_config": {
-                        "system_prompt_ref": "test.prompt",
-                    },
                 },
             ],
             "constraints": {"scopes": [], "ttl_s": 900, "max_retries": 3},

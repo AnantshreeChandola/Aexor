@@ -76,6 +76,14 @@ class SpawnRequest(BaseModel):
     policy_ref: str | None = Field(
         default=None, description="Explicit policy ID to evaluate against"
     )
+    ancestor_verdicts: dict[int, str] = Field(
+        default_factory=dict,
+        description="Map of upstream sanitizer step number to trust verdict string",
+    )
+    scanner_degraded: bool = Field(
+        default=False,
+        description="True if any upstream sanitizer had scanner_degraded=true",
+    )
 
 
 # ---------------------------------------------------------------------------

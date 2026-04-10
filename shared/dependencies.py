@@ -100,3 +100,8 @@ def get_monitor_service(request: Request) -> Any:
 def get_audit_service(request: Request) -> Any:
     """Get AuditService singleton from app state."""
     return request.app.state.audit_service
+
+
+def get_filter_service(request: Request) -> Any:
+    """Get FilterService singleton from app state."""
+    return request.app.state.filter_service

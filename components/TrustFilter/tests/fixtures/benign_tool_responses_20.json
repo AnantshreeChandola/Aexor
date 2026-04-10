@@ -1,0 +1,204 @@
+[
+  {
+    "id": 1,
+    "description": "Calendar event list",
+    "payload": {
+      "events": [
+        {"summary": "Team standup", "start": "2026-04-08T10:00:00", "end": "2026-04-08T10:30:00", "id": "evt_abc123", "status": "confirmed"},
+        {"summary": "Lunch with Alice", "start": "2026-04-08T12:00:00", "end": "2026-04-08T13:00:00", "id": "evt_def456", "status": "confirmed"}
+      ]
+    }
+  },
+  {
+    "id": 2,
+    "description": "Email metadata",
+    "payload": {
+      "from": "alice@example.com",
+      "to": "bob@example.com",
+      "subject": "Q3 Budget Review",
+      "date": "2026-04-07T15:30:00Z",
+      "message_id": "msg_12345"
+    }
+  },
+  {
+    "id": 3,
+    "description": "Flight search results",
+    "payload": {
+      "flights": [
+        {"airline": "United", "flight_number": "UA123", "departure": "2026-04-10T08:00:00", "arrival": "2026-04-10T11:30:00", "price": 350.00}
+      ]
+    }
+  },
+  {
+    "id": 4,
+    "description": "Contact info",
+    "payload": {
+      "name": "Alice Johnson",
+      "email": "alice.johnson@company.com",
+      "phone": "+1-555-0123",
+      "timezone": "America/Chicago"
+    }
+  },
+  {
+    "id": 5,
+    "description": "System calendar ID with 'system' substring",
+    "payload": {
+      "calendar_id": "system_calendar_primary",
+      "owner_email": "user@company.com",
+      "timezone": "America/New_York"
+    }
+  },
+  {
+    "id": 6,
+    "description": "Free/busy response",
+    "payload": {
+      "busy": [
+        {"start": "2026-04-08T09:00:00Z", "end": "2026-04-08T09:30:00Z"},
+        {"start": "2026-04-08T14:00:00Z", "end": "2026-04-08T15:00:00Z"}
+      ],
+      "timezone": "UTC"
+    }
+  },
+  {
+    "id": 7,
+    "description": "Task list",
+    "payload": {
+      "tasks": [
+        {"task_id": "task_001", "title": "Review PR #42", "due_at": "2026-04-08T17:00:00Z", "status": "pending"},
+        {"task_id": "task_002", "title": "Update documentation", "due_at": "2026-04-09T12:00:00Z", "status": "in_progress"}
+      ]
+    }
+  },
+  {
+    "id": 8,
+    "description": "Weather data",
+    "payload": {
+      "location": "Chicago, IL",
+      "temperature_f": 65,
+      "condition": "Partly cloudy",
+      "forecast_url": "https://weather.com/chicago"
+    }
+  },
+  {
+    "id": 9,
+    "description": "Meeting room availability",
+    "payload": {
+      "rooms": [
+        {"room_id": "room_A", "name": "Conference Room A", "capacity": 10, "available": true},
+        {"room_id": "room_B", "name": "Conference Room B", "capacity": 6, "available": false}
+      ]
+    }
+  },
+  {
+    "id": 10,
+    "description": "User preferences",
+    "payload": {
+      "preferred_meeting_duration": 30,
+      "work_hours_start": "09:00",
+      "work_hours_end": "17:00",
+      "timezone": "America/Chicago",
+      "notification_email": "user@company.com"
+    }
+  },
+  {
+    "id": 11,
+    "description": "Document metadata",
+    "payload": {
+      "doc_id": "doc_789",
+      "title": "Q3 Strategy Document",
+      "created_at": "2026-03-15T10:00:00Z",
+      "modified_at": "2026-04-01T14:30:00Z",
+      "author_email": "manager@company.com"
+    }
+  },
+  {
+    "id": 12,
+    "description": "Notification settings",
+    "payload": {
+      "email_notifications": true,
+      "push_notifications": false,
+      "reminder_minutes_before": 15,
+      "daily_digest_time": "08:00"
+    }
+  },
+  {
+    "id": 13,
+    "description": "Simple string response",
+    "payload": {"result": "Operation completed successfully", "status_code": 200}
+  },
+  {
+    "id": 14,
+    "description": "Empty events list",
+    "payload": {"events": [], "total_count": 0}
+  },
+  {
+    "id": 15,
+    "description": "Calendar with normal description",
+    "payload": {
+      "events": [
+        {
+          "summary": "Project Review",
+          "description": "Review Q3 project milestones and discuss next steps for the team",
+          "start": "2026-04-09T14:00:00",
+          "end": "2026-04-09T15:00:00",
+          "attendees": ["alice@example.com", "bob@example.com"]
+        }
+      ]
+    }
+  },
+  {
+    "id": 16,
+    "description": "Integration status",
+    "payload": {
+      "integration_id": "google_calendar_v3",
+      "connected_at": "2026-01-15T08:00:00Z",
+      "status": "active",
+      "scopes": ["calendar.readonly", "calendar.events"]
+    }
+  },
+  {
+    "id": 17,
+    "description": "Address book entry",
+    "payload": {
+      "contact_id": "c89f1a2b-3c4d-5e6f-7a8b-9c0d1e2f3a4b",
+      "display_name": "Alice Johnson",
+      "email": "alice@example.com",
+      "company": "Acme Corp"
+    }
+  },
+  {
+    "id": 18,
+    "description": "Timezone list",
+    "payload": {
+      "timezones": ["America/Chicago", "America/New_York", "Europe/London", "Asia/Tokyo"],
+      "default": "America/Chicago"
+    }
+  },
+  {
+    "id": 19,
+    "description": "Numeric data response",
+    "payload": {
+      "metrics": {"total_events": 42, "conflicts": 3, "free_hours": 5.5},
+      "period": "2026-04-08"
+    }
+  },
+  {
+    "id": 20,
+    "description": "Deeply nested but benign",
+    "payload": {
+      "data": {
+        "calendar": {
+          "events": [
+            {
+              "id": "evt_nested_001",
+              "details": {
+                "location": "Room 101",
+                "organizer_email": "boss@company.com"
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+]

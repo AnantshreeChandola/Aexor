@@ -69,6 +69,7 @@ class ExecuteService:
         retry_policy: RetryPolicy,
         tracker: Any | None = None,
         audit: Any | None = None,
+        filter_service: Any | None = None,
     ) -> None:
         self._policy = policy_service
         self._tracker = tracker
@@ -83,6 +84,7 @@ class ExecuteService:
         self._dag_resolver = dag_resolver
         self._template_resolver = template_resolver
         self._retry = retry_policy
+        self._filter_service = filter_service
 
     async def _emit_audit(
         self,
@@ -383,6 +385,8 @@ class ExecuteService:
             result = await self._execute_reasoning_step(step, ctx, request)
         elif step.type == "policy_check":
             result = await self._execute_policy_check(step, ctx)
+        elif step.type == "sanitizer":
+            result = await self._execute_sanitizer_step(step, ctx)
         else:
             raise StepExecutionError(step.step, f"Unknown type: {step.type}")
 
@@ -784,8 +788,47 @@ class ExecuteService:
                     },
                 )
 
-        # 6. Fallback: if no recommended_time was extracted, construct one from
-        #    the intent's entities so downstream templates don't fail.
+        # 6. Tier 1 schema validation (FR-025)
+        #    For untrusted_input steps with output_schema_ref, validate
+        #    the parsed output against SCHEMA_REGISTRY.
+        #    On failure: hard fail, no fallback.
+        if (
+            trust == "untrusted_input"
+            and step.reasoning_config
+            and step.reasoning_config.output_schema_ref
+        ):
+            from shared.schemas.reasoner_outputs import (
+                SCHEMA_REGISTRY,
+            )
+
+            schema_ref = step.reasoning_config.output_schema_ref
+            schema_cls = SCHEMA_REGISTRY.get(schema_ref)
+            if schema_cls is not None:
+                parsed = self._extract_json_from_content(
+                    response.get("content", "")
+                )
+                if parsed is None:
+                    raise StepExecutionError(
+                        step.step,
+                        f"Tier 1 schema validation failed: "
+                        f"could not extract JSON for "
+                        f"schema '{schema_ref}'",
+                    )
+                try:
+                    schema_cls.model_validate(parsed)
+                except Exception as exc:
+                    raise StepExecutionError(
+                        step.step,
+                        f"Tier 1 schema validation failed "
+                        f"for '{schema_ref}': {exc}",
+                    ) from exc
+            # If schema_cls is None, plan validator should
+            # have caught this. Continue execution.
+            return response
+
+        # 7. Fallback (Tier 2 only): if no recommended_time
+        #    was extracted, construct one from the intent's
+        #    entities so downstream templates don't fail.
         if "recommended_time" not in response:
             fallback = self._build_reasoner_fallback(ctx.plan.intent)
             if fallback:
@@ -851,6 +894,90 @@ class ExecuteService:
         )
         decision = await self._policy.evaluate_spawn(spawn_req)
         return decision.model_dump()
+
+    async def _execute_sanitizer_step(
+        self, step: PlanStep, ctx: ExecutionContext
+    ) -> dict[str, Any]:
+        """Execute a sanitizer step via TrustFilter (FR-024).
+
+        Invokes filter_service.scan() directly, NOT via MCP dispatch.
+        Propagates trust metadata into ExecutionContext (FR-026).
+        """
+        from components.TrustFilter.domain.errors import (
+            LoadBearingFlaggedError,
+            MalformedInputError,
+            PayloadDepthExceededError,
+            PayloadTooLargeError,
+            TrustFilterError,
+        )
+
+        if self._filter_service is None:
+            raise StepExecutionError(
+                step.step,
+                "FilterService not configured",
+            )
+
+        # Resolve upstream payload from context_from
+        upstream_payload = self._resolve_sanitizer_input(
+            step, ctx
+        )
+        load_bearing = step.args.get(
+            "load_bearing_fields", []
+        )
+        strict = step.args.get("strict_mode", False)
+
+        try:
+            sanitized = await self._filter_service.scan(
+                raw_payload=upstream_payload,
+                load_bearing_fields=load_bearing,
+                strict_mode=strict,
+                plan_id=ctx.plan.plan_id,
+                step_number=step.step,
+                trace_id=ctx.trace_id or "",
+            )
+        except LoadBearingFlaggedError as exc:
+            return {
+                "_error": True,
+                "error_type": exc.error_type,
+                "flagged_field": exc.field_path,
+            }
+        except (
+            PayloadTooLargeError,
+            PayloadDepthExceededError,
+            MalformedInputError,
+        ) as exc:
+            return {
+                "_error": True,
+                "error_type": exc.error_type,
+            }
+        except TrustFilterError as exc:
+            return {
+                "_error": True,
+                "error_type": exc.error_type,
+            }
+
+        # Propagate trust metadata (FR-026)
+        ctx.sanitizer_verdicts[step.step] = (
+            sanitized.trust_verdict
+        )
+        ctx.sanitizer_degraded |= sanitized.scanner_degraded
+
+        return sanitized.model_dump()
+
+    @staticmethod
+    def _resolve_sanitizer_input(
+        step: PlanStep, ctx: ExecutionContext
+    ) -> dict | list | str | None:
+        """Resolve the upstream MCP response for a sanitizer.
+
+        The sanitizer's context_from points to the API step
+        whose result should be scanned.
+        """
+        for ref in step.context_from:
+            sr = ctx.step_results.get(ref)
+            if sr is not None and sr.result is not None:
+                return sr.result
+        return None
 
     # ------------------------------------------------------------------
     # Spawn handling
@@ -1254,6 +1381,7 @@ def create_execute_service(
     credential_vault: Any,
     redis_client: Any,
     tracker: Any | None = None,
+    filter_service: Any | None = None,
 ) -> ExecuteService:
     """Create ExecuteService with all dependencies.
 
@@ -1278,4 +1406,5 @@ def create_execute_service(
         template_resolver=template_resolver,
         retry_policy=retry_policy,
         tracker=tracker,
+        filter_service=filter_service,
     )

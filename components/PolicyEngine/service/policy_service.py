@@ -14,7 +14,11 @@ from datetime import UTC, datetime
 
 import ulid
 
-from shared.schemas.policy import PolicyAttestation, PolicyDecision, PolicyRule
+from shared.schemas.policy import (
+    PolicyAttestation,
+    PolicyDecision,
+    PolicyRule,
+)
 
 from ..adapters.cache import PolicyCacheAdapter
 from ..adapters.db import PolicyDatabaseAdapter
@@ -165,6 +169,22 @@ class PolicyService:
                 violations=violations,
             )
 
+        # Evaluate trust verdicts from ancestor sanitizer steps (FR-028)
+        if request.ancestor_verdicts or request.scanner_degraded:
+            trust_decision = await self.evaluate_trust_verdicts(
+                step_dict={
+                    "step": request.spawning_step,
+                    "role": "",
+                },
+                ancestor_verdicts=request.ancestor_verdicts,
+                scanner_degraded=request.scanner_degraded,
+                policy_rule=rule,
+            )
+            if not trust_decision.allowed:
+                return trust_decision
+            if trust_decision.requires_approval:
+                requires_approval = True
+
         logger.info(
             "evaluate_spawn ALLOWED: plan_id=%s policy_id=%s requires_approval=%s",
             request.plan_id,
@@ -176,6 +196,92 @@ class PolicyService:
             requires_approval=requires_approval,
             reason=f"Approved by policy '{rule.policy_id}' v{rule.version}",
             policy_matched=True,
+        )
+
+    # ------------------------------------------------------------------
+    # Trust verdict evaluation (FR-028, FR-029, FR-030, FR-031)
+    # ------------------------------------------------------------------
+
+    async def evaluate_trust_verdicts(
+        self,
+        step_dict: dict,
+        ancestor_verdicts: dict[int, str],
+        scanner_degraded: bool,
+        policy_rule: PolicyRule | None = None,
+    ) -> PolicyDecision:
+        """Evaluate trust verdicts from ancestor sanitizer steps.
+
+        Args:
+            step_dict: The step being evaluated.
+            ancestor_verdicts: Map of step_num -> verdict string.
+            scanner_degraded: True if any sanitizer was degraded.
+            policy_rule: Optional policy with trust_verdict_rules.
+
+        Returns:
+            PolicyDecision indicating whether approval is needed.
+        """
+        requires_approval = False
+        violations: list[str] = []
+        role = step_dict.get("role", "")
+
+        # FR-029: hardcoded defaults
+        for step_num, verdict in ancestor_verdicts.items():
+            if verdict == "injection":
+                requires_approval = True
+                violations.append(
+                    f"Ancestor step {step_num} has "
+                    f"trust_verdict=injection"
+                )
+
+        if scanner_degraded:
+            requires_approval = True
+            violations.append(
+                "scanner_degraded=true on ancestor sanitizer"
+            )
+
+        # FR-030: configurable rules from policy
+        if policy_rule and policy_rule.trust_verdict_rules:
+            for rule in policy_rule.trust_verdict_rules:
+                if not rule.enabled:
+                    continue
+                if rule.roles and role not in rule.roles:
+                    continue
+                for step_num, verdict in ancestor_verdicts.items():
+                    if verdict == rule.verdict:
+                        if rule.action == "require_approval":
+                            requires_approval = True
+                            violations.append(
+                                f"TrustVerdictRule: verdict="
+                                f"{verdict} on step {step_num}"
+                            )
+                        elif rule.action == "block":
+                            return PolicyDecision(
+                                allowed=False,
+                                requires_approval=False,
+                                reason=(
+                                    f"Blocked by trust verdict "
+                                    f"rule: {verdict} on step "
+                                    f"{step_num}"
+                                ),
+                                violations=violations,
+                            )
+
+        # FR-031: check gate_id
+        if requires_approval:
+            gate_id = step_dict.get("gate_id")
+            if not gate_id:
+                return PolicyDecision(
+                    allowed=False,
+                    requires_approval=True,
+                    reason="requires_approval_but_no_gate",
+                    violations=violations,
+                )
+
+        reason = "; ".join(violations) if violations else "No trust escalation"
+        return PolicyDecision(
+            allowed=True,
+            requires_approval=requires_approval,
+            reason=reason,
         )
 
     # ------------------------------------------------------------------

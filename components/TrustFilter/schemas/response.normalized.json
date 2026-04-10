@@ -1,0 +1,47 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SanitizedPayload",
+  "description": "Shape-preserving sanitized wrapper for MCP tool responses",
+  "type": "object",
+  "required": [
+    "original_shape",
+    "stripped_fields",
+    "trust_verdict",
+    "confidence",
+    "scanner_degraded",
+    "scanner_version",
+    "scanned_at"
+  ],
+  "properties": {
+    "original_shape": {
+      "description": "Original JSON with flagged fields replaced by redaction marker"
+    },
+    "stripped_fields": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Dotted paths of stripped fields"
+    },
+    "trust_verdict": {
+      "type": "string",
+      "enum": ["clean", "suspicious", "injection"]
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+    },
+    "scanner_degraded": {
+      "type": "boolean",
+      "default": false
+    },
+    "scanner_version": {
+      "type": "string",
+      "pattern": "^trust_filter@"
+    },
+    "scanned_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false
+}

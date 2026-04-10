@@ -1,15 +1,19 @@
 """
-Policy Schema — GLOBAL_SPEC §2.3.1, §2.4.1, §2.9
+Policy Schema -- GLOBAL_SPEC SS2.3.1, SS2.4.1, SS2.9
 
 Pydantic models for the PolicyEngine contract: reasoning configuration,
-policy rules, evaluation decisions, and runtime attestations.
+policy rules, evaluation decisions, runtime attestations, and
+trust verdict rules (FR-016).
 
-Used by PolicyEngine, Planner, Signer, PlanWriter, and ExecuteOrchestrator.
+Used by PolicyEngine, Planner, Signer, PlanWriter, ExecuteOrchestrator,
+and TrustFilter.
 """
 
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+
+from shared.schemas.trust import Verdict
 
 
 class ReasoningConfig(BaseModel):
@@ -49,8 +53,33 @@ class ReasoningConfig(BaseModel):
     )
 
 
+class TrustVerdictRule(BaseModel):
+    """Trust verdict escalation rule (FR-016).
+
+    Declares how PolicyEngine should react to a specific verdict
+    on an ancestor sanitizer step.
+    """
+
+    verdict: Verdict = Field(
+        ...,
+        description="Verdict value to match",
+    )
+    action: Literal["require_approval", "block"] = Field(
+        ...,
+        description="Action to take when verdict matches",
+    )
+    roles: list[str] = Field(
+        default_factory=list,
+        description="Optional scope filter by role (empty=all)",
+    )
+    enabled: bool = Field(
+        default=True,
+        description="Whether this rule is active",
+    )
+
+
 class PolicyRule(BaseModel):
-    """Policy definition (GLOBAL_SPEC §2.9).
+    """Policy definition (GLOBAL_SPEC SS2.9).
 
     Defines constraints that the PolicyEngine evaluates against
     plan steps and agent roles at runtime.
@@ -100,6 +129,14 @@ class PolicyRule(BaseModel):
         default=8192,
         ge=256,
         description="Token budget for LLM reasoning under this policy",
+    )
+
+    trust_verdict_rules: list[TrustVerdictRule] = Field(
+        default_factory=list,
+        description=(
+            "Trust verdict escalation rules (FR-016). "
+            "Empty list preserves pre-feature behavior."
+        ),
     )
 
 

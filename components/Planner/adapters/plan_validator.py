@@ -20,6 +20,7 @@ from pydantic import ValidationError
 from components.Planner.domain.models import PlanValidationError
 from shared.schemas.intent import Intent
 from shared.schemas.plan import Plan
+from shared.schemas.reasoner_outputs import SCHEMA_REGISTRY
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,42 @@ class PlanValidator:
 
     def __init__(self) -> None:
         pass
+
+    @staticmethod
+    def _has_intervening_sanitizer(
+        api_step_num: int,
+        reasoning_step: Any,
+        step_by_num: dict[int, Any],
+    ) -> bool:
+        """Check if there is a sanitizer step between an API step
+        and an llm_reasoning step in the context_from chain.
+
+        Walks the reasoning step's context_from looking for a
+        sanitizer whose own context_from includes the api step.
+        """
+        for ref_num in reasoning_step.context_from:
+            ref_step = step_by_num.get(ref_num)
+            if ref_step is None:
+                continue
+            if ref_step.type == "sanitizer":
+                # Check if this sanitizer covers the api step
+                if api_step_num in ref_step.context_from:
+                    return True
+                # Also check transitive: sanitizer depends on
+                # something that depends on the api step
+                visited: set[int] = set()
+                queue = list(ref_step.context_from)
+                while queue:
+                    dep = queue.pop(0)
+                    if dep in visited:
+                        continue
+                    visited.add(dep)
+                    if dep == api_step_num:
+                        return True
+                    dep_step = step_by_num.get(dep)
+                    if dep_step:
+                        queue.extend(dep_step.context_from)
+        return False
 
     async def validate(
         self,
@@ -168,11 +205,14 @@ class PlanValidator:
 
         # Tool existence — API tools must be in the catalog.
         # Exceptions:
-        # - llm_reasoning and policy_check steps don't call tools via MCP
+        # - llm_reasoning, policy_check, and sanitizer steps don't call tools via MCP
         # - Resolver steps use pass-through tool names (e.g. "system.confirm",
         #   "confirm_action") that aren't real MCP tools — the execution engine
         #   handles them as gate-only checkpoints without MCP invocation.
-        plan_tool_ids = {s.uses for s in plan.graph if s.type == "api" and s.role != "Resolver"}
+        plan_tool_ids = {
+            s.uses for s in plan.graph
+            if s.type == "api" and s.role != "Resolver"
+        }
         missing_tools = plan_tool_ids - tool_ids
         if missing_tools:
             raise PlanValidationError(
@@ -325,6 +365,114 @@ class PlanValidator:
                     f"All Booker steps (including spawned) require HITL approval."
                 ),
             )
+
+        # --- Trust boundary rules (§037 FR-017 to FR-021) ---
+
+        # Rule E — Tier 1 reasoner requires output_schema_ref (FR-017, FR-021)
+        for step in plan.graph:
+            if (
+                step.type == "llm_reasoning"
+                and step.trust_level == "untrusted_input"
+                and step.reasoning_config is not None
+            ):
+                ref = step.reasoning_config.output_schema_ref
+                if ref is None:
+                    raise PlanValidationError(
+                        layer="business_rules",
+                        message=(
+                            f"Rule E: Step {step.step} is a Tier 1 "
+                            f"reasoner (untrusted_input) but has "
+                            f"output_schema_ref=null. Tier 1 "
+                            f"reasoners require a schema."
+                        ),
+                    )
+                if ref not in SCHEMA_REGISTRY:
+                    raise PlanValidationError(
+                        layer="business_rules",
+                        message=(
+                            f"Rule E: Step {step.step} has "
+                            f"output_schema_ref='{ref}' which is "
+                            f"not in SCHEMA_REGISTRY. Valid keys: "
+                            f"{sorted(SCHEMA_REGISTRY.keys())}"
+                        ),
+                    )
+
+        # Rule F — API -> LLM reasoning requires intervening sanitizer (FR-018)
+        # Walk context_from chain for each llm_reasoning step.
+        for step in plan.graph:
+            if step.type != "llm_reasoning":
+                continue
+            # Check all context_from references transitively
+            visited: set[int] = set()
+            queue = list(step.context_from)
+            while queue:
+                ref_num = queue.pop(0)
+                if ref_num in visited:
+                    continue
+                visited.add(ref_num)
+                ref_step = step_by_num.get(ref_num)
+                if ref_step is None:
+                    continue
+                if ref_step.type == "api":
+                    # There must be a sanitizer between this
+                    # api step and the current llm_reasoning
+                    if not self._has_intervening_sanitizer(
+                        api_step_num=ref_num,
+                        reasoning_step=step,
+                        step_by_num=step_by_num,
+                    ):
+                        raise PlanValidationError(
+                            layer="business_rules",
+                            message=(
+                                f"Rule F: Step {step.step} "
+                                f"(llm_reasoning) transitively "
+                                f"references api step {ref_num} "
+                                f"via context_from without an "
+                                f"intervening sanitizer step."
+                            ),
+                        )
+                # Continue walking transitive deps
+                if ref_step.type != "sanitizer":
+                    queue.extend(ref_step.context_from)
+
+        # Rule G — Sanitizer constraints (FR-019)
+        for step in plan.graph:
+            if step.type != "sanitizer":
+                continue
+            if step.can_spawn:
+                raise PlanValidationError(
+                    layer="business_rules",
+                    message=(
+                        f"Rule G: Sanitizer step {step.step} "
+                        f"has can_spawn=true. Sanitizer steps "
+                        f"must not spawn."
+                    ),
+                )
+            if step.trust_level is not None:
+                raise PlanValidationError(
+                    layer="business_rules",
+                    message=(
+                        f"Rule G: Sanitizer step {step.step} "
+                        f"has trust_level='{step.trust_level}'. "
+                        f"Sanitizer steps must not set trust_level."
+                    ),
+                )
+
+        # Rule H — Tier 1 reasoner constraints (FR-020)
+        for step in plan.graph:
+            if (
+                step.type == "llm_reasoning"
+                and step.trust_level == "untrusted_input"
+            ):
+                if step.can_spawn:
+                    raise PlanValidationError(
+                        layer="business_rules",
+                        message=(
+                            f"Rule H: Tier 1 reasoner step "
+                            f"{step.step} has can_spawn=true. "
+                            f"Tier 1 reasoners must not spawn."
+                        ),
+                    )
 
         # Step args size check
         for step in plan.graph:

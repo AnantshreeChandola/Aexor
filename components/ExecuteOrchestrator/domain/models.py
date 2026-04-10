@@ -73,6 +73,9 @@ class ExecutionContext:
         self.attestations: list[PolicyAttestation] = []
         self.plan_revision: int = 0
         self.recovery_action_count: int = 0
+        # Trust boundary metadata (FR-026)
+        self.sanitizer_verdicts: dict[int, str] = {}
+        self.sanitizer_degraded: bool = False
 
 
 # ---------------------------------------------------------------------------

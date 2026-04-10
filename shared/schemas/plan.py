@@ -18,10 +18,11 @@ from .policy import ReasoningConfig
 class PlanStep(BaseModel):
     """Single execution step in the plan graph.
 
-    Supports three step types:
+    Supports four step types:
     - ``api``: deterministic MCP tool invocation (default, backward-compatible)
     - ``llm_reasoning``: LLM-based adaptive reasoning (requires reasoning_config)
     - ``policy_check``: policy evaluation gate (requires policy_ref)
+    - ``sanitizer``: trust boundary sanitizer (role=Guard, FR-015)
     """
 
     step: int = Field(..., ge=1, description="Step number (1-indexed)")
@@ -29,7 +30,14 @@ class PlanStep(BaseModel):
     mode: Literal["interactive", "durable"] = Field(..., description="Execution mode")
 
     role: Literal[
-        "Fetcher", "Analyzer", "Watcher", "Resolver", "Booker", "Notifier", "Reasoner"
+        "Fetcher",
+        "Analyzer",
+        "Watcher",
+        "Resolver",
+        "Booker",
+        "Notifier",
+        "Reasoner",
+        "Guard",
     ] = Field(..., description="Runtime agent role")
 
     uses: str = Field(..., min_length=1, description="Tool/connector ID (e.g., 'google.calendar')")
@@ -52,7 +60,7 @@ class PlanStep(BaseModel):
 
     # --- Hybrid execution fields (all have defaults for backward compat) ---
 
-    type: Literal["api", "llm_reasoning", "policy_check"] = Field(
+    type: Literal["api", "llm_reasoning", "policy_check", "sanitizer"] = Field(
         default="api", description="Step type for hybrid execution"
     )
 

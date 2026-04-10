@@ -274,6 +274,17 @@ async def lifespan(app: FastAPI):
             app.state, "integration_manager", None
         )
 
+    # TrustFilter service (library -- stateless sanitizer, graceful degradation)
+    try:
+        from components.TrustFilter.service.filter_service import (
+            create_filter_service,
+        )
+
+        app.state.filter_service = create_filter_service()
+    except Exception as exc:
+        logger.warning("TrustFilter init failed: %s", exc)
+        app.state.filter_service = None
+
     # ExecuteOrchestrator service (Orchestration Layer -- graceful degradation)
     try:
         from components.ExecuteOrchestrator.adapters.credential_vault import (
@@ -294,6 +305,7 @@ async def lifespan(app: FastAPI):
             llm_client=AnthropicReasoningAdapter(),
             credential_vault=CredentialVaultAdapter(db=db),
             redis_client=intake_redis,
+            filter_service=app.state.filter_service,
         )
     except Exception as exc:
         logger.warning("ExecuteOrchestrator init failed: %s", exc)
