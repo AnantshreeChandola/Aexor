@@ -119,6 +119,10 @@ class PlanTable(Base):
         Index("idx_plans_stored_at", stored_at),
         Index("idx_plans_hash", plan_hash),
         Index("idx_plans_step_count", step_count),
+        Index(
+            "idx_plans_user_id",
+            text("(canonical_json -> 'intent' ->> 'user_id')"),
+        ),
     )
 
 
@@ -193,6 +197,44 @@ class PlanEmbeddingTable(Base):
             postgresql_ops={"embedding": "vector_cosine_ops"},
         ),
         Index("idx_plan_embeddings_created_at", created_at),
+    )
+
+
+class ToolEmbeddingTable(Base):
+    """
+    Tool embeddings table - stores vector embeddings and tsvector for tool discovery.
+
+    Owned by Planner component (Tool Discovery). Requires pgvector extension.
+    """
+
+    __tablename__ = "tool_embeddings"
+
+    embedding_id = Column(
+        SQLAlchemy_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tool_name = Column(String(256), nullable=False, unique=True)
+    provider_name = Column(String(64), nullable=False)
+    embedding = Column(
+        Vector(384) if Vector is not None else String,
+        nullable=False,
+    )
+    search_text = Column(String, nullable=False)
+    tsv = Column(TSVECTOR, nullable=True)
+    model_version = Column(String(32), nullable=False, default="all-MiniLM-L6-v2")
+    created_at = Column(DateTime, nullable=False, server_default=text("NOW()"))
+    updated_at = Column(DateTime, nullable=False, server_default=text("NOW()"))
+
+    __table_args__ = (
+        Index("idx_tool_embeddings_tool_name", tool_name, unique=True),
+        Index("idx_tool_embeddings_provider", provider_name),
+        Index("idx_tool_embeddings_tsv", tsv, postgresql_using="gin"),
+        Index(
+            "idx_tool_embeddings_hnsw",
+            embedding,
+            postgresql_using="hnsw",
+            postgresql_with={"m": 16, "ef_construction": 64},
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
     )
 
 
@@ -559,4 +601,62 @@ class UserConnectionTable(Base):
             provider_name,
             postgresql_where=text("is_connected = TRUE"),
         ),
+    )
+
+
+# Scheduler Tables - Owned by Scheduler component
+
+
+class ScheduledPlanTable(Base):
+    """
+    Scheduled plans table — one-time and recurring plan execution schedules.
+
+    Owned by Scheduler component. Stores the plan skeleton, entities, and
+    recurrence configuration. APScheduler uses in-memory job store; this
+    table is the source of truth for recovery on restart.
+    """
+
+    __tablename__ = "scheduled_plans"
+
+    id = Column(
+        SQLAlchemy_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    user_id = Column(
+        SQLAlchemy_UUID(as_uuid=True),
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    name = Column(String(255), nullable=False)
+    intent_type = Column(String(64), nullable=False)
+    skeleton_json = Column(JSONB, nullable=False)
+    entities_json = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    constraints_json = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    schedule_type = Column(String(16), nullable=False)  # "once" or "recurring"
+    scheduled_at = Column(DateTime(timezone=True), nullable=True)  # For one-time
+    cron_expression = Column(String(128), nullable=True)  # Human-readable display
+    recurrence_config = Column(JSONB, nullable=True)  # UI-friendly descriptor
+    timezone = Column(String(64), nullable=False, server_default=text("'UTC'"))
+    status = Column(String(16), nullable=False, server_default=text("'active'"))
+    approval_mode = Column(String(16), nullable=False, server_default=text("'auto_approve'"))
+    last_run_at = Column(DateTime(timezone=True), nullable=True)
+    next_run_at = Column(DateTime(timezone=True), nullable=True)
+    run_count = Column(Integer, nullable=False, server_default=text("0"))
+    max_runs = Column(Integer, nullable=True)
+    last_error = Column(JSONB, nullable=True)
+    source_plan_id = Column(String(26), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("NOW()"))
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=text("NOW()"))
+
+    __table_args__ = (
+        Index("idx_scheduled_plans_user_id", user_id),
+        Index(
+            "idx_scheduled_plans_user_active",
+            user_id,
+            status,
+            postgresql_where=text("status = 'active'"),
+        ),
+        Index("idx_scheduled_plans_next_run", next_run_at),
+        Index("idx_scheduled_plans_status", status),
     )

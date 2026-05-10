@@ -10,6 +10,7 @@ Reference: LLD Section 4.1
 from __future__ import annotations
 
 import logging
+import time
 
 from fastapi import APIRouter, Depends, Request, status
 from fastapi.responses import JSONResponse
@@ -22,13 +23,12 @@ from ..domain.models import (
     IntakeMessage,
     IntentParserError,
     MaxTurnsExceededError,
+    RateLimitedError,
     SessionNotFoundError,
     SessionOwnershipError,
     SessionResetResponse,
     SessionStoreUnavailableError,
-    ToolNotAvailableError,
 )
-from ..service.intake_service import ProviderNotConnectedError
 
 logger = logging.getLogger(__name__)
 
@@ -84,26 +84,25 @@ def _handle_domain_error(exc: Exception) -> JSONResponse:
                 details={"reason": exc.reason},
             ).model_dump(),
         )
-    if isinstance(exc, ToolNotAvailableError):
+    if isinstance(exc, RateLimitedError):
+        headers: dict[str, str] = {}
+        if exc.retry_after_s is not None:
+            headers["Retry-After"] = str(int(exc.retry_after_s))
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             content=ErrorResponse(
-                error_code="TOOL_NOT_AVAILABLE",
-                message=str(exc),
+                error_code="LLM_RATE_LIMITED",
+                message=(
+                    f"The {exc.provider} API rate-limited this request. "
+                    "Please wait or switch providers via LLM_PROVIDER / LLM_API_KEY."
+                ),
                 details={
-                    "intent_type": exc.intent_type,
-                    "required_tools": exc.required_tools,
+                    "provider": exc.provider,
+                    "model": exc.model,
+                    "retry_after_s": exc.retry_after_s,
                 },
             ).model_dump(),
-        )
-    if isinstance(exc, ProviderNotConnectedError):
-        return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            content=ErrorResponse(
-                error_code="PROVIDER_NOT_CONNECTED",
-                message=str(exc),
-                details={"provider_names": exc.provider_names},
-            ).model_dump(),
+            headers=headers,
         )
     if isinstance(exc, IntentParserError):
         return JSONResponse(
@@ -129,18 +128,37 @@ async def submit_message(
     auth_context: dict = Depends(get_auth_context),
     service=Depends(get_intake_service),
 ):
-    """Submit a user message for intent collection."""
+    """Submit a user message for intent detection / clarification."""
     user_id = str(auth_context["user_id"])
-    context_tier = auth_context["context_tier"]
     tz = request.headers.get("X-Timezone", "America/Chicago")
+
+    t_start = time.monotonic()
+    logger.info(
+        "intake_api_request",
+        extra={
+            "user_id": user_id,
+            "message_length": len(body.message),
+            "session_id": body.session_id,
+            "tz": tz,
+        },
+    )
 
     try:
         response = await service.process_message(
             user_id=user_id,
             message=body.message,
-            context_tier=context_tier,
             session_id=body.session_id,
             tz=tz,
+        )
+        t_total = int((time.monotonic() - t_start) * 1000)
+        logger.info(
+            "intake_api_response",
+            extra={
+                "user_id": user_id,
+                "session_id": response.session_id,
+                "status": response.status,
+                "total_api_ms": t_total,
+            },
         )
         return response.model_dump(mode="json")
     except (
@@ -148,10 +166,19 @@ async def submit_message(
         SessionOwnershipError,
         MaxTurnsExceededError,
         SessionStoreUnavailableError,
-        ToolNotAvailableError,
-        ProviderNotConnectedError,
+        RateLimitedError,
         IntentParserError,
     ) as exc:
+        t_total = int((time.monotonic() - t_start) * 1000)
+        logger.warning(
+            "intake_api_error",
+            extra={
+                "user_id": user_id,
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+                "total_api_ms": t_total,
+            },
+        )
         return _handle_domain_error(exc)
 
 

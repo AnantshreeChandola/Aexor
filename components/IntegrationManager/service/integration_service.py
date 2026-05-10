@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -50,6 +51,8 @@ class IntegrationManager:
     MCP config's ``allowed_tools`` list via Composio REST API.
     """
 
+    _TOOLKIT_CACHE_TTL = 300  # 5 minutes
+
     def __init__(
         self,
         db_adapter: IntegrationDatabaseAdapter,
@@ -61,6 +64,7 @@ class IntegrationManager:
         self._composio_config = composio_config
         self._composio = composio_client
         self._cache = connection_cache
+        self._toolkit_cache: dict[str, tuple[float, dict]] = {}  # slug -> (expires_at, data)
 
     def get_available_providers(self) -> list[str]:
         """Return the list of provider names that have auth configs.
@@ -393,6 +397,40 @@ class IntegrationManager:
             app = parts[0].lower() if parts else tool.lower()
             apps.setdefault(app, []).append(tool)
         return apps
+
+    async def _get_toolkit_cached(self, slug: str) -> dict:
+        """Fetch toolkit metadata with in-memory TTL cache."""
+        now = time.monotonic()
+        cached = self._toolkit_cache.get(slug)
+        if cached and cached[0] > now:
+            return cached[1]
+
+        if self._composio is None:
+            return {"slug": slug, "name": slug, "logo": "", "description": ""}
+
+        try:
+            meta = await self._composio.get_toolkit(slug)
+        except Exception:
+            meta = {"slug": slug, "name": slug, "logo": "", "description": ""}
+
+        self._toolkit_cache[slug] = (now + self._TOOLKIT_CACHE_TTL, meta)
+        return meta
+
+    async def list_apps_with_metadata(self) -> list[dict]:
+        """Return apps from allowed_tools, enriched with logo/description."""
+        apps_map = await self.list_apps()
+        result = []
+        for app, tools in sorted(apps_map.items()):
+            meta = await self._get_toolkit_cached(app)
+            result.append({
+                "slug": app,
+                "name": meta.get("name", app),
+                "logo": meta.get("logo", ""),
+                "description": meta.get("description", ""),
+                "tools": tools,
+                "tool_count": len(tools),
+            })
+        return result
 
     async def list_tools(self) -> list[str]:
         """Return the allowed_tools list from the Composio MCP config.

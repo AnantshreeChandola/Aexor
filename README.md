@@ -51,7 +51,7 @@ User Request → Understand → Plan → Preview → Approve → Execute → Lea
 **Layer 2 — Domain Services** (all implemented)
 | Component | Purpose |
 |-----------|---------|
-| Intake | Multi-turn intent collection with LLM parsing and Redis sessions |
+| Intake | Multi-turn intent collection with local-first LLM parsing (Ollama → remote fallback) and Redis sessions |
 | ContextRAG | Tiered evidence gathering from Memory Layer (≤2KB) |
 | Planner | Deterministic plan generation via Anthropic Claude API with 4-level fallback |
 | PolicyEngine | Policy rule evaluation, attestations, HITL enforcement |
@@ -97,7 +97,8 @@ User Request → Understand → Plan → Preview → Approve → Execute → Lea
 | Backend | Python 3.11+, FastAPI, Pydantic v2 | Async, type hints |
 | Database | PostgreSQL 16 + pgvector | Relational + vector + credential vault |
 | Cache | Redis 7 with hiredis | Sessions, idempotency, approval gates |
-| AI/LLM | Anthropic Claude + OpenAI (optional fallback) | Planning + intent parsing + runtime reasoning |
+| AI/LLM | Anthropic Claude + OpenAI (optional fallback) | Planning + runtime reasoning |
+| Local LLM | Ollama (Llama 3.2 3B, 4-bit) | Intent parsing — zero API cost, ~1s on Apple Silicon |
 | Embeddings | ONNX Runtime (all-MiniLM-L6-v2, 384-dim) | Fully local CPU inference, zero API cost |
 | Credentials | AES-256-GCM vault in PostgreSQL | Master key from env; LLM never sees plaintext |
 | Tools | MCP protocol (Composio, custom servers) | All external tool invocations |
@@ -110,7 +111,8 @@ User Request → Understand → Plan → Preview → Approve → Execute → Lea
 |---------|--------------|---------|
 | Planning (primary) | `claude-sonnet-4-5-20250929` | `PLANNER_PRIMARY_MODEL` |
 | Planning (fallback) | `claude-sonnet-4-5-20250929` | `PLANNER_FALLBACK_MODEL` |
-| Intent parsing | `claude-sonnet-4-5-20250929` | `INTAKE_PARSER_MODEL` |
+| Intent parsing (local) | `llama3.2:3b` via Ollama | `INTAKE_LOCAL_MODEL` |
+| Intent parsing (fallback) | `claude-sonnet-4-5-20250929` | `INTAKE_PARSER_MODEL` |
 | Runtime reasoning | Per-step via `reasoning_config.model` | Set in plan by Planner |
 | Embeddings | `all-MiniLM-L6-v2` (ONNX, local) | Bundled, no API |
 
@@ -149,7 +151,7 @@ Aexor/
 ├── docs/
 │   └── architecture/     # GLOBAL_SPEC, Project_HLD, QUICK_REFERENCE
 ├── tests/                # Shared acceptance and contract tests
-├── docker-compose.yml    # Full local stack (PostgreSQL, Redis, app)
+├── docker-compose.yml    # Full local stack (PostgreSQL, Redis, Ollama, app)
 ├── .github/workflows/    # CI pipeline
 └── pyproject.toml        # Dependencies, ruff, mypy, pytest config
 ```
@@ -161,8 +163,14 @@ Aexor/
 ### Prerequisites
 - Python 3.11+
 - Docker & Docker Compose (recommended)
-- Anthropic API key (`ANTHROPIC_API_KEY`)
-- OpenAI API key (`OPENAI_API_KEY`, optional — for fallback)
+- An LLM provider — pick one:
+  - Anthropic API key (`LLM_PROVIDER=anthropic`, `LLM_API_KEY=sk-ant-...`)
+  - OpenAI API key (`LLM_PROVIDER=openai`, `LLM_API_KEY=sk-...`)
+  - Google Gemini API key (`LLM_PROVIDER=gemini`, `LLM_API_KEY=AIza...`)
+  - Claude Code CLI subscription (`LLM_PROVIDER=claude_code`, no key required; install `@anthropic-ai/claude-code` and run `claude login`)
+- Ollama runs automatically as a Docker Compose sidecar (Llama 3.2 3B for local intent parsing). No setup needed — the model is pulled on first startup.
+
+See [`QUICKSTART.md`](QUICKSTART.md) for the full env-var reference and per-provider config blocks.
 
 ### Getting Started
 
@@ -172,7 +180,7 @@ git clone <repo-url>
 cd Aexor
 
 # Option 1: Docker (recommended)
-cp .env.example .env  # Add ANTHROPIC_API_KEY
+cp .env.example .env  # Set LLM_PROVIDER and LLM_API_KEY
 docker compose up --build -d
 
 # Option 2: Local

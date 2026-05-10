@@ -21,13 +21,14 @@ class BudgetManager:
     def enforce_budget(
         self,
         evidence: list[EvidenceItem],
+        relevance_scores: dict[str, float] | None = None,
     ) -> tuple[list[EvidenceItem], int]:
         """Sort by priority, trim to budget, return (trimmed_list, total_bytes).
 
-        Priority order:
-          1. Tier ascending (Tier 2 before Tier 3)
-          2. Confidence descending within same tier
-          3. Earlier items within same tier+confidence (stable sort)
+        When relevance_scores is provided (key=evidence.key -> float):
+          Sort key: (relevance DESC, tier ASC, confidence DESC)
+        When relevance_scores is None (backward compat):
+          Sort key: (tier ASC, confidence DESC)
 
         Budget measurement: len(item.model_dump_json().encode("utf-8")) per item.
         Items are added greedily until budget is exceeded.
@@ -38,11 +39,21 @@ class BudgetManager:
         if not evidence:
             return [], 0
 
-        # Stable sort: tier ASC, confidence DESC
-        sorted_evidence = sorted(
-            evidence,
-            key=lambda item: (item.tier, -item.confidence),
-        )
+        if relevance_scores:
+            sorted_evidence = sorted(
+                evidence,
+                key=lambda item: (
+                    -relevance_scores.get(item.key, 0.0),
+                    item.tier,
+                    -item.confidence,
+                ),
+            )
+        else:
+            # Backward-compatible: tier ASC, confidence DESC
+            sorted_evidence = sorted(
+                evidence,
+                key=lambda item: (item.tier, -item.confidence),
+            )
 
         trimmed: list[EvidenceItem] = []
         total_bytes = 0

@@ -17,6 +17,7 @@ from shared.schemas.evidence import EvidenceItem
 from shared.schemas.intent import Intent
 
 from ..adapters.budget_manager import BudgetManager
+from ..adapters.evidence_scorer import EvidenceScorer
 from ..adapters.history_adapter import HistoryAdapter
 from ..adapters.planlibrary_adapter import PlanLibraryAdapter
 from ..adapters.profilestore_adapter import ProfileStoreAdapter
@@ -56,6 +57,7 @@ class ContextRAGService:
         self._planlibrary_adapter = PlanLibraryAdapter(plan_service)
         self._vectorindex_adapter = VectorIndexAdapter(vector_index_service)
         self._budget_manager = BudgetManager()
+        self._evidence_scorer = EvidenceScorer()
 
     async def gather_evidence(self, intent: Intent) -> ContextResult:
         """Assemble typed evidence from Memory Layer for plan generation.
@@ -72,14 +74,8 @@ class ContextRAGService:
         effective_budget = intent.context_budget or 3
 
         logger.info(
-            "gather_evidence_start",
-            extra={
-                "intent_type": intent.intent,
-                "user_id": intent.user_id,
-                "effective_budget": effective_budget,
-                "component": "ContextRAG",
-                "op": "gather_evidence",
-            },
+            "gather_evidence_start intent=%s user=%s budget=%d",
+            intent.intent, intent.user_id, effective_budget,
         )
 
         # 1. Determine eligible sources based on tier
@@ -116,53 +112,45 @@ class ContextRAGService:
             if isinstance(result, SourceQueryError):
                 degraded.append(adapter.source_name)
                 logger.warning(
-                    "source_degraded",
-                    extra={
-                        "source": adapter.source_name,
-                        "reason": result.reason,
-                        "intent_type": intent.intent,
-                        "trace_id": intent.trace_id,
-                        "component": "ContextRAG",
-                        "op": "gather_evidence",
-                    },
+                    "source_degraded source=%s reason=%s intent=%s",
+                    adapter.source_name, result.reason, intent.intent,
                 )
             elif isinstance(result, BaseException):
                 degraded.append(adapter.source_name)
                 logger.warning(
-                    "source_degraded",
-                    extra={
-                        "source": adapter.source_name,
-                        "reason": type(result).__name__,
-                        "intent_type": intent.intent,
-                        "trace_id": intent.trace_id,
-                        "component": "ContextRAG",
-                        "op": "gather_evidence",
-                    },
+                    "source_degraded source=%s reason=%s intent=%s",
+                    adapter.source_name, type(result).__name__, intent.intent,
                 )
             else:
+                logger.info(
+                    "source_ok source=%s items=%d intent=%s",
+                    adapter.source_name, len(result), intent.intent,
+                )
                 all_evidence.extend(result)
 
         # 5. Deduplicate by key
         all_evidence = self._budget_manager.deduplicate(all_evidence)
 
-        # 6. Budget enforcement (sort + trim)
-        trimmed, total_bytes = self._budget_manager.enforce_budget(all_evidence)
+        # 5b. Score evidence by relevance to intent
+        relevance_scores = self._evidence_scorer.score_to_dict(intent, all_evidence)
+        scored_above = sum(1 for v in relevance_scores.values() if v >= 0.15)
+        logger.info(
+            "evidence_scored intent=%s total=%d above_threshold=%d",
+            intent.intent, len(all_evidence), scored_above,
+        )
+
+        # 6. Budget enforcement (sort + trim) -- now with relevance scores
+        trimmed, total_bytes = self._budget_manager.enforce_budget(
+            all_evidence, relevance_scores=relevance_scores,
+        )
 
         duration_ms = _elapsed_ms(start)
 
         logger.info(
-            "gather_evidence_complete",
-            extra={
-                "intent_type": intent.intent,
-                "user_id": intent.user_id,
-                "trace_id": intent.trace_id,
-                "evidence_count": len(trimmed),
-                "total_bytes": total_bytes,
-                "degraded_sources": degraded,
-                "duration_ms": duration_ms,
-                "component": "ContextRAG",
-                "op": "gather_evidence",
-            },
+            "gather_evidence_complete evidence_count=%d total_bytes=%d "
+            "degraded=%s duration_ms=%d intent=%s",
+            len(trimmed), total_bytes, degraded or "none",
+            duration_ms, intent.intent,
         )
 
         # 7. Return result

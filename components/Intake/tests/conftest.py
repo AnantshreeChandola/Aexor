@@ -1,8 +1,7 @@
 """
 Intake Test Fixtures
 
-Shared fixtures for mocked Redis, LLM, Planner, ProfileStore,
-and sample domain objects.
+Shared fixtures for mocked Redis, LLM, and sample domain objects.
 """
 
 from __future__ import annotations
@@ -18,11 +17,6 @@ from components.Intake.domain.models import (
     Session,
     SessionTurn,
 )
-from components.Planner.domain.models import (
-    EntityRequirement,
-    RequiredEntitiesResult,
-)
-from shared.schemas.evidence import EvidenceItem
 
 
 @pytest.fixture()
@@ -89,75 +83,6 @@ def mock_llm_adapter() -> AsyncMock:
         return_value='{"intent": "schedule_meeting", "entities": {"attendee": "Alice"}, "constraints": {}}'
     )
     return adapter
-
-
-@pytest.fixture()
-def sample_required_entities_result() -> RequiredEntitiesResult:
-    """RequiredEntitiesResult for schedule_meeting."""
-    return RequiredEntitiesResult(
-        intent_type="schedule_meeting",
-        resolved_tools=["google.calendar"],
-        required_entities=[
-            EntityRequirement(
-                name="attendee",
-                description="Who should attend the meeting?",
-                required=True,
-            ),
-            EntityRequirement(
-                name="time",
-                description="When would you like to schedule?",
-                required=True,
-            ),
-            EntityRequirement(
-                name="duration_min",
-                description="How long should the meeting be?",
-                required=True,
-                default_preference_key="default_meeting_duration",
-            ),
-        ],
-        missing_entities=[
-            EntityRequirement(
-                name="time",
-                description="When would you like to schedule?",
-                required=True,
-            ),
-            EntityRequirement(
-                name="duration_min",
-                description="How long should the meeting be?",
-                required=True,
-                default_preference_key="default_meeting_duration",
-            ),
-        ],
-    )
-
-
-@pytest.fixture()
-def mock_planner_service(
-    sample_required_entities_result,
-) -> AsyncMock:
-    """AsyncMock with get_required_entities returning entities result."""
-    service = AsyncMock()
-    service.get_required_entities = AsyncMock(
-        return_value=sample_required_entities_result,
-    )
-    return service
-
-
-@pytest.fixture()
-def mock_preference_service() -> AsyncMock:
-    """AsyncMock with get_preference returning an EvidenceItem."""
-    service = AsyncMock()
-    service.get_preference = AsyncMock(
-        return_value=EvidenceItem(
-            type="preference",
-            key="default_meeting_duration",
-            value=30,
-            confidence=1.0,
-            source_ref="profilestore:prefs/default_meeting_duration",
-            tier=2,
-        ),
-    )
-    return service
 
 
 @pytest.fixture()

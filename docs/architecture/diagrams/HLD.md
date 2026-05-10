@@ -23,10 +23,9 @@ flowchart LR
 
   %% ── Orchestration Layer: Execute ──
   GATE --> EXE[ExecuteOrchestrator\nDAG dispatch]
-  EXE --> CRED[Credential Vault\nAES-256-GCM]
-  EXE --> MCP[MCP Tool Invocations\nAPI steps]
+  EXE --> MCP[MCP Tool Invocations\nvia Composio per-user endpoints]
   EXE --> LLM[Anthropic API\nTier 1 sandbox / Tier 2 agent]
-  EXE --> PE[PolicyEngine\nspawn eval, deny-by-default]
+  EXE --> PE[PolicyEngine\nspawn eval, approval-first]
   EXE --> SCHED[APScheduler + Redis\ndurable / long jobs]
 
   %% ── Orchestration Layer: Monitor ──

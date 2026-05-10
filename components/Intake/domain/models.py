@@ -42,9 +42,8 @@ class Session(BaseModel):
     detected_intent: str | None = None
     extracted_entities: dict[str, Any] = Field(default_factory=dict)
     extracted_constraints: dict[str, Any] = Field(default_factory=dict)
-    profile_defaults_offered: dict[str, Any] = Field(default_factory=dict)
-    contact_suggestions: dict[str, str] = Field(default_factory=dict)
-    last_follow_up: str | None = None
+    sub_intents: list[str] = Field(default_factory=list)
+    routing_tier: str | None = None  # "local" or "remote" (which LLM served Turn 1)
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
     )
@@ -86,6 +85,9 @@ class ParseResult(BaseModel):
     intent: str | None = None
     entities: dict[str, Any] = Field(default_factory=dict)
     constraints: dict[str, Any] = Field(default_factory=dict)
+    sub_intents: list[str] = Field(default_factory=list)
+    confidence: float | None = None  # 0.0-1.0, None if LLM didn't provide
+    escalated: bool = False  # True if remote LLM was used due to low confidence
 
 
 # ---------------------------------------------------------------------------
@@ -139,17 +141,28 @@ class IntentParserError(IntakeError):
         super().__init__(f"Intent parser error: {reason}")
 
 
-class ToolNotAvailableError(IntakeError):
-    """Intent requires tools not registered in ToolCatalog."""
+class RateLimitedError(IntakeError):
+    """Upstream LLM provider rejected the request due to rate limiting.
+
+    Surfaced to the API layer so the UI can show the exact provider-side
+    error (HTTP 429 with Retry-After) instead of silently falling back to
+    a "Gathering information" loop.
+    """
 
     def __init__(
         self,
-        intent_type: str,
-        required_tools: list[str],
+        provider: str,
+        model: str | None = None,
+        retry_after_s: float | None = None,
     ) -> None:
-        self.intent_type = intent_type
-        self.required_tools = required_tools
-        tools_str = ", ".join(required_tools) if required_tools else "unknown"
-        super().__init__(
-            f"No registered tools can fulfill intent '{intent_type}'. Required tools: {tools_str}"
-        )
+        self.provider = provider
+        self.model = model
+        self.retry_after_s = retry_after_s
+        parts = [f"{provider} rate limited"]
+        if model:
+            parts.append(f"(model={model})")
+        if retry_after_s is not None:
+            parts.append(f"retry in {retry_after_s:.0f}s")
+        super().__init__(" ".join(parts))
+
+

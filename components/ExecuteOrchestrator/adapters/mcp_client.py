@@ -29,6 +29,22 @@ logger = logging.getLogger(__name__)
 _RETRYABLE_STATUS_CODES = {503, 504}
 _SESSION_EXPIRED_CODES = {401, 403}
 
+# Patterns in MCP tool result content that indicate the user's integration
+# is not connected/authenticated.  Composio sometimes returns these as
+# successful JSON-RPC responses (HTTP 200) instead of JSON-RPC errors.
+_RESULT_NOT_CONNECTED_RE = re.compile(
+    r"no connected\b.*\baccount|"
+    r"not connected|"
+    r"not authenticated|"
+    r"account.*not.*found|"
+    r"entity.*not.*found|"
+    r"connection.*not.*found|"
+    r"authentication.*required|"
+    r"auth.*error.*account|"
+    r"no active connection",
+    re.IGNORECASE,
+)
+
 # Patterns that suggest prompt injection in MCP server responses
 _INJECTION_PATTERNS = re.compile(
     r"(?:^|\n)\s*(?:"
@@ -246,6 +262,9 @@ class MCPClientAdapter:
         # 9. Sanitize (reuse existing sanitizer)
         result = self._sanitize_response(result)
 
+        # 10. Check for "not connected" errors embedded in result content
+        self._check_result_not_connected(result, server, tool)
+
         return result
 
     async def _do_invoke_legacy(
@@ -333,6 +352,9 @@ class MCPClientAdapter:
         # 10. Sanitize response (MCP server data is untrusted)
         result = self._sanitize_response(result)
 
+        # 11. Check for "not connected" errors embedded in result content
+        self._check_result_not_connected(result, server, tool)
+
         return result
 
     @staticmethod
@@ -393,6 +415,37 @@ class MCPClientAdapter:
             return response.json()
         except Exception as exc:
             raise MCPInvocationError(server, tool, f"Failed to parse JSON response: {exc}") from exc
+
+    @staticmethod
+    def _check_result_not_connected(result: Any, server: str, tool: str) -> None:
+        """Raise MCPInvocationError if the tool result content indicates
+        the user's integration is not connected.
+
+        Composio sometimes returns auth errors as successful HTTP 200
+        JSON-RPC responses with the error text embedded in the result
+        content.  Catching them here ensures the execute service's
+        ``_check_integration_not_connected`` short-circuit fires.
+        """
+        text = ""
+        if isinstance(result, dict):
+            # MCP content array: {"content": [{"type": "text", "text": "..."}]}
+            content = result.get("content")
+            if isinstance(content, list):
+                text = " ".join(
+                    item.get("text", "") for item in content if isinstance(item, dict)
+                )
+            elif isinstance(content, str):
+                text = content
+            # Also check top-level error/message fields
+            for key in ("error", "message", "detail"):
+                val = result.get(key)
+                if isinstance(val, str):
+                    text += " " + val
+        elif isinstance(result, str):
+            text = result
+
+        if text and _RESULT_NOT_CONNECTED_RE.search(text):
+            raise MCPInvocationError(server, tool, text.strip()[:500])
 
     @staticmethod
     def _sanitize_response(result: Any) -> Any:

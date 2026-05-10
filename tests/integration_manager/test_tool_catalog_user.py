@@ -142,10 +142,10 @@ class TestRefreshUser:
         # All-caps prefix GOOGLECALENDAR stays as one word (no camelCase transition)
         assert tools[1].provider_name == "googlecalendar"
 
-    async def test_http_error_falls_back_to_global(self, catalog, mock_http):
+    async def test_http_error_returns_empty(self, catalog, mock_http):
         mock_http.post.side_effect = RuntimeError("network error")
 
-        # Pre-populate global catalog
+        # Pre-populate global catalog (should NOT be returned)
         catalog._tools = {
             "SLACK_SEND_MESSAGE": ToolDefinition(
                 name="SLACK_SEND_MESSAGE",
@@ -155,13 +155,12 @@ class TestRefreshUser:
         }
 
         tools = await catalog.refresh_user("user-1")
-        assert len(tools) == 1
-        assert tools[0].name == "SLACK_SEND_MESSAGE"
+        assert len(tools) == 0
 
-    async def test_no_composio_falls_back_to_global(
+    async def test_no_composio_returns_empty(
         self, mock_config, mock_http, mock_session_manager
     ):
-        """Without url_manager, returns global tools."""
+        """Without url_manager, returns empty list (not global tools)."""
         catalog = ToolCatalog(
             config=mock_config,
             http_client=mock_http,
@@ -176,8 +175,7 @@ class TestRefreshUser:
         }
 
         tools = await catalog.refresh_user("user-1")
-        assert len(tools) == 1
-        assert tools[0].name == "TEST_TOOL"
+        assert len(tools) == 0
 
 
 # ---------------------------------------------------------------------------
