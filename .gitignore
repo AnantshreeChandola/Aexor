@@ -146,3 +146,6 @@ Thumbs.db
 # Project specific
 personal_agent.egg-info/
 uv.lock
+
+# Personal scratch / future-iteration notes (not part of the spec)
+docs/FUTURE_ITERATIONS.md

@@ -180,7 +180,7 @@ class PlanValidator:
     async def _validate_business_rules(
         self,
         plan: Plan,
-        tool_ids: set[str],
+        tool_ids: set[str],  # noqa: ARG002
     ) -> None:
         """Layer 3: Business rule validation."""
         step_set = {s.step for s in plan.graph}
@@ -203,23 +203,12 @@ class PlanValidator:
                 message=f"Plan has {max_parallel} parallel steps, max is {MAX_PARALLEL_STEPS}",
             )
 
-        # Tool existence — API tools must be in the catalog.
-        # Exceptions:
-        # - llm_reasoning, policy_check, and sanitizer steps don't call tools via MCP
-        # - Resolver steps use pass-through tool names (e.g. "system.confirm",
-        #   "confirm_action") that aren't real MCP tools — the execution engine
-        #   handles them as gate-only checkpoints without MCP invocation.
-        plan_tool_ids = {
-            s.uses for s in plan.graph
-            if s.type == "api" and s.role != "Resolver"
-        }
-        missing_tools = plan_tool_ids - tool_ids
-        if missing_tools:
-            raise PlanValidationError(
-                layer="business_rules",
-                message=f"Unknown tools: {missing_tools}",
-                details={"missing_tools": list(missing_tools)},
-            )
+        # Tool existence — deferred to _finalize_plan() which uses
+        # resolve_tool() for fuzzy name matching (e.g. google.calendar →
+        # GOOGLECALENDAR_LIST_EVENTS).  Exact-match validation here would
+        # reject valid plans whose tool names differ only in format.
+        # Exception: sanitizer steps use pseudo-tool "trust_filter.scan"
+        # which is handled internally and doesn't need catalog lookup.
 
         # dry_run enforcement
         non_dry_run = [s.step for s in plan.graph if not s.dry_run]
@@ -413,14 +402,11 @@ class PlanValidator:
                 ref_step = step_by_num.get(ref_num)
                 if ref_step is None:
                     continue
-                if ref_step.type == "api":
-                    # There must be a sanitizer between this
-                    # api step and the current llm_reasoning
-                    if not self._has_intervening_sanitizer(
-                        api_step_num=ref_num,
-                        reasoning_step=step,
-                        step_by_num=step_by_num,
-                    ):
+                if ref_step.type == "api" and not self._has_intervening_sanitizer(
+                    api_step_num=ref_num,
+                    reasoning_step=step,
+                    step_by_num=step_by_num,
+                ):
                         raise PlanValidationError(
                             layer="business_rules",
                             message=(
@@ -463,16 +449,16 @@ class PlanValidator:
             if (
                 step.type == "llm_reasoning"
                 and step.trust_level == "untrusted_input"
+                and step.can_spawn
             ):
-                if step.can_spawn:
-                    raise PlanValidationError(
-                        layer="business_rules",
-                        message=(
-                            f"Rule H: Tier 1 reasoner step "
-                            f"{step.step} has can_spawn=true. "
-                            f"Tier 1 reasoners must not spawn."
-                        ),
-                    )
+                raise PlanValidationError(
+                    layer="business_rules",
+                    message=(
+                        f"Rule H: Tier 1 reasoner step "
+                        f"{step.step} has can_spawn=true. "
+                        f"Tier 1 reasoners must not spawn."
+                    ),
+                )
 
         # Step args size check
         for step in plan.graph:

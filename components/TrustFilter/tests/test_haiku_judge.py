@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -97,7 +96,7 @@ class TestHaikuJudgeFailures:
             )
             adapter._client = AsyncMock()
             adapter._client.messages.create = AsyncMock(
-                side_effect=asyncio.TimeoutError()
+                side_effect=TimeoutError()
             )
             # asyncio.wait_for wraps the timeout
             with pytest.raises(HaikuUnreachableError):

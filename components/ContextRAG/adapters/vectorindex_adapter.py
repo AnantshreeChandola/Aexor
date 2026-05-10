@@ -36,7 +36,7 @@ class VectorIndexAdapter:
 
     source_name = "vectorindex"
     required_tier = 3
-    default_timeout = 0.05
+    default_timeout = 0.1
 
     def __init__(self, vector_index_service: Any | None) -> None:
         self._service = vector_index_service
@@ -44,7 +44,7 @@ class VectorIndexAdapter:
     async def fetch_evidence(
         self,
         intent: Intent,
-        _timeout_s: float = 0.05,
+        _timeout_s: float = 0.1,
     ) -> list[EvidenceItem]:
         """Call VectorIndexService.search() and convert results.
 

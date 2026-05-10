@@ -11,6 +11,7 @@ import logging
 
 from fastapi import APIRouter, Depends, Query, Request
 
+from shared.api.auth import get_auth_context
 from shared.dependencies import get_analytics_service, get_plan_service
 
 from ..domain.models import (
@@ -139,6 +140,21 @@ async def health_check(request: Request) -> dict:
             "error": str(e),
             "component": "PlanLibrary",
         }
+
+
+@router.get("/user")
+async def get_user_plans(
+    service: PlanService = Depends(get_plan_service),
+    auth_context: dict = Depends(get_auth_context),
+    limit: int = Query(default=50, ge=1, le=500),
+    success_only: bool = Query(default=False),
+) -> SuccessResponse:
+    """Return plans for the authenticated user."""
+    user_id = str(auth_context["user_id"])
+    plans = await service.get_plans_by_user(
+        user_id=user_id, limit=limit, success_only=success_only
+    )
+    return SuccessResponse(data=plans)
 
 
 @router.get("/{plan_id}")

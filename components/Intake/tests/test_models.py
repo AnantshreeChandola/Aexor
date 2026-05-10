@@ -27,7 +27,6 @@ from components.Intake.domain.models import (
     SessionResetResponse,
     SessionStoreUnavailableError,
     SessionTurn,
-    ToolNotAvailableError,
 )
 
 # ------------------------------------------------------------------
@@ -63,7 +62,6 @@ class TestSession:
         assert session.detected_intent is None
         assert session.extracted_entities == {}
         assert session.extracted_constraints == {}
-        assert session.profile_defaults_offered == {}
         assert session.created_at is not None
         assert session.updated_at is not None
 
@@ -172,7 +170,6 @@ class TestErrorHierarchy:
             MaxTurnsExceededError("ses_1", 20),
             SessionStoreUnavailableError("Redis down"),
             IntentParserError("LLM failed"),
-            ToolNotAvailableError("book_flight", ["airline.booking"]),
         ]
         for err in errors:
             assert isinstance(err, IntakeError)
@@ -190,12 +187,6 @@ class TestErrorHierarchy:
     def test_max_turns_exceeded_attrs(self):
         err = MaxTurnsExceededError("ses_abc", 20)
         assert err.max_turns == 20
-
-    def test_tool_not_available_error_message(self):
-        err = ToolNotAvailableError("book_flight", ["airline.booking"])
-        assert err.intent_type == "book_flight"
-        assert "airline.booking" in str(err)
-        assert "book_flight" in str(err)
 
     def test_intent_parser_error_attrs(self):
         err = IntentParserError("timeout")

@@ -66,9 +66,11 @@ Intake is the system's **HTTP entry point** in the **API/Interface Layer**. It:
 └──────────────────────────────────────────────────────────────┘
 
 Cross-component dependencies:
+  Intake ──► FallbackLLMAdapter               (local-first intent parsing)
+             ├─ try: Ollama (Llama 3.2 3B)    (~1s, free, Docker sidecar)
+             └─ catch: Remote LLM (Claude)    (~2s, paid, fallback)
   Intake ──► Planner.get_required_entities()  (lightweight query)
   Intake ──► ProfileStore.get_preference()    (consent-gated defaults)
-  Intake ──► LLMAdapter (Anthropic Claude)    (intent parsing)
 ```
 
 ### Blast Radius Analysis
@@ -76,7 +78,8 @@ Cross-component dependencies:
 | Failure | Impact | Containment |
 |---------|--------|-------------|
 | Redis down | Cannot create/load sessions | HTTP 503 `SESSION_STORE_UNAVAILABLE` — no cascade |
-| LLM unavailable | Cannot parse intent | Fallback: extract nothing, return `status: "collecting"` with generic prompt |
+| Ollama unavailable | Cannot parse intent locally | FallbackLLMAdapter seamlessly uses remote LLM — no user impact |
+| Remote LLM unavailable | Cannot parse intent (and Ollama down) | Fallback: extract nothing, return `status: "collecting"` with generic prompt |
 | Planner unavailable | Cannot determine required entities | Fallback: heuristic (intent + ≥1 entity → ready) |
 | Tool not available | Intent requires a tool not in PluginRegistry | HTTP 422 `TOOL_NOT_AVAILABLE` — user informed early, no wasted turns |
 | ProfileStore unavailable | Cannot check stored defaults | Skip defaults, ask user directly for all missing entities |
@@ -84,7 +87,7 @@ Cross-component dependencies:
 | Max turns exceeded | Session capped | HTTP 400 `MAX_TURNS_EXCEEDED` — session preserved |
 | Malformed message | Validation failure | HTTP 422 from Pydantic — no session side effects |
 
-**Isolation strategy**: Three external dependencies (Redis, LLM, Planner/ProfileStore). Redis failure is binary (503). LLM and Planner/ProfileStore failures degrade gracefully — Intake falls back to simpler behavior, never blocks the user. Tool-not-available errors are surfaced early to the user rather than collecting entities for an intent that can't be fulfilled.
+**Isolation strategy**: Four external dependencies (Redis, Ollama, Remote LLM, Planner/ProfileStore). Redis failure is binary (503). Ollama failure triggers seamless fallback to the remote LLM via FallbackLLMAdapter. Remote LLM and Planner/ProfileStore failures degrade gracefully — Intake falls back to simpler behavior, never blocks the user. Tool-not-available errors are surfaced early to the user rather than collecting entities for an intent that can't be fulfilled.
 
 ---
 
@@ -141,7 +144,10 @@ def create_intake_service(
     llm_adapter: LLMAdapter,
     planner_service: Any,
     preference_service: Any,
+    local_llm_adapter: LLMAdapter | None = None,
 ) -> IntakeService: ...
+# When local_llm_adapter is provided, wraps it with the remote adapter
+# in a FallbackLLMAdapter (local-first, remote fallback).
 ```
 
 ### 4.3 Consumer Contracts
@@ -192,12 +198,15 @@ class Session(BaseModel):
     detected_intent: str | None = None
     extracted_entities: dict[str, Any] = Field(default_factory=dict)
     extracted_constraints: dict[str, Any] = Field(default_factory=dict)
-    profile_defaults_offered: dict[str, Any] = Field(default_factory=dict)  # NEW
+    profile_defaults_offered: dict[str, Any] = Field(default_factory=dict)
+    routing_tier: str | None = None                    # "local" or "remote" (which LLM served Turn 1)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 ```
 
-**New field** `profile_defaults_offered`: Tracks which ProfileStore defaults were offered to the user so we don't re-offer them. Key = entity name, value = offered value.
+**Field** `profile_defaults_offered`: Tracks which ProfileStore defaults were offered to the user so we don't re-offer them. Key = entity name, value = offered value.
+
+**Field** `routing_tier`: Set on Turn 1 to `"local"` (Ollama served the parse) or `"remote"` (remote LLM served it). Used for observability. `None` = not yet classified.
 
 #### SessionTurn
 
@@ -381,9 +390,47 @@ If intent cannot be determined, return intent: null.
 
 **Context merging**: The LLM receives both the new message and the prior session state (detected_intent, extracted_entities). The LLM is instructed to return the merged result directly.
 
-**Reuse**: `LLMAdapter` protocol and `AnthropicAdapter` from `components/Planner/adapters/llm_adapter.py` — same adapter instance shared via DI, no new code needed for the LLM client.
+**Reuse**: `LLMAdapter` protocol from `components/Planner/adapters/llm/protocol.py`. Intake uses a `FallbackLLMAdapter` that wraps a local `OllamaAdapter` and the shared remote adapter (see §7.3).
 
-### 7.3 Planner's `get_required_entities()` (New Method)
+### 7.3 FallbackLLMAdapter — `adapters/fallback_llm.py`
+
+Composing adapter that implements the `LLMAdapter` protocol. Tries a local LLM (Ollama) first and falls back to the remote LLM (Claude/OpenAI/Gemini) on any exception.
+
+```python
+class FallbackLLMAdapter:
+    def __init__(self, local: LLMAdapter, remote: LLMAdapter, local_model: str) -> None: ...
+
+    async def generate(self, model, system_prompt, user_prompt, ...) -> str:
+        """Try local adapter (with local_model override), fall back to remote."""
+
+    last_provider: str  # "local" or "remote" — set after each call
+```
+
+**Architecture**:
+```
+User message
+    │
+    ▼
+FallbackLLMAdapter
+    ├─ try: Ollama (Llama 3.2 3B local)  ← ~1s, free, Docker sidecar
+    │
+    └─ catch: Remote LLM (Claude/etc.)   ← ~2s, paid, fallback
+    │
+    ▼
+LLMBasedParser (unchanged — same prompt, same JSON parsing)
+```
+
+**Key design decisions**:
+- The local adapter receives `local_model` (e.g. `llama3.2:3b`); the remote adapter receives the original `model` parameter — no model name leakage between backends.
+- `last_provider` attribute enables observability without coupling the parser to the fallback logic.
+- Remote failures propagate normally (not swallowed) — only local failures trigger fallback.
+- The `LLMBasedParser` is unaware of which backend served the response.
+
+**Env vars**: `INTAKE_USE_LOCAL_LLM` (default `true`), `OLLAMA_BASE_URL`, `INTAKE_LOCAL_MODEL`, `INTAKE_LOCAL_TIMEOUT_S`.
+
+The `Session.routing_tier` field records which backend served Turn 1 (`"local"` or `"remote"`).
+
+### 7.4 Planner's `get_required_entities()` (New Method)
 
 Added to `components/Planner/service/planner_service.py`:
 
@@ -472,8 +519,10 @@ I still need a few details:
 **DI wiring**:
 1. `shared/app.py` lifespan:
    - Create `redis.asyncio.Redis` from `REDIS_URL` env var
-   - Reuse `AnthropicAdapter` instance (already created for Planner) or create a shared one
-   - Call `create_intake_service(redis_client, llm_adapter, planner_service, preference_service)`
+   - Reuse remote LLM adapter instance (already created for Planner) or create a shared one
+   - Create `OllamaAdapter` for local LLM (graceful if unavailable)
+   - Call `create_intake_service(redis_client, llm_adapter, planner_service, preference_service, local_llm_adapter=ollama_adapter)`
+   - Factory wraps both in `FallbackLLMAdapter` automatically
    - Store on `app.state.intake_service`
 2. `shared/dependencies.py`: Add `get_intake_service(request) → request.app.state.intake_service`
 3. Routes: `service: IntakeService = Depends(get_intake_service)`
@@ -651,7 +700,7 @@ No new dependencies required — all packages already in `pyproject.toml`.
 | Auth utilities | `shared/api/auth.py` | `get_auth_context()` → user_id, context_tier |
 | Error handlers | `shared/api/error_handlers.py` | `ErrorResponse`, `APIErrorHandler` |
 | Intent schema | `shared/schemas/intent.py` | `Intent` model (§2.1) |
-| LLMAdapter | `components/Planner/adapters/llm_adapter.py` | Shared LLM protocol + Anthropic adapter |
+| LLMAdapter | `components/Planner/adapters/llm/protocol.py` | Shared LLM protocol (Ollama + remote adapters) |
 | DI wiring | `shared/app.py`, `shared/dependencies.py` | Service initialization |
 
 ### Component Dependencies
@@ -668,7 +717,8 @@ No new dependencies required — all packages already in `pyproject.toml`.
 | Service | Purpose | SLA |
 |---------|---------|-----|
 | Redis 7 | Session storage | Required for operation; 503 on failure |
-| Anthropic Claude API | Intent parsing (via LLMAdapter) | Degrades gracefully; returns "collecting" on failure |
+| Ollama (Docker sidecar) | Local intent parsing (Llama 3.2 3B) | Falls back to remote LLM if unavailable |
+| Remote LLM (Claude/OpenAI/Gemini) | Fallback intent parsing | Degrades gracefully; returns "collecting" on failure |
 
 ---
 
@@ -744,7 +794,7 @@ Note: Redis is the **primary store** for sessions, not a cache layer over Postgr
 | Redis GET/SET | < 5ms | < 2ms | Local network |
 | ProfileStore lookup p95 | < 50ms | < 20ms | DB query for single preference |
 
-**Note**: Performance targets are significantly relaxed from the original spec (< 200ms). The LLM-based parsing adds ~500ms-1s of latency. This is acceptable because Intake is a conversational interface where users expect a brief response time, not real-time. The spec's < 200ms target applied to the rules-based parser and should be updated.
+**Note**: With the local Ollama adapter (Llama 3.2 3B), intent parsing latency is ~1s on Apple Silicon (M-series), making the local path significantly cheaper and comparable in speed. Remote LLM fallback adds ~500ms-1s additional latency. Both are acceptable for a conversational interface.
 
 ### Availability
 
@@ -777,6 +827,7 @@ Note: Redis is the **primary store** for sessions, not a cache layer over Postgr
 | `test_service.py` | IntakeService with mocked adapters | Multi-turn flow, session lifecycle, readiness via Planner, profile defaults, consent tier gating, error paths |
 | `test_contract.py` | Intent §2.1 conformance | All emitted Intents pass `Intent.model_validate()` |
 | `test_observability.py` | No PII in logs | Capture log output, assert no message content |
+| `test_fallback_llm.py` | FallbackLLMAdapter with fake adapters | Local success, local failure → remote fallback, both fail, model override, provider tracking |
 
 ---
 
@@ -784,16 +835,17 @@ Note: Redis is the **primary store** for sessions, not a cache layer over Postgr
 
 ### Blast Radius Containment
 
-Intake has three external dependencies (Redis, LLM API, Planner/ProfileStore). Failure modes:
+Intake has four external dependencies (Redis, Ollama, Remote LLM, Planner/ProfileStore). Failure modes:
 - **Redis down**: HTTP 503 for all session operations. No cascade to other components.
-- **LLM down**: Intent parsing fails → empty ParseResult → "collecting" with generic prompt. No cascade.
+- **Ollama down**: FallbackLLMAdapter silently falls back to remote LLM. No user-visible impact.
+- **Both LLMs down**: Intent parsing fails → empty ParseResult → "collecting" with generic prompt. No cascade.
 - **Planner down**: Entity requirements unknown → fallback to heuristic (intent + ≥1 entity → ready). May emit incomplete Intents, but downstream validation catches this.
 - **ProfileStore down**: Cannot offer stored defaults → skip defaults, ask user for all missing entities. No cascade.
 - **Session data corruption**: 1h TTL bounds exposure. User can reset session.
 
 ### Fault Isolation
 
-- **LLM calls**: Reuse Planner's `CircuitBreaker` for the LLM adapter. Intake uses Haiku model (separate circuit from Planner's primary/fallback models). Circuit opens after 5 consecutive failures, closes after 60s.
+- **LLM calls**: FallbackLLMAdapter handles Ollama failures by falling back to remote LLM. Remote LLM reuses Planner's `CircuitBreaker`. Circuit opens after 5 consecutive failures, closes after 60s.
 - **Planner query**: If Planner service throws, catch and fall back to heuristic. No circuit breaker needed — the Planner's own breakers handle LLM failures internally.
 - **ProfileStore**: If preference lookup throws (including `ConsentDeniedError`), skip the default for that entity. No circuit breaker needed — single DB query, fast failure.
 - **Redis**: Binary fail/succeed. `SessionStoreUnavailableError` is the single fault boundary.
@@ -804,7 +856,8 @@ Intake has three external dependencies (Redis, LLM API, Planner/ProfileStore). F
 |-------------|------|-----------|-------|
 | Intake → Planner | Library call | Sync (await) | `get_required_entities()` — lightweight, no plan generation |
 | Intake → ProfileStore | Library call | Sync (await) | `get_preference()` — consent-gated, single DB query |
-| Intake → LLM | HTTP API | Async | Via shared `AnthropicAdapter` — circuit-breakered |
+| Intake → Ollama | HTTP API | Async | Via `OllamaAdapter` (local, Docker sidecar) — FallbackLLMAdapter |
+| Intake → Remote LLM | HTTP API | Async | Via shared remote adapter — fallback path, circuit-breakered |
 | Intake → Redis | TCP | Async | Session CRUD — binary success/fail |
 
 ### Determinism Guarantees
@@ -840,10 +893,12 @@ No background tasks. All operations are synchronous request-response.
 
 2. **Open intent taxonomy**: Intake accepts any intent string. Downstream validation by Planner/PluginRegistry. No ADR needed — this was a spec-level decision.
 
-3. **LLM-based parser**: Uses Anthropic Claude (Haiku) via shared `LLMAdapter` protocol. Chosen over rules-based MVP because:
-   - Rules-based parser cannot accurately judge entity completeness for arbitrary intent types (open taxonomy).
+3. **Local-first LLM parsing**: Uses Ollama (Llama 3.2 3B) as primary parser with remote LLM (Claude/etc.) as fallback via `FallbackLLMAdapter`. Chosen because:
+   - Local model provides zero API cost and ~1s latency on Apple Silicon.
+   - Open taxonomy — no fixed intent list, handles any intent without retraining.
    - LLM naturally handles synonyms, implicit entities, and multi-language input.
-   - Cost per parse is minimal (~$0.001 per Haiku call for short extraction tasks).
+   - Seamless fallback to remote LLM if Ollama is unavailable.
+   - Replaces the earlier regex-based `IntentRouter` which was limited to a fixed set of intents.
 
 4. **Planner-driven readiness**: Readiness is determined by Planner's `get_required_entities()` instead of a local heuristic. Chosen because:
    - Planner has access to tool definitions (via PluginRegistry) and knows exactly what entities each tool needs.
@@ -863,13 +918,13 @@ No background tasks. All operations are synchronous request-response.
 
 | ID | Risk | Severity | Mitigation |
 |----|------|----------|------------|
-| R-001 | LLM parsing adds 500ms-1s latency per message | Medium | Use Haiku (fastest model); circuit breaker for fast failure; update spec targets |
+| R-001 | LLM parsing adds ~1s latency per message | Low | Local Ollama (~1s, free) with remote fallback (~2s, paid); circuit breaker on remote path |
 | R-002 | Redis unavailability causes all sessions to fail | Medium | HTTP 503 with clear error; sessions are ephemeral (1h TTL) |
 | R-003 | Session state grows unbounded with many turns | Low | Capped at 20 turns, 50KB max state, 10K char message limit |
 | R-004 | Redis key pattern deviation from MODULAR_ARCHITECTURE | Low | Document deviation; update MODULAR_ARCHITECTURE to `session:{user_id}:{session_id}` |
 | R-005 | Planner query adds cross-component coupling | Medium | Lightweight method with no plan generation; graceful fallback to heuristic |
 | R-006 | LLM may extract incorrect entities | Medium | Planner validates completeness; user can correct in subsequent turns |
-| R-007 | ANTHROPIC_API_KEY must be set for Intake to parse | High | Shared with Planner — already a deployment requirement; clear error on startup |
+| R-007 | Remote LLM API key must be set for fallback parsing | Medium | Local Ollama handles most parsing; remote key shared with Planner — already a deployment requirement |
 
 ### Open Questions
 

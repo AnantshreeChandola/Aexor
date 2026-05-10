@@ -18,7 +18,6 @@ from components.TrustFilter.service.filter_service import (
     FilterService,
 )
 
-
 # -----------------------------------------------------------------
 # Verdict combination tests (T402)
 # -----------------------------------------------------------------

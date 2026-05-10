@@ -48,7 +48,7 @@ Return ONLY a valid JSON object (no markdown, no code fences) matching this sche
       "max_spawned_steps": null | <int, 1-10>,
       "policy_ref": "<policy_id or null>",
       "reasoning_config": null | {
-        "model": "<model_id>",
+        "model": "claude-sonnet-4-5-20250929",
         "temperature": <float, 0.0-1.0>,
         "max_tokens": <int, 256-8192>,
         "system_prompt_ref": "<prompt template reference>",
@@ -73,7 +73,15 @@ Return ONLY a valid JSON object (no markdown, no code fences) matching this sche
 5. Steps are numbered sequentially starting from 1.
 6. Maximum 50 steps, maximum 10 parallel steps (steps with same "after" dependency).
 7. NEVER include credential values, API keys, or secrets in args. Use credential ID references only.
-8. Role assignments:
+8. CRITICAL — Minimal planning. Only include steps that directly fulfill the user's stated intent:
+   - For READ-ONLY intents (list, check, show, "what meetings do I have", "show my schedule"):
+     Use ONLY Fetcher + Reasoner steps. The Fetcher retrieves data, the Reasoner formats/summarizes it for the user.
+     Do NOT add Booker, Notifier, or Resolver steps for read-only queries.
+   - Add Booker steps ONLY when the user explicitly asks to create, update, delete, or modify something.
+   - Add Notifier steps ONLY when the user explicitly asks to send a notification, email, or message.
+   - Add Resolver steps ONLY when the plan involves a write action that needs user confirmation.
+   - NEVER invent actions the user did not ask for. If they ask "list my meetings", do NOT add conflict analysis, notifications, or booking steps.
+9. Role assignments:
    - Fetcher: Read-only data retrieval
    - Analyzer: Data processing and analysis
    - Watcher: Monitor for changes or conditions
@@ -82,49 +90,55 @@ Return ONLY a valid JSON object (no markdown, no code fences) matching this sche
    - Notifier: Send notifications or alerts
    - Reasoner: LLM-based adaptive reasoning (requires type="llm_reasoning", policy_ref, reasoning_config)
    - Guard: Trust boundary sanitizer (requires type="sanitizer", uses="trust_filter.scan")
-9. Step types:
+10. Step types:
    - "api" (default): Deterministic tool call
    - "llm_reasoning": LLM-based adaptive decision — MUST have role="Reasoner", policy_ref, and reasoning_config
    - "policy_check": Policy evaluation gate — MUST have policy_ref
    - "sanitizer": Trust boundary scan — MUST have role="Guard", uses="trust_filter.scan", call="scan", can_spawn=false. The sanitizer step scans upstream API results for prompt-injection attacks before they reach any Reasoner step.
-10. Spawning rules:
+11. Spawning rules:
    - Steps with can_spawn=true may create child steps at runtime (max_spawned_steps ≤ 10)
    - Spawned steps inherit their parent's policy_ref
    - No recursive spawning (spawned steps cannot themselves spawn)
    - Total graph size must stay ≤ 100 steps
-11. Return raw JSON only. No explanation, no markdown wrapping.
-12. Plan structure pattern — always follow this ordering:
-    a. Fetcher step(s): Read-only data retrieval first (e.g., check calendar availability, list events). type="api".
-    a2. Guard step(s): Insert a sanitizer step after each Fetcher step whose output will flow into a Reasoner. type="sanitizer", role="Guard", uses="trust_filter.scan". See Rule 21 for the sanitizer template.
-    b. Reasoner step: Analyze fetched data and decide the best action (type="llm_reasoning", can_spawn=true, trust_level="trusted"). The Reasoner outputs structured JSON with a recommended action (e.g., {"recommended_time": "...", "has_conflict": true}). context_from must include the Guard (sanitizer) step, NOT the Fetcher step directly. The Reasoner serves as the conflict-detection, rescheduling, and recovery handler — all dynamic logic lives here, NOT hardcoded.
-    c. Resolver step (if user confirmation needed): Present the Reasoner's recommendation to the user (role="Resolver", gate_id required). This is a HITL gate — execution pauses until the user approves.
-    d. Booker step: Execute the write action using template references to the Reasoner's output (e.g., start_datetime = "{{step_2.result.recommended_time}}"). MUST have role="Booker" and gate_id for HITL approval.
-    e. Notifier step: Send notifications using template references for actual values from the Reasoner or Booker output.
-13. Recovery Reasoner requirements:
+12. Return raw JSON only. No explanation, no markdown wrapping.
+13. Plan structure patterns — choose the RIGHT pattern for the intent:
+    A. READ-ONLY intents (list, check, show, query): Fetcher → Guard → Reasoner ONLY.
+       - Fetcher: Retrieve data (type="api", role="Fetcher"). Set the correct query args from the intent — e.g. for "list meetings this week", set timeMin/timeMax to the start and end of the current week using the user's timezone. Use the tool's input_schema to determine the correct parameter names.
+       - Guard: Insert a sanitizer step after the Fetcher. type="sanitizer", role="Guard", uses="trust_filter.scan". See Rule 22 for the sanitizer template.
+       - Reasoner: Summarize and present the retrieved data to the user (type="llm_reasoning", role="Reasoner"). The system_prompt_ref MUST instruct it to format the data as a clear, human-readable list or summary (e.g., "List all events with their title, date, time, and status"). context_from must include the Guard step (NOT the Fetcher directly). Do NOT instruct the Reasoner to analyze conflicts, recommend times, or output scheduling fields — just present the data.
+       - Do NOT add Booker, Notifier, or Resolver steps.
+    B. WRITE/SCHEDULING intents (create, book, schedule, update, delete, send):
+       a. Fetcher step(s): Read-only data retrieval first (e.g., check calendar availability, list events). type="api".
+       a2. Guard step(s): Insert a sanitizer step after each Fetcher step whose output will flow into a Reasoner. type="sanitizer", role="Guard", uses="trust_filter.scan". See Rule 22 for the sanitizer template.
+       b. Reasoner step: Analyze fetched data and decide the best action (type="llm_reasoning", can_spawn=true, trust_level="trusted"). The Reasoner outputs structured JSON with a recommended action (e.g., {"recommended_time": "...", "has_conflict": true}). context_from must include the Guard (sanitizer) step, NOT the Fetcher step directly.
+       c. Resolver step (if user confirmation needed): Present the Reasoner's recommendation to the user (role="Resolver", gate_id required). This is a HITL gate — execution pauses until the user approves.
+       d. Booker step: Execute the write action using template references to the Reasoner's output (e.g., start_datetime = "{{step_2.result.recommended_time}}"). MUST have role="Booker" and gate_id for HITL approval.
+       e. Notifier step (only if user asked to notify someone): Send notifications using template references for actual values from the Reasoner or Booker output.
+14. Recovery Reasoner requirements (for write/scheduling intents only):
     - The Reasoner step MUST have can_spawn=true and max_spawned_steps=3
     - The Reasoner step MUST have trust_level="trusted" (so it can spawn steps)
     - The `uses` field on llm_reasoning steps should describe the reasoning context (e.g., "calendar_conflict_resolver") — it does NOT need to be a catalog tool
     - The Reasoner's reasoning_config.system_prompt_ref MUST instruct it to output structured JSON with known field names so downstream steps can use {{step_N.result.field}} template references
     - If a Booker step fails (e.g., time conflict), the system routes the error to this Reasoner, which spawns a new Booker step with corrected args (e.g., a different time slot)
-14. Write operations (create, update, delete, send) MUST use role="Booker" with a gate_id.
-15. When the intent involves attendees or recipients, ALWAYS include a Notifier step with the appropriate email/notification tool.
-16. Conflict detection — for scheduling intents the Fetcher step MUST query existing events for the target date/time range so the Reasoner can detect overlaps. Use a tool that returns events (e.g., GOOGLECALENDAR_FIND_EVENT, GOOGLECALENDAR_EVENTS_LIST_ALL_CALENDARS) — NOT a metadata-only tool like GOOGLECALENDAR_GET_CALENDAR which returns no event data. Pass the target date range in the Fetcher args (timeMin/timeMax or equivalent).
-17. Template references — EXACT syntax is {{step_N.result.field}} with DOUBLE curly braces, underscore after "step", and ".result." segment. Examples:
+15. Write operations (create, update, delete, send) MUST use role="Booker" with a gate_id.
+16. When the intent EXPLICITLY asks to notify, email, or message attendees/recipients, include a Notifier step with the appropriate tool. Do NOT add a Notifier step for read-only intents or when the user did not ask to send anything.
+17. Conflict detection — for scheduling intents the Fetcher step MUST query existing events for the target date/time range so the Reasoner can detect overlaps. Use a tool that returns events (e.g., GOOGLECALENDAR_FIND_EVENT, GOOGLECALENDAR_EVENTS_LIST_ALL_CALENDARS) — NOT a metadata-only tool like GOOGLECALENDAR_GET_CALENDAR which returns no event data. Pass the target date range in the Fetcher args (timeMin/timeMax or equivalent).
+18. Template references — EXACT syntax is {{step_N.result.field}} with DOUBLE curly braces, underscore after "step", and ".result." segment. Examples:
     CORRECT:   "{{step_2.result.recommended_time}}"
     CORRECT:   "{{step_1.result.events}}"
     WRONG:     "{step2.recommended_time}" — missing double braces, underscore, .result.
     WRONG:     "{{step2.recommended_time}}" — missing underscore and .result.
     WRONG:     "{step_2.resolved_time}" — missing double braces and .result.
     You MUST use the Reasoner's step number (NOT the Resolver step number) when referencing Reasoner output fields like recommended_time. When referencing Reasoner output, you MUST set the Reasoner's reasoning_config.system_prompt_ref to instruct it to return structured JSON with known field names (e.g., {"recommended_time": "...", "has_conflict": true, "conflicts": [...]}). This allows downstream steps to reliably use {{step_N.result.recommended_time}} etc.
-18. IMPORTANT: Booker and Notifier steps should use template references to the Reasoner's structured output for dynamic values (e.g., {{step_2.result.recommended_time}}) rather than hardcoding values from the intent. This lets the Reasoner adjust values based on conflict analysis at runtime. Always reference the REASONER step number, not any other step.
-19. Conflict resolution with user interaction — for scheduling intents the plan MUST include a Resolver step (role="Resolver", gate_id required) between the Reasoner and Booker steps. The expected plan pattern is:
+19. IMPORTANT: Booker and Notifier steps should use template references to the Reasoner's structured output for dynamic values (e.g., {{step_2.result.recommended_time}}) rather than hardcoding values from the intent. This lets the Reasoner adjust values based on conflict analysis at runtime. Always reference the REASONER step number, not any other step.
+20. Conflict resolution with user interaction — for scheduling intents the plan MUST include a Resolver step (role="Resolver", gate_id required) between the Reasoner and Booker steps. The expected plan pattern is:
     a. Fetcher: Query existing events for the target date/time range (type="api")
     b. Reasoner: Analyze fetched events for overlaps with the requested time. Use type="llm_reasoning" with a reasoning_config that instructs the LLM to output structured JSON: {"recommended_time": "<ISO datetime>", "has_conflict": <bool>, "conflicts": [...], "free_slots": [{"start": "<ISO>", "end": "<ISO>", "label": "<human-readable>"}], "reason": "<why this time was chosen>"}. If has_conflict=true, free_slots MUST contain 3-5 nearest available time slots during work hours. If has_conflict=false, free_slots should be an empty array. context_from must include the Fetcher step number.
     c. Resolver: Present the Reasoner's recommendation to the user for confirmation (role="Resolver", type="api", gate_id required). Use a pass-through tool name like "system.confirm" or "confirm_action" (does NOT need to be in the catalog). MUST include "context_from": [<Reasoner step number>] so the system forwards the Reasoner's recommendation fields. The gate_id triggers HITL approval so the user can review the Reasoner's recommendation before proceeding.
     d. Booker: Create the event using the Reasoner's recommended_time via template reference: start_datetime = "{{step_N.result.recommended_time}}" where N is the Reasoner step number (NOT the Resolver step number). MUST have gate_id for HITL approval. The field name MUST be "recommended_time" — do NOT use "resolved_time", "start_time", or other names.
     e. Notifier: Send notifications using template references for the actual scheduled time: "{{step_N.result.recommended_time}}" where N is the Reasoner step number.
-20. Date resolution — ALWAYS resolve relative dates (e.g., "Friday", "next Tuesday", "tomorrow") using the LOCAL date/time provided in the user's timezone, NOT the UTC timestamp. The "Current Local Date/Time" field is the authoritative reference for what day it is for the user.
-21. TRUST BOUNDARY — MANDATORY SANITIZER STEPS: Whenever an "api" step's output flows (via context_from or after) into any "llm_reasoning" step, you MUST insert a "sanitizer" step in between. The sanitizer scans API responses for prompt-injection attacks before they reach the Reasoner. This is a HARD REQUIREMENT — plans without sanitizer steps between API and Reasoner will be rejected by the validator.
+21. Date resolution — ALWAYS resolve relative dates (e.g., "Friday", "next Tuesday", "tomorrow") using the LOCAL date/time provided in the user's timezone, NOT the UTC timestamp. The "Current Local Date/Time" field is the authoritative reference for what day it is for the user.
+22. TRUST BOUNDARY — MANDATORY SANITIZER STEPS: Whenever an "api" step's output flows (via context_from or after) into any "llm_reasoning" step, you MUST insert a "sanitizer" step in between. The sanitizer scans API responses for prompt-injection attacks before they reach the Reasoner. This is a HARD REQUIREMENT — plans without sanitizer steps between API and Reasoner will be rejected by the validator.
     - Sanitizer step template:
       {
         "step": <N>,
@@ -146,13 +160,13 @@ Return ONLY a valid JSON object (no markdown, no code fences) matching this sche
     - "trust_filter.scan" is an internal pseudo-tool — it does NOT need to be in the tool catalog
     - "load_bearing_fields" in args: list of dotted JSON paths (e.g., ["events[0].start_datetime"]) that must NOT be stripped even if flagged. Use this for fields whose values are critical to downstream computation (times, IDs). Leave empty if unsure.
     - "strict_mode" in args: when true, suspicious fields are also stripped (not just injection-flagged fields). Default false.
-22. TIER 1 REASONER RULES: When a Reasoner step has trust_level="untrusted_input" (Tier 1), it MUST:
+23. TIER 1 REASONER RULES: When a Reasoner step has trust_level="untrusted_input" (Tier 1), it MUST:
     - Have reasoning_config.output_schema_ref set to a valid schema key (e.g., "slot_proposal_v1", "free_slots_v1", "flight_recommendation_v1", "email_summary_v1", "freebusy_sanitized_v1")
     - Have can_spawn=false (Tier 1 reasoners cannot spawn)
     - NOT reference real MCP tools (uses field should be a descriptive name like "schedule_analyzer", not a catalog tool)
     - Have context_from pointing to a sanitizer step (NOT directly to an api step)
-23. TIER 2 REASONER RULES: When a Reasoner step has trust_level="trusted" (Tier 2), the existing rules from items 12-13 apply. Tier 2 reasoners CAN have can_spawn=true and do NOT require output_schema_ref.
-24. PLAN PATTERN WITH SANITIZER — The correct ordering when API data flows into a Reasoner is:
+24. TIER 2 REASONER RULES: When a Reasoner step has trust_level="trusted" (Tier 2), the existing rules from items 13-14 apply. Tier 2 reasoners CAN have can_spawn=true and do NOT require output_schema_ref.
+25. PLAN PATTERN WITH SANITIZER — The correct ordering when API data flows into a Reasoner is:
     a. Fetcher step(s): type="api", role="Fetcher" — retrieve external data
     b. Guard step(s): type="sanitizer", role="Guard" — scan each API response for injection. One sanitizer per API step whose output feeds into reasoning. context_from=[<api_step>].
     c. Reasoner step: type="llm_reasoning", role="Reasoner" — context_from references the sanitizer step(s), NOT the api steps. For Tier 1 (untrusted_input): output_schema_ref required, can_spawn=false. For Tier 2 (trusted): can_spawn=true, no output_schema_ref needed.
@@ -221,6 +235,21 @@ Return ONLY a valid JSON object (no markdown, no code fences) matching this sche
 
         week_section = f"\n\nThis week's calendar:\n{week_calendar}" if week_calendar else ""
 
+        # Tool override instructions for user-selected tools
+        tool_override_section = ""
+        if intent.tool_overrides:
+            override_lines = [
+                f"  - Step {step_num}: Use tool '{tool_name}'"
+                for step_num, tool_name in sorted(intent.tool_overrides.items())
+            ]
+            tool_override_section = (
+                "\n\n## Tool Overrides (user-selected)\n"
+                "The user has explicitly chosen the following tools for specific steps. "
+                "You MUST use these exact tools and map the intent's entities to the "
+                "correct parameter names based on each tool's input_schema:\n"
+                + "\n".join(override_lines)
+            )
+
         return f"""## Current Date/Time
 UTC: {now_utc}
 Current Local Date/Time ({user_tz}): {now_local}{week_section}
@@ -234,7 +263,7 @@ Resolve all relative dates (e.g. "tomorrow", "next Friday") using the calendar a
 {evidence_json}
 
 ## Available Tools (from catalog)
-{catalog_json}
+{catalog_json}{tool_override_section}
 
 Generate a plan that fulfills the user's intent using the available tools and evidence.
 Use evidence to inform argument values (e.g., preferred meeting duration, timezone).

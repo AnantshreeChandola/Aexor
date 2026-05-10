@@ -1,6 +1,5 @@
 """Tests for TrustFilter domain errors -- T205."""
 
-import pytest
 
 from components.TrustFilter.domain.errors import (
     HaikuUnreachableError,

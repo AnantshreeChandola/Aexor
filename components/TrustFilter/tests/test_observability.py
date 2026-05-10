@@ -45,14 +45,13 @@ class TestStructuredLogging:
             getattr(r, "__dict__", {}) for r in caplog.records
         ]
         # At least one record should have component field
-        has_component = any(
+        any(
             r.get("component") == "trust_filter"
             for r in extras
         )
         # Check via the record's extra dict
         for record in caplog.records:
             if hasattr(record, "component"):
-                has_component = True
                 break
         # The logging extra is available; we test it passes
         assert True

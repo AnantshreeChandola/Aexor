@@ -164,6 +164,15 @@ class CycleDetectedError(ExecuteError):
         super().__init__(f"Cycle detected: {details}")
 
 
+class IntegrationNotConnectedError(ExecuteError):
+    """A required integration (e.g. Notion, Gmail) is not connected on Composio."""
+
+    def __init__(self, provider: str, step: int | None = None) -> None:
+        self.provider = provider
+        self.step = step
+        super().__init__(f"{provider} not connected on Composio")
+
+
 class GateApprovalRequired(ExecuteError):
     """Execution paused — a gated step requires user approval before continuing."""
 

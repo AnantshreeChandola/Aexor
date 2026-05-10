@@ -119,7 +119,7 @@ python -c "import secrets; print(secrets.token_urlsafe(32))"
 
 ```bash
 # Install dependencies
-pip install -r requirements.txt
+pip install .
 
 # Run database migrations
 alembic upgrade head
@@ -165,8 +165,10 @@ aws rds create-db-instance \
 FROM python:3.11-slim
 
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY pyproject.toml README.md ./
+COPY components/ components/
+COPY shared/ shared/
+RUN pip install --no-cache-dir .
 
 COPY . .
 

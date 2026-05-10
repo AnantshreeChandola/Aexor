@@ -7,14 +7,20 @@ Returns data in Evidence Item format.
 Reference: LLD.md, tasks.md T200
 """
 
+import copy
 import logging
+import re
 import time
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
+import ulid
+
 from shared.database.error_handler import DatabaseIntegrityError
 from shared.schemas.evidence import EvidenceItem
+from shared.schemas.intent import Intent
+from shared.schemas.plan import Plan, PlanConstraints, PlanMeta, PlanStep
 
 from ..adapters.db import DatabaseAdapter
 from ..domain.models import (
@@ -24,6 +30,7 @@ from ..domain.models import (
     DuplicatePlanError,
     PlanDB,
     PlanMetricsDB,
+    PlanNotFoundError,
     PlanOutcomeDB,
     PlanTooLargeError,
     StorePlanResponse,
@@ -132,9 +139,15 @@ class PlanService:
         # Verify determinism: same input -> same hash
         assert compute_plan_hash(canonical) == plan_hash
 
-        # Extract intent type from meta
+        # Extract intent type — prefer plan.intent.intent (the canonical
+        # location), fall back to meta.intent_type for legacy plans.
+        intent_obj = plan.get("intent", {})
         meta = plan.get("meta", {})
-        intent_type = meta.get("intent_type", "unknown")
+        intent_type = (
+            intent_obj.get("intent")
+            or meta.get("intent_type")
+            or "unknown"
+        )
         created_at_str = meta.get("created_at")
         if created_at_str:
             created_at = datetime.fromisoformat(created_at_str)
@@ -254,14 +267,8 @@ class PlanService:
 
         latency_ms = (time.time() - start_time) * 1000
         logger.info(
-            "Plans queried by intent",
-            extra={
-                "intent_type": intent_type,
-                "result_count": len(evidence_items),
-                "latency_ms": round(latency_ms, 2),
-                "component": "PlanLibrary",
-                "operation": "get_plans_by_intent",
-            },
+            "plans_queried_by_intent intent=%s result_count=%d latency_ms=%.1f",
+            intent_type, len(evidence_items), latency_ms,
         )
 
         return evidence_items
@@ -293,3 +300,142 @@ class PlanService:
             )
 
         return plan
+
+    async def get_plans_by_user(
+        self,
+        user_id: str,
+        limit: int = 50,
+        success_only: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Return plans for a specific user."""
+        return await self.db.get_plans_by_user(
+            user_id=user_id, limit=limit, success_only=success_only
+        )
+
+    async def clone_plan_for_rerun(
+        self,
+        source_plan_id: str,
+        fresh_entities: dict[str, Any],
+        user_id: str,
+        trace_id: str,
+        constraints_override: dict[str, Any] | None = None,
+    ) -> Plan:
+        """Clone a previously executed plan with fresh entities for rerun.
+
+        Reuses the plan's DAG structure (steps, roles, tools, dependencies)
+        but replaces all entities and resets step statuses.
+
+        Args:
+            source_plan_id: ULID of the plan to clone
+            fresh_entities: New entities to substitute into the plan
+            user_id: User requesting the rerun
+            trace_id: New trace ID for this execution
+            constraints_override: Optional constraint overrides (replaces original)
+
+        Returns:
+            A new Plan ready for preview and execution
+
+        Raises:
+            PlanNotFoundError: If source plan does not exist
+        """
+        plan_db = await self.db.get_plan_by_id(source_plan_id)
+        if plan_db is None:
+            raise PlanNotFoundError(plan_id=source_plan_id)
+
+        source_plan = Plan.model_validate(plan_db.canonical_json)
+
+        new_plan_id = ulid.new().str
+
+        # Build new intent: same type, fresh entities
+        new_intent = Intent(
+            intent=source_plan.intent.intent,
+            entities=fresh_entities,
+            constraints=constraints_override if constraints_override is not None else source_plan.intent.constraints,
+            tz=source_plan.intent.tz,
+            user_id=user_id,
+            trace_id=trace_id,
+            session_id=source_plan.intent.session_id,
+        )
+
+        # Clone graph steps: reset status, apply fresh entities
+        cloned_steps: list[PlanStep] = []
+        for step in source_plan.graph:
+            step_data = step.model_dump()
+            step_data["status"] = "pending"
+            step_data["result"] = None
+            step_data["error"] = None
+            step_data["dry_run"] = True
+
+            # Substitute {{entities.X}} patterns in args values
+            if step_data.get("args"):
+                step_data["args"] = self._substitute_entity_args(
+                    step_data["args"], fresh_entities
+                )
+
+            cloned_steps.append(PlanStep.model_validate(step_data))
+
+        # Build new constraints
+        if constraints_override is not None:
+            new_constraints = PlanConstraints.model_validate(constraints_override)
+        else:
+            new_constraints = source_plan.constraints.model_copy()
+
+        # Build new meta
+        now_iso = datetime.now(UTC).isoformat()
+        # Compute canonical hash from the new plan content
+        preliminary_plan_data = {
+            "plan_id": new_plan_id,
+            "intent": new_intent.model_dump(),
+            "graph": [s.model_dump() for s in cloned_steps],
+            "constraints": new_constraints.model_dump(),
+        }
+        canonical = canonicalize_plan(preliminary_plan_data)
+        new_hash = compute_plan_hash(canonical)
+
+        new_meta = PlanMeta(
+            created_at=now_iso,
+            author="planner@system",
+            canonical_hash=new_hash,
+            rerun_source=source_plan_id,
+        )
+
+        new_plan = Plan(
+            plan_id=new_plan_id,
+            intent=new_intent,
+            trace_id=trace_id,
+            graph=cloned_steps,
+            constraints=new_constraints,
+            plugins=source_plan.plugins.copy(),
+            meta=new_meta,
+            plan_revision=0,
+        )
+
+        logger.info(
+            "Plan cloned for rerun",
+            extra={
+                "source_plan_id": source_plan_id,
+                "new_plan_id": new_plan_id,
+                "component": "PlanLibrary",
+                "operation": "clone_plan_for_rerun",
+            },
+        )
+
+        return new_plan
+
+    @staticmethod
+    def _substitute_entity_args(
+        args: dict[str, Any], entities: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Replace ``{{entities.X}}`` placeholders in step args with fresh entity values."""
+        pattern = re.compile(r"\{\{entities\.(\w+)\}\}")
+        result: dict[str, Any] = {}
+        for key, value in args.items():
+            if isinstance(value, str):
+                def _replacer(match: re.Match) -> str:
+                    entity_key = match.group(1)
+                    return str(entities.get(entity_key, match.group(0)))
+
+                result[key] = pattern.sub(_replacer, value)
+            else:
+                result[key] = copy.deepcopy(value)
+        return result

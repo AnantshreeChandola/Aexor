@@ -94,9 +94,8 @@ class JsonTreeWalker:
                 yield from self.walk(
                     item, depth=depth + 1, path=child_path
                 )
-        elif isinstance(payload, str):
-            if path and self._should_scan(path, payload):
-                yield (path, payload)
+        elif isinstance(payload, str) and path and self._should_scan(path, payload):
+            yield (path, payload)
 
     def _walk_field(
         self,
@@ -133,10 +132,7 @@ class JsonTreeWalker:
             return False
 
         # Skip structured values by shape
-        if self._is_structured_value(value):
-            return False
-
-        return True
+        return not self._is_structured_value(value)
 
     @staticmethod
     def _leaf_name(path: str) -> str:
@@ -155,10 +151,7 @@ class JsonTreeWalker:
         lower = name.lower()
         if lower in _STRUCTURED_EXACT:
             return True
-        for suffix in _STRUCTURED_SUFFIXES:
-            if lower.endswith(suffix):
-                return True
-        return False
+        return any(lower.endswith(suffix) for suffix in _STRUCTURED_SUFFIXES)
 
     @staticmethod
     def _is_structured_value(value: str) -> bool:
@@ -187,10 +180,7 @@ class JsonTreeWalker:
             return True
 
         # URL (short ones)
-        if len(stripped) < 200 and _URL_RE.match(stripped):
-            return True
-
-        return False
+        return bool(len(stripped) < 200 and _URL_RE.match(stripped))
 
     def apply_strips(
         self,
@@ -219,7 +209,7 @@ class JsonTreeWalker:
         """Set a value at a dotted/bracketed path."""
         tokens = _tokenize_path(path)
         current = obj
-        for i, token in enumerate(tokens[:-1]):
+        for _i, token in enumerate(tokens[:-1]):
             current = _navigate(current, token)
             if current is None:
                 return
@@ -227,9 +217,8 @@ class JsonTreeWalker:
         if isinstance(last, int) and isinstance(current, list):
             if 0 <= last < len(current):
                 current[last] = value
-        elif isinstance(last, str) and isinstance(current, dict):
-            if last in current:
-                current[last] = value
+        elif isinstance(last, str) and isinstance(current, dict) and last in current:
+            current[last] = value
 
 
 def _tokenize_path(path: str) -> list[str | int]:

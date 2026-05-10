@@ -306,10 +306,7 @@ class TestSeedFixtureDetection:
         false_positives = 0
         for item in benign_responses_20:
             payload = item["payload"]
-            if isinstance(payload, dict):
-                text = json.dumps(payload)
-            else:
-                text = str(payload)
+            text = json.dumps(payload) if isinstance(payload, dict) else str(payload)
             hits = scanner.scan_string(text, "test_field")
             high_med = [
                 h for h in hits

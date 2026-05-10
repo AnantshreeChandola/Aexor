@@ -105,3 +105,13 @@ def get_audit_service(request: Request) -> Any:
 def get_filter_service(request: Request) -> Any:
     """Get FilterService singleton from app state."""
     return request.app.state.filter_service
+
+
+def get_scheduler_service(request: Request) -> Any:
+    """Get SchedulerService singleton from app state (may be None)."""
+    return getattr(request.app.state, "scheduler_service", None)
+
+
+def get_llm_adapter(request: Request) -> Any:
+    """Get LLMAdapter singleton from app state (may be None)."""
+    return getattr(request.app.state, "llm_adapter", None)

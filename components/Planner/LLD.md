@@ -112,6 +112,8 @@ def create_planner_service(
     registry_service: RegistryService,
     plan_service: PlanService,
     llm_adapter: LLMAdapter | None = None,
+    fallback_llm_adapter: LLMAdapter | None = None,
+    deterministic_planner: DeterministicPlanner | None = None,
 ) -> PlannerService:
     """Create PlannerService with DI-injected dependencies.
 
@@ -122,11 +124,51 @@ def create_planner_service(
         registry_service: PluginRegistry for tool catalog.
         plan_service: PlanLibrary for Level 3 template fallback.
         llm_adapter: LLM adapter (default: AnthropicAdapter from env).
+        fallback_llm_adapter: Separate LLM adapter for fallback model.
+        deterministic_planner: Rule-based planner for known intents
+            (default: auto-created DeterministicPlanner).
 
     Returns:
         Configured PlannerService.
     """
 ```
+
+### 4.3 WorkflowRegistry Entity Map
+
+For known intent types, `get_required_entities()` bypasses the LLM and uses the WorkflowRegistry to return required entities immediately. This eliminates an LLM round-trip for all 26 known intents. Entity definitions come from `WorkflowDefinition.entities` in `workflow_registry.py` — the single source of truth.
+
+| Intent | Required Tools | Entities |
+|--------|---------------|----------|
+| `send_email` | `GMAIL_SEND_EMAIL` | `recipient` (req), `subject` (req), `body` (req) |
+| `schedule_meeting` | `GOOGLECALENDAR_CREATE_EVENT`, `GOOGLECALENDAR_FIND_EVENT` | `attendee` (req), `date_time` (req), `title` (opt), `duration` (opt, pref: `meeting_duration_min`) |
+| `create_event` | `GOOGLECALENDAR_CREATE_EVENT`, `GOOGLECALENDAR_FIND_EVENT` | `title` (req), `date_time` (req), `duration` (opt) |
+| `draft_email` | `GMAIL_CREATE_DRAFT` | `recipient` (req), `subject` (req), `body` (req) |
+| `read_email` | `GMAIL_FETCH_EMAILS` | `sender` (opt), `date_range` (opt), `limit` (opt) |
+| `list_email` | `GMAIL_FETCH_EMAILS` | `folder` (opt), `limit` (opt) |
+| `search_email` | `GMAIL_FETCH_EMAILS` | `query` (req), `limit` (opt) |
+| `list_meetings` | `GOOGLECALENDAR_LIST_EVENTS` | `date_range` (opt), `limit` (opt) |
+| `check_calendar` | `GOOGLECALENDAR_LIST_EVENTS` | `date_range` (req) |
+| `create_document` | `GOOGLEDOCS_CREATE_DOCUMENT_FROM_TEXT` | `title` (req), `content` (req) |
+| `edit_document` | `GOOGLEDOCS_GET_DOCUMENT`, `GOOGLEDOCS_APPEND_TEXT` | `document_id` (req), `content` (req), `action` (opt) |
+| `upload_file` | `GOOGLEDRIVE_UPLOAD_FILE` | `file_path` (req), `folder` (opt) |
+| `download_file` | `GOOGLEDRIVE_FIND_FILE` | `file_name` (req), `query` (opt) |
+| `search_files` | `GOOGLEDRIVE_SEARCH_FILE` | `query` (req) |
+| `list_files` | `GOOGLEDRIVE_LIST_FILES` | `folder` (opt), `limit` (opt) |
+| `create_page` | `NOTION_CREATE_A_NEW_PAGE` | `title` (req), `content` (opt), `parent` (opt) |
+| `create_task` | `NOTION_CREATE_A_NEW_PAGE` | `title` (req), `status` (opt), `due_date` (opt), `assignee` (opt), `parent` (opt) |
+| `search_notion` | `NOTION_SEARCH_NOTION` | `query` (req) |
+| `list_tasks` | `NOTION_FETCH_DATABASE` | `database_id` (req), `status` (opt) |
+| `create_issue` | `GITHUB_ISSUES_CREATE` | `title` (req), `body` (opt), `repo` (req), `labels` (opt), `assignees` (opt) |
+| `list_issues` | `GITHUB_ISSUES_LIST` | `repo` (req), `state` (opt), `labels` (opt) |
+| `create_pr` | `GITHUB_PULLS_CREATE` | `title` (req), `body` (opt), `repo` (req), `head` (req), `base` (opt) |
+| `list_prs` | `GITHUB_PULLS_LIST` | `repo` (req), `state` (opt) |
+| `send_message` | `SLACK_SENDS_A_MESSAGE_TO_A_SLACK_CHANNEL` | `channel` (req), `message` (req) |
+| `search_messages` | `SLACK_SEARCH_FOR_MESSAGES_IN_SLACK` | `query` (req), `channel` (opt) |
+| `list_channels` | `SLACK_LIST_ALL_SLACK_TEAM_CHANNELS` | `limit` (opt) |
+
+Each entity includes aliases for fuzzy matching against collected entities (e.g., `time` matches `date_time` via alias). Intents not in the registry fall through to the LLM path.
+
+For compound intents (e.g., `schedule_meeting_and_email` with `sub_intents: ["schedule_meeting", "send_email"]`), entity requirements from each sub-workflow are merged via `merge_entity_requirements()`, de-duplicating shared entities (required wins over optional).
 
 ### 4.3 Consumer Contracts
 
@@ -140,7 +182,7 @@ result: PlannerResult = await planner.generate_plan(intent)
 
 # Access:
 plan: Plan = result.plan              # GLOBAL_SPEC §2.3
-fallback_level: int = result.fallback_level  # 1-4
+fallback_level: int = result.fallback_level  # 0-4 (0=cached/deterministic)
 context_degraded: bool = result.context_degraded
 generation_duration_ms: int = result.generation_duration_ms
 ```
@@ -166,9 +208,9 @@ class PlannerResult(BaseModel):
     """Result of plan generation."""
     plan: Plan
     fallback_level: int = Field(
-        ..., ge=1, le=4,
+        ..., ge=0, le=4,
         description="Which fallback level produced this plan "
-                    "(1=primary, 2=secondary, 3=template, 4=minimal)"
+                    "(0=cached/deterministic, 1=primary, 2=secondary, 3=template, 4=minimal)"
     )
     context_degraded: bool = Field(
         default=False,
@@ -270,6 +312,18 @@ class AnthropicAdapter:
         """Call Claude Messages API. Raises LLMCallError on failure."""
 ```
 
+**Prompt caching**: The `AnthropicAdapter.generate()` method passes the system prompt with `cache_control: {"type": "ephemeral"}` to enable Anthropic's prompt caching. This reduces TTFT by 30-50% for cached prefixes since the static system prompt (~137 lines) is identical across calls.
+
+```python
+system=[
+    {
+        "type": "text",
+        "text": system_prompt,
+        "cache_control": {"type": "ephemeral"},
+    }
+],
+```
+
 **Configuration** (environment variables):
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
@@ -279,6 +333,105 @@ class AnthropicAdapter:
 | `PLANNER_MAX_INPUT_TOKENS` | No | `8192` | Max input token budget |
 | `PLANNER_MAX_OUTPUT_TOKENS` | No | `4096` | Max output token budget |
 | `PLANNER_LLM_TIMEOUT_S` | No | `30` | Per-call LLM timeout in seconds |
+
+### 6.6 Deterministic Planner — `adapters/deterministic_planner.py`
+
+Rule-based plan builder for known intent types. Bypasses LLM entirely by producing multi-step DAG plans from WorkflowRegistry templates. Deterministic plans are indistinguishable from LLM-generated plans at execution time — same multi-step DAG patterns, same Reasoner steps with `can_spawn`, same HITL gates, same template references.
+
+```python
+class DeterministicPlanner:
+    """Build plans from WorkflowRegistry templates — no LLM required."""
+
+    def can_handle(self, intent: str | Intent) -> bool:
+        """Check if this intent has a deterministic workflow.
+        Accepts str (intent type) or Intent object.
+        Supports compound intents via sub_intents or string decomposition.
+        """
+
+    def build_plan(self, intent: Intent, tools: list) -> Plan | None:
+        """Build a valid Plan from WorkflowRegistry templates.
+        Produces multi-step DAGs matching LLM output patterns.
+        Returns None if required tools are not in catalog → falls through to LLM.
+        """
+```
+
+**Supported intents** (9 total):
+| Intent | Pattern | Steps |
+|--------|---------|-------|
+| `send_email` | write | Reasoner(validate) → Resolver(confirm) → Booker(GMAIL_SEND_EMAIL) |
+| `schedule_meeting` | write | Fetcher(FIND_EVENT) → Reasoner(conflicts) → Resolver(confirm) → Booker(CREATE_EVENT) |
+| `create_event` | write | Fetcher(FIND_EVENT) → Reasoner(conflicts) → Resolver(confirm) → Booker(CREATE_EVENT) |
+| `draft_email` | light-write | Booker(GMAIL_CREATE_DRAFT) |
+| `read_email` | read | Fetcher(GMAIL_FETCH_EMAILS) → Reasoner(summarize) |
+| `list_email` | read | Fetcher(GMAIL_FETCH_EMAILS) → Reasoner(summarize) |
+| `search_email` | read | Fetcher(GMAIL_FETCH_EMAILS) → Reasoner(summarize) |
+| `list_meetings` | read | Fetcher(LIST_EVENTS) → Reasoner(summarize) |
+| `check_calendar` | read | Fetcher(LIST_EVENTS) → Reasoner(summarize) |
+
+**Compound intents**: When an `Intent` has `sub_intents` (e.g., `["schedule_meeting", "send_email"]`), the planner looks up each sub-intent's workflow and calls `compose_workflows()` to chain their DAGs into a single plan. This eliminates both entity inference and plan generation LLM calls.
+
+Plans are returned as `fallback_level=0` (deterministic). All plans pass the existing `PlanValidator`.
+
+### 6.7 Workflow Registry — `adapters/workflow_registry.py`
+
+Centralized registry of frozen workflow definitions for 26 known intents across 7 providers (gmail, googlecalendar, googledocs, googledrive, notion, github, slack). Single source of truth for entity maps, provider maps, action maps, and deterministic plan templates.
+
+**Frozen dataclasses**:
+```python
+@dataclass(frozen=True)
+class EntityDefinition:
+    name: str                              # "recipient"
+    description: str                       # "Who to send the email to"
+    required: bool = True
+    aliases: tuple[str, ...] = ()          # ("to", "attendee_email")
+    default_preference_key: str | None = None
+    tool_param: str | None = None          # MCP param name
+
+@dataclass(frozen=True)
+class StepTemplate:
+    step: int                              # 1-indexed
+    role: str                              # "Fetcher", "Reasoner", "Booker", etc.
+    type: str = "api"                      # "api" | "llm_reasoning"
+    tool: str = ""                         # MCP tool name
+    timeout_s: int = 30
+    gate_id: str | None = None
+    context_from: tuple[int, ...] = ()
+    after: tuple[int, ...] = ()
+    can_spawn: bool = False
+    policy_ref: str | None = None
+    reasoning_config: dict | None = None   # For llm_reasoning steps
+
+@dataclass(frozen=True)
+class WorkflowDefinition:
+    intent: str                            # "send_email"
+    provider: str                          # "gmail"
+    steps: tuple[StepTemplate, ...]        # Full multi-step DAG
+    entities: tuple[EntityDefinition, ...]
+    related_actions: tuple[str, ...] = ()  # For tool_filter
+    related_providers: tuple[str, ...] = ()
+```
+
+**Three workflow patterns**:
+1. **Read-only** (list, check, search): `Fetcher → Reasoner` (2 steps, no Booker)
+2. **Write** (create, send, schedule): `Fetcher → Reasoner → Resolver → Booker` (3-4 steps, HITL gates)
+3. **Light-write** (draft): `Booker` only (1 step, HITL gate)
+
+**Helper functions**:
+| Function | Returns | Purpose |
+|----------|---------|---------|
+| `get_workflow(intent)` | `WorkflowDefinition \| None` | Lookup workflow by intent type |
+| `has_workflow(intent)` | `bool` | Check if intent has a known workflow |
+| `get_all_intents()` | `tuple[str, ...]` | All 9 registered intent types |
+| `get_entity_map()` | `dict` | Entity definitions for `get_required_entities()` |
+| `get_provider_map()` | `dict` | Provider mappings for `tool_filter.py` |
+| `get_action_map()` | `dict` | Action mappings for `tool_filter.py` |
+
+**Composition functions** (for compound intents):
+| Function | Purpose |
+|----------|---------|
+| `decompose_intent(intent_type)` | Split compound intent string into known sub-workflows |
+| `compose_workflows(workflows)` | Chain multiple workflow DAGs into single step sequence |
+| `merge_entity_requirements(workflows)` | Merge entity definitions with deduplication |
 
 ### 6.2 Plan Validator — `adapters/plan_validator.py`
 
@@ -455,28 +608,30 @@ async def generate_plan(self, intent: Intent) -> PlannerResult:
     context_result = await self._context_rag.gather_evidence(intent)
     context_degraded = len(context_result.degraded_sources) > 0
 
-    # 2. Get tool catalog from PluginRegistry
-    catalog = await self._registry.list_catalog()
-    registry_version = catalog.registry_version
-    tool_ids = {t.tool_id for t in catalog.tools}
+    # 2. Get tool catalog (per-user → global → live refresh)
+    tools = ...  # Filter by intent type and action
+    tool_names = {t.name for t in tools}
+
+    # 2b. Check plan cache (signature hash lookup in PlanLibrary)
+    cached = await self._try_plan_cache(intent, list(tool_names))
+    if cached is not None:
+        return cached  # fallback_level=0, near-zero latency
+
+    # 2c. Try deterministic planner for known intents (no LLM)
+    if self._deterministic_planner and self._deterministic_planner.can_handle(intent.intent):
+        plan = self._deterministic_planner.build_plan(intent, tools)
+        if plan is not None:
+            return PlannerResult(plan=plan, fallback_level=0, ...)
 
     # 3. Build prompts
     system_prompt = self._prompt_builder.build_system_prompt()
-    user_prompt = self._prompt_builder.build_user_prompt(
-        intent, context_result.evidence, catalog
-    )
+    user_prompt = self._prompt_builder.build_user_prompt(intent, evidence, tools)
 
-    # 4. Try fallback hierarchy
-    plan, fallback_level = await self._generate_with_fallback(
-        intent, system_prompt, user_prompt,
-        registry_version, tool_ids, context_result.evidence
-    )
+    # 4. Try LLM fallback hierarchy (Levels 1-4)
+    plan, fallback_level = await self._generate_with_fallback(...)
 
-    # 5. Compute canonical hash and populate meta
-    plan_dict = plan.model_dump()
-    canonical_hash = compute_plan_hash(plan_dict)
-    plan_dict["meta"]["canonical_hash"] = canonical_hash
-    plan = Plan.model_validate(plan_dict)
+    # 5. Finalize plan (plan_id, intent, plugins, canonical_hash)
+    plan = self._finalize_plan(plan, intent)
 
     # 6. Return result
     duration_ms = int((time.monotonic() - start) * 1000)
@@ -489,63 +644,23 @@ async def generate_plan(self, intent: Intent) -> PlannerResult:
     )
 ```
 
-### 7.2 Fallback Hierarchy
+**New fast paths (steps 2b, 2c)**: Before invoking the LLM, the service checks two fast paths:
+- **Plan cache** (`_try_plan_cache`): Hashes `(intent_type, sorted_entity_keys, sorted_tool_ids)` with SHA-256 and queries PlanLibrary's `get_plan_by_hash()`. Cache hits return `fallback_level=0`.
+- **Deterministic planner**: For 26 known intents across email, calendar, docs, drive, Notion, GitHub, and Slack, builds plans from templates. Returns `fallback_level=0` with sub-millisecond latency.
 
-```python
-async def _generate_with_fallback(
-    self, intent, system_prompt, user_prompt,
-    registry_version, tool_ids, evidence
-) -> tuple[Plan, int]:
-    """Try 4 fallback levels. Returns (Plan, level)."""
+### 7.2 Fallback Hierarchy (5 levels)
 
-    # Level 1: Primary model (e.g., claude-sonnet-4-5)
-    try:
-        raw = await self._primary_breaker.call(
-            self._llm.generate,
-            model=self._primary_model,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-        )
-        plan = await self._validator.validate(
-            raw, intent, registry_version, tool_ids
-        )
-        return self._finalize_plan(plan, intent), 1
-    except CircuitOpenError:
-        logger.warning("primary_circuit_open", extra={...})
-    except (PlanValidationError, LLMCallError) as exc:
-        logger.warning("primary_failed", extra={...})
-
-    # Level 2: Fallback model (e.g., claude-haiku-4-5)
-    try:
-        raw = await self._fallback_breaker.call(
-            self._llm.generate,
-            model=self._fallback_model,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-        )
-        plan = await self._validator.validate(
-            raw, intent, registry_version, tool_ids
-        )
-        return self._finalize_plan(plan, intent), 2
-    except (CircuitOpenError, PlanValidationError, LLMCallError) as exc:
-        logger.warning("fallback_failed", extra={...})
-
-    # Level 3: Template from PlanLibrary
-    try:
-        templates = await self._plan_service.get_plans_by_intent(
-            intent.intent, limit=1
-        )
-        if templates:
-            plan = self._instantiate_template(
-                templates[0], intent, evidence, tool_ids
-            )
-            return plan, 3
-    except Exception as exc:
-        logger.warning("template_failed", extra={...})
-
-    # Level 4: Minimal safe plan (deterministic, never fails)
-    return self._create_minimal_plan(intent), 4
 ```
+Level 0: Plan cache / Deterministic planner (no LLM, <10ms)
+Level 1: Primary LLM model (claude-sonnet-4-5)
+Level 2: Fallback LLM model (separate circuit breaker)
+Level 3: Template from PlanLibrary (past successful plans)
+Level 4: Minimal safe plan (deterministic, never fails)
+```
+
+Level 0 is checked before entering the LLM fallback chain (see §7.1 steps 2b/2c). Levels 1-4 are the existing LLM-based fallback hierarchy.
+
+Level 0 deterministic plans now produce multi-step DAGs from WorkflowRegistry templates that match LLM output patterns exactly — same Reasoner steps with `can_spawn=True`, same HITL gates via `gate_id`, same template references (`{{step_N.result.field}}`). This means deterministic plans benefit from the same adaptive execution and error recovery as LLM-generated plans. For compound intents, the registry composes multiple workflow DAGs into a single plan, eliminating both entity inference and plan generation LLM calls.
 
 ### 7.3 Minimal Safe Plan (Level 4)
 

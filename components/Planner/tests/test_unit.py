@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import time
 from datetime import UTC
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from components.Planner.adapters.circuit_breaker import CircuitBreaker, CircuitState
-from components.Planner.adapters.llm_adapter import AnthropicAdapter, LLMAdapter
+from components.Planner.adapters.llm import LLMAdapter, LLMConfig
+from components.Planner.adapters.llm.providers.anthropic import AnthropicAdapter
 from components.Planner.adapters.plan_hasher import canonicalize_plan, compute_plan_hash
 from components.Planner.adapters.plan_validator import PlanValidator
 from components.Planner.adapters.prompt_builder import PromptBuilder
@@ -394,6 +395,10 @@ class TestPlanValidator:
 
     # Layer 3: Business rules
     @pytest.mark.asyncio
+    @pytest.mark.xfail(
+        reason="Tool existence check moved from validator to _finalize_plan() for fuzzy name matching",
+        strict=True,
+    )
     async def test_layer3_nonexistent_tool_raises_business_error(self):
         with pytest.raises(PlanValidationError) as exc_info:
             await self.validator.validate(SAMPLE_PLAN_MISSING_TOOL, SAMPLE_INTENT, 1, self.tool_ids)
@@ -903,16 +908,18 @@ class TestPlanValidator:
 
 class TestLLMAdapter:
     def test_anthropic_adapter_implements_protocol(self):
-        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}):
-            adapter = AnthropicAdapter(api_key="test-key")
+        adapter = AnthropicAdapter(
+            LLMConfig(provider="anthropic", api_key="test-key", timeout_s=10)
+        )
         assert isinstance(adapter, LLMAdapter)
 
     @pytest.mark.asyncio
     async def test_anthropic_adapter_wraps_api_errors_in_llm_call_error(self):
         import anthropic
 
-        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}):
-            adapter = AnthropicAdapter(api_key="test-key")
+        adapter = AnthropicAdapter(
+            LLMConfig(provider="anthropic", api_key="test-key", timeout_s=10)
+        )
 
         adapter._client = AsyncMock()
         adapter._client.messages.create = AsyncMock(
@@ -930,8 +937,9 @@ class TestLLMAdapter:
     async def test_anthropic_adapter_wraps_timeout_in_llm_call_error(self):
         import anthropic
 
-        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}):
-            adapter = AnthropicAdapter(api_key="test-key")
+        adapter = AnthropicAdapter(
+            LLMConfig(provider="anthropic", api_key="test-key", timeout_s=10)
+        )
 
         adapter._client = AsyncMock()
         adapter._client.messages.create = AsyncMock(
@@ -943,8 +951,9 @@ class TestLLMAdapter:
 
     @pytest.mark.asyncio
     async def test_anthropic_adapter_returns_text_content(self):
-        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}):
-            adapter = AnthropicAdapter(api_key="test-key")
+        adapter = AnthropicAdapter(
+            LLMConfig(provider="anthropic", api_key="test-key", timeout_s=10)
+        )
 
         mock_block = MagicMock()
         mock_block.type = "text"
@@ -957,3 +966,280 @@ class TestLLMAdapter:
 
         result = await adapter.generate("test-model", "sys", "usr")
         assert result == '{"plan": "test"}'
+
+
+# ===========================
+# T505: DeterministicPlanner Tests
+# ===========================
+
+
+class TestDeterministicPlanner:
+    """Verify DeterministicPlanner builds multi-step DAGs from registry."""
+
+    def setup_method(self):
+        from components.Planner.adapters.deterministic_planner import DeterministicPlanner
+
+        self.planner = DeterministicPlanner()
+
+    def _make_tools(self):
+        """Build Composio-style tools for catalog validation."""
+        from .conftest import _make_composio_tool
+
+        return [
+            # Gmail
+            _make_composio_tool("GMAIL_SEND_EMAIL", "gmail"),
+            _make_composio_tool("GMAIL_FETCH_EMAILS", "gmail"),
+            _make_composio_tool("GMAIL_CREATE_DRAFT", "gmail"),
+            # Google Calendar
+            _make_composio_tool("GOOGLECALENDAR_CREATE_EVENT", "googlecalendar"),
+            _make_composio_tool("GOOGLECALENDAR_FIND_EVENT", "googlecalendar"),
+            _make_composio_tool("GOOGLECALENDAR_LIST_EVENTS", "googlecalendar"),
+            # Google Docs
+            _make_composio_tool("GOOGLEDOCS_CREATE_DOCUMENT_FROM_TEXT", "googledocs"),
+            _make_composio_tool("GOOGLEDOCS_GET_DOCUMENT", "googledocs"),
+            _make_composio_tool("GOOGLEDOCS_APPEND_TEXT", "googledocs"),
+            # Google Drive
+            _make_composio_tool("GOOGLEDRIVE_UPLOAD_FILE", "googledrive"),
+            _make_composio_tool("GOOGLEDRIVE_FIND_FILE", "googledrive"),
+            _make_composio_tool("GOOGLEDRIVE_SEARCH_FILE", "googledrive"),
+            _make_composio_tool("GOOGLEDRIVE_LIST_FILES", "googledrive"),
+            # Notion
+            _make_composio_tool("NOTION_CREATE_A_NEW_PAGE", "notion"),
+            _make_composio_tool("NOTION_SEARCH_NOTION", "notion"),
+            _make_composio_tool("NOTION_FETCH_DATABASE", "notion"),
+            # GitHub
+            _make_composio_tool("GITHUB_ISSUES_CREATE", "github"),
+            _make_composio_tool("GITHUB_ISSUES_LIST", "github"),
+            _make_composio_tool("GITHUB_PULLS_CREATE", "github"),
+            _make_composio_tool("GITHUB_PULLS_LIST", "github"),
+            # Slack
+            _make_composio_tool("SLACK_SENDS_A_MESSAGE_TO_A_SLACK_CHANNEL", "slack"),
+            _make_composio_tool("SLACK_SEARCH_FOR_MESSAGES_IN_SLACK", "slack"),
+            _make_composio_tool("SLACK_LIST_ALL_SLACK_TEAM_CHANNELS", "slack"),
+        ]
+
+    def _make_intent(self, intent_type: str, entities: dict | None = None, sub_intents: list[str] | None = None):
+        return Intent(
+            intent=intent_type,
+            entities=entities or {},
+            constraints={},
+            user_id="test-user",
+            sub_intents=sub_intents or [],
+        )
+
+    # --- can_handle ---
+
+    def test_can_handle_all_32_intents(self):
+        from components.Planner.adapters.workflow_registry import get_all_intents
+
+        all_intents = get_all_intents()
+        assert len(all_intents) == 32
+        for intent_name in all_intents:
+            assert self.planner.can_handle(intent_name), f"can_handle({intent_name}) should be True"
+
+    NEW_INTENTS = (
+        "create_document_google_docs", "edit_document_google_docs",
+        "upload_file_google_drive", "download_file_google_drive",
+        "search_files_google_drive", "list_files_google_drive",
+        "create_page_notion", "create_task_notion", "search_notion", "list_tasks_notion",
+        "create_issue_github", "list_issues_github", "create_pr_github", "list_prs_github",
+        "send_message_slack", "search_messages_slack", "list_channels_slack",
+    )
+
+    @pytest.mark.parametrize("intent", NEW_INTENTS)
+    def test_can_handle_new_intents(self, intent: str):
+        assert self.planner.can_handle(intent) is True
+
+    def test_can_handle_compound_sub_intents(self):
+        intent = self._make_intent(
+            "schedule_meeting_and_email",
+            sub_intents=["schedule_meeting", "send_email"],
+        )
+        assert self.planner.can_handle(intent) is True
+
+    def test_can_handle_unknown_returns_false(self):
+        assert self.planner.can_handle("analyze_stocks") is False
+
+    def test_can_handle_partial_unknown_sub_intents_false(self):
+        intent = self._make_intent(
+            "schedule_and_stock",
+            sub_intents=["schedule_meeting", "analyze_stocks"],
+        )
+        assert self.planner.can_handle(intent) is False
+
+    # --- build_plan: write intents ---
+
+    def test_schedule_meeting_produces_4_step_dag(self):
+        intent = self._make_intent("schedule_meeting_google_calendar", {"attendee": "Alice", "date_time": "tomorrow"})
+        plan = self.planner.build_plan(intent, self._make_tools())
+        assert plan is not None
+        assert len(plan.graph) == 4
+        roles = [s.role for s in plan.graph]
+        assert roles == ["Fetcher", "Reasoner", "Resolver", "Booker"]
+
+    def test_schedule_meeting_reasoner_has_config(self):
+        intent = self._make_intent("schedule_meeting_google_calendar")
+        plan = self.planner.build_plan(intent, self._make_tools())
+        assert plan is not None
+        reasoner = next(s for s in plan.graph if s.role == "Reasoner")
+        assert reasoner.can_spawn is True
+        assert reasoner.reasoning_config is not None
+        assert reasoner.policy_ref is not None
+
+    def test_schedule_meeting_booker_has_gate(self):
+        intent = self._make_intent("schedule_meeting_google_calendar")
+        plan = self.planner.build_plan(intent, self._make_tools())
+        assert plan is not None
+        booker = next(s for s in plan.graph if s.role == "Booker")
+        assert booker.gate_id is not None
+
+    def test_send_email_produces_3_step_dag(self):
+        intent = self._make_intent("send_email_gmail", {"recipient": "bob@x.com", "subject": "Hi", "body": "Test"})
+        plan = self.planner.build_plan(intent, self._make_tools())
+        assert plan is not None
+        assert len(plan.graph) == 3
+        roles = [s.role for s in plan.graph]
+        assert roles == ["Reasoner", "Resolver", "Booker"]
+
+    # --- build_plan: read intents ---
+
+    def test_read_email_produces_2_step_dag(self):
+        intent = self._make_intent("read_email_gmail")
+        plan = self.planner.build_plan(intent, self._make_tools())
+        assert plan is not None
+        assert len(plan.graph) == 2
+        roles = [s.role for s in plan.graph]
+        assert roles == ["Fetcher", "Reasoner"]
+
+    def test_list_meetings_produces_2_step_dag(self):
+        intent = self._make_intent("list_meetings_google_calendar")
+        plan = self.planner.build_plan(intent, self._make_tools())
+        assert plan is not None
+        assert len(plan.graph) == 2
+        assert plan.graph[0].role == "Fetcher"
+        assert plan.graph[1].role == "Reasoner"
+        # No Booker
+        assert all(s.role != "Booker" for s in plan.graph)
+
+    def test_check_calendar_produces_2_step_dag(self):
+        intent = self._make_intent("check_calendar_google_calendar")
+        plan = self.planner.build_plan(intent, self._make_tools())
+        assert plan is not None
+        assert len(plan.graph) == 2
+
+    def test_draft_email_produces_1_step_dag(self):
+        intent = self._make_intent("draft_email_gmail", {"subject": "Hi", "body": "Draft"})
+        plan = self.planner.build_plan(intent, self._make_tools())
+        assert plan is not None
+        assert len(plan.graph) == 1
+        assert plan.graph[0].role == "Booker"
+
+    # --- build_plan: compound intents ---
+
+    def test_compound_intent_via_sub_intents(self):
+        intent = self._make_intent(
+            "schedule_meeting_and_email",
+            entities={"attendee": "Alice", "date_time": "tomorrow", "subject": "Meeting", "body": "Details"},
+            sub_intents=["schedule_meeting_google_calendar", "send_email_gmail"],
+        )
+        plan = self.planner.build_plan(intent, self._make_tools())
+        assert plan is not None
+        # schedule_meeting_google_calendar (4) + send_email_gmail (3) = 7 steps
+        assert len(plan.graph) == 7
+
+    def test_compound_intent_inter_workflow_deps(self):
+        intent = self._make_intent(
+            "schedule_meeting_and_email",
+            sub_intents=["schedule_meeting_google_calendar", "send_email_gmail"],
+        )
+        plan = self.planner.build_plan(intent, self._make_tools())
+        assert plan is not None
+        # Step 5 (first of email workflow) should depend on step 4 (last of schedule)
+        step_5 = plan.graph[4]
+        assert 4 in step_5.after
+
+    def test_compound_intent_via_decomposition(self):
+        """Compound intent string decomposes into known workflows."""
+        intent = self._make_intent("create_issue_github_and_send_message_slack")
+        plan = self.planner.build_plan(intent, self._make_tools())
+        assert plan is not None
+        # create_issue_github (3) + send_message_slack (3) = 6 steps
+        assert len(plan.graph) == 6
+
+    # --- build_plan: tool validation ---
+
+    def test_returns_none_when_tools_missing(self):
+        from .conftest import _make_tool_definition
+
+        intent = self._make_intent("schedule_meeting_google_calendar")
+        wrong_tools = [_make_tool_definition("SLACK_SEND_MESSAGE", "Send Slack message")]
+        plan = self.planner.build_plan(intent, wrong_tools)
+        assert plan is None
+
+    def test_all_steps_have_dry_run(self):
+        intent = self._make_intent("schedule_meeting_google_calendar")
+        plan = self.planner.build_plan(intent, self._make_tools())
+        assert plan is not None
+        for step in plan.graph:
+            assert step.dry_run is True
+
+    # --- build_plan: new provider intents ---
+
+    def test_build_plan_notion_create_page_steps(self):
+        """create_page_notion (write with fetcher) → Fetcher + Reasoner + Resolver + Booker = 4 steps."""
+        intent = self._make_intent("create_page_notion", {"title": "My Page"})
+        plan = self.planner.build_plan(intent, self._make_tools())
+        assert plan is not None
+        assert len(plan.graph) == 4
+        roles = [s.role for s in plan.graph]
+        assert roles == ["Fetcher", "Reasoner", "Resolver", "Booker"]
+
+    def test_build_plan_googledrive_search_files(self):
+        """search_files_google_drive (read) → Fetcher + Reasoner = 2 steps."""
+        intent = self._make_intent("search_files_google_drive", {"query": "report"})
+        plan = self.planner.build_plan(intent, self._make_tools())
+        assert plan is not None
+        assert len(plan.graph) == 2
+        roles = [s.role for s in plan.graph]
+        assert roles == ["Fetcher", "Reasoner"]
+
+    def test_build_plan_slack_send_message(self):
+        """send_message_slack (write without fetcher) → Reasoner + Resolver + Booker = 3 steps."""
+        intent = self._make_intent("send_message_slack", {"channel": "#general", "message": "Hello"})
+        plan = self.planner.build_plan(intent, self._make_tools())
+        assert plan is not None
+        assert len(plan.graph) == 3
+        roles = [s.role for s in plan.graph]
+        assert roles == ["Reasoner", "Resolver", "Booker"]
+
+    def test_build_plan_edit_document_full_write(self):
+        """edit_document_google_docs (write with fetcher) → 4 steps."""
+        intent = self._make_intent("edit_document_google_docs", {"document_id": "doc-123", "content": "Updated"})
+        plan = self.planner.build_plan(intent, self._make_tools())
+        assert plan is not None
+        assert len(plan.graph) == 4
+        roles = [s.role for s in plan.graph]
+        assert roles == ["Fetcher", "Reasoner", "Resolver", "Booker"]
+
+    def test_build_plan_create_document_light_write(self):
+        """create_document_google_docs (light-write) → 1 step Booker only."""
+        intent = self._make_intent("create_document_google_docs", {"title": "Doc", "content": "Content"})
+        plan = self.planner.build_plan(intent, self._make_tools())
+        assert plan is not None
+        assert len(plan.graph) == 1
+        assert plan.graph[0].role == "Booker"
+
+    def test_compound_cross_provider(self):
+        """Compound: create_issue_github + send_message_slack → composed DAG from different providers."""
+        intent = self._make_intent(
+            "create_issue_and_send_message",
+            entities={"title": "Bug", "repo": "org/repo", "channel": "#dev", "message": "Issue created"},
+            sub_intents=["create_issue_github", "send_message_slack"],
+        )
+        plan = self.planner.build_plan(intent, self._make_tools())
+        assert plan is not None
+        # create_issue_github (3) + send_message_slack (3) = 6 steps
+        assert len(plan.graph) == 6
+        # Last step of first workflow chains to first step of second
+        step_4 = plan.graph[3]
+        assert 3 in step_4.after

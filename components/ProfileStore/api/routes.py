@@ -19,6 +19,7 @@ from shared.dependencies import get_preference_service
 
 from ..domain.models import (
     ConsentDeniedError,
+    PreferenceImportRequest,
     PreferenceRequest,
     SuccessResponse,
     ValidationError,
@@ -110,6 +111,44 @@ async def set_preference(
 
         return SuccessResponse(data=response.model_dump())
 
+    except (UserNotFoundError, ValidationError) as e:
+        return error_handler.handle_service_errors(e)
+
+
+@router.post("/{user_id}/import")
+async def import_preferences(
+    user_id: UUID,
+    request_body: PreferenceImportRequest,
+    request: Request,
+    auth_context: dict = Depends(get_auth_context),
+    service: PreferenceService = Depends(get_preference_service),
+) -> SuccessResponse:
+    """
+    Import preferences from free text or JSON.
+
+    Extracts preferences for user review before saving.
+    JSON input is parsed directly; free text uses LLM extraction.
+    """
+    try:
+        verify_user_access(user_id, auth_context)
+
+        llm_adapter = getattr(request.app.state, "llm_adapter", None)
+
+        result = await service.import_preferences(
+            user_id=user_id,
+            content=request_body.content,
+            llm_adapter=llm_adapter,
+        )
+
+        logger.info(
+            f"IMPORT preferences: user={user_id}, type={result.raw_input_type}, "
+            f"count={len(result.extracted)}"
+        )
+
+        return SuccessResponse(data=result.model_dump())
+
+    except ValueError as e:
+        return error_handler.handle_service_errors(e)
     except (UserNotFoundError, ValidationError) as e:
         return error_handler.handle_service_errors(e)
 

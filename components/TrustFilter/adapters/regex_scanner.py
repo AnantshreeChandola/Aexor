@@ -7,7 +7,7 @@ LLD Section 6.1, FR-003. Compiles rules at __init__, not per-call.
 from __future__ import annotations
 
 import re
-from typing import Pattern
+from re import Pattern
 
 from components.TrustFilter.domain.errors import S1InternalError
 from components.TrustFilter.domain.models import RuleHit

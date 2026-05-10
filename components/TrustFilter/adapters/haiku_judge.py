@@ -97,7 +97,7 @@ class HaikuJudgeAdapterImpl:
                 ),
                 timeout=timeout_s,
             )
-        except asyncio.TimeoutError as exc:
+        except TimeoutError as exc:
             raise HaikuUnreachableError(
                 "timeout"
             ) from exc

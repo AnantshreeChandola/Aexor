@@ -237,15 +237,8 @@ class FactService:
 
         # Log query operation
         logger.info(
-            "Facts queried",
-            extra={
-                "user_id": str(user_id),
-                "intent_type": intent_type,
-                "result_count": len(evidence_items),
-                "query_latency_ms": latency_ms,
-                "component": "History",
-                "op": "query_facts",
-            },
+            "facts_queried user=%s intent=%s result_count=%d latency_ms=%d",
+            str(user_id), intent_type, len(evidence_items), latency_ms,
         )
 
         return QueryFactsResponse(

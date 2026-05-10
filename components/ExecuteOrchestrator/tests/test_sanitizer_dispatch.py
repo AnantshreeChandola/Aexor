@@ -15,8 +15,8 @@ import pytest
 from jose import jwt
 
 from shared.schemas.intent import Intent
-from shared.schemas.plan import Plan, PlanConstraints, PlanMeta, PlanStep
-from shared.schemas.policy import PolicyDecision, ReasoningConfig
+from shared.schemas.plan import Plan, PlanMeta, PlanStep
+from shared.schemas.policy import ReasoningConfig
 from shared.schemas.sanitized_payload import SanitizedPayload
 
 from ..adapters.dag_resolver import DAGResolver
@@ -288,7 +288,7 @@ class TestSanitizerDispatch:
     @pytest.mark.asyncio
     async def test_resolve_sanitizer_input_from_context_from(self):
         """_resolve_sanitizer_input returns the upstream step result."""
-        svc = _build_service()
+        _build_service()
 
         step = PlanStep(
             step=3,
@@ -322,7 +322,7 @@ class TestSanitizerDispatch:
     @pytest.mark.asyncio
     async def test_resolve_sanitizer_input_none_when_empty(self):
         """_resolve_sanitizer_input returns None if no upstream results."""
-        svc = _build_service()
+        _build_service()
 
         step = PlanStep(
             step=2,

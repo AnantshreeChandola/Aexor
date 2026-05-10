@@ -153,6 +153,45 @@ class DatabaseAdapter:
             )
 
     @with_db_error_handling
+    async def get_plan_by_hash(self, plan_hash: str) -> dict[str, Any] | None:
+        """
+        Retrieve the most recent successful plan matching a signature hash.
+
+        Uses the existing idx_plans_hash index. Returns the plan data dict
+        with a ``success`` flag if found, None otherwise.
+        """
+        async with self.shared_db.get_session() as session:
+            query = text("""
+                SELECT
+                    p.plan_id,
+                    p.canonical_json,
+                    p.intent_type,
+                    p.step_count,
+                    p.plan_hash,
+                    p.created_at,
+                    o.success
+                FROM plans p
+                JOIN plan_outcomes o ON p.plan_id = o.plan_id
+                WHERE p.plan_hash = :plan_hash
+                  AND o.success = true
+                ORDER BY p.stored_at DESC
+                LIMIT 1
+            """)
+            result = await session.execute(query, {"plan_hash": plan_hash})
+            row = result.first()
+            if row is None:
+                return None
+            return {
+                "plan_id": row.plan_id,
+                "canonical_json": row.canonical_json,
+                "intent_type": row.intent_type,
+                "step_count": row.step_count,
+                "plan_hash": row.plan_hash,
+                "created_at": row.created_at,
+                "success": row.success,
+            }
+
+    @with_db_error_handling
     async def get_plans_by_intent(
         self,
         intent_type: str,
@@ -338,6 +377,8 @@ class DatabaseAdapter:
         async with self.shared_db.get_session() as session:
             query = text("""
                 SELECT p.plan_id, p.intent_type, p.step_count, p.stored_at,
+                       p.canonical_json -> 'intent' -> 'intent' AS intent_name,
+                       p.canonical_json -> 'intent' -> 'entities' AS intent_entities,
                        o.success, o.error_type, o.execution_start, o.execution_end,
                        o.total_steps, o.failed_step, o.context_data
                 FROM plans p
@@ -350,6 +391,48 @@ class DatabaseAdapter:
                 LIMIT :limit
             """)
             result = await session.execute(query, {"limit": limit})
+            rows = result.fetchall()
+            return [dict(row._mapping) for row in rows]
+
+    @with_db_error_handling
+    async def get_plans_by_user(
+        self,
+        user_id: str,
+        limit: int = 50,
+        success_only: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Return plans for a specific user, identified via canonical_json->'intent'->>'user_id'.
+
+        Args:
+            user_id: User identifier stored inside the plan intent
+            limit: Maximum results to return
+            success_only: When True, only return plans whose latest outcome was successful
+
+        Returns:
+            List of plan dicts with latest outcome info
+        """
+        async with self.shared_db.get_session() as session:
+            base_query = """
+                SELECT p.plan_id, p.intent_type, p.step_count, p.stored_at,
+                       p.canonical_json -> 'intent' -> 'intent' AS intent_name,
+                       p.canonical_json -> 'intent' -> 'entities' AS intent_entities,
+                       o.success, o.error_type, o.execution_start, o.execution_end,
+                       o.total_steps, o.failed_step, o.context_data
+                FROM plans p
+                LEFT JOIN LATERAL (
+                    SELECT * FROM plan_outcomes po
+                    WHERE po.plan_id = p.plan_id
+                    ORDER BY po.execution_start DESC LIMIT 1
+                ) o ON true
+                WHERE p.canonical_json -> 'intent' ->> 'user_id' = :user_id
+            """
+            if success_only:
+                base_query += " AND o.success = true"
+            base_query += " ORDER BY p.stored_at DESC LIMIT :limit"
+
+            result = await session.execute(
+                text(base_query), {"user_id": user_id, "limit": limit}
+            )
             rows = result.fetchall()
             return [dict(row._mapping) for row in rows]
 

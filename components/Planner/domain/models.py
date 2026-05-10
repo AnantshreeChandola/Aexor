@@ -32,6 +32,15 @@ class EntityRequirement(BaseModel):
     )
 
 
+class SkeletonStepHint(BaseModel):
+    """Lightweight step structure from LLM entity+plan inference."""
+
+    role: str = Field(..., description="Fetcher, Reasoner, Resolver, Booker")
+    type: str = Field(default="api", description="api, llm_reasoning")
+    tool: str = Field(default="system.echo", description="Resolved tool name or system.echo")
+    description: str = Field(default="", description="Human-readable step description")
+
+
 class RequiredEntitiesResult(BaseModel):
     """Result from Planner's get_required_entities() lightweight query."""
 
@@ -45,6 +54,10 @@ class RequiredEntitiesResult(BaseModel):
         default_factory=list,
         description="Subset of required_entities not yet provided",
     )
+    plan_steps: list[SkeletonStepHint] = Field(
+        default_factory=list,
+        description="Plan structure from unified LLM call (unknown intents only)",
+    )
 
 
 class PlannerResult(BaseModel):
@@ -53,11 +66,11 @@ class PlannerResult(BaseModel):
     plan: Plan
     fallback_level: int = Field(
         ...,
-        ge=1,
+        ge=0,
         le=4,
         description=(
             "Which fallback level produced this plan "
-            "(1=primary, 2=secondary, 3=template, 4=minimal)"
+            "(0=cached/deterministic, 1=primary, 2=secondary, 3=template, 4=minimal)"
         ),
     )
     context_degraded: bool = Field(

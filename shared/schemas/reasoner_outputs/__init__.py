@@ -23,9 +23,9 @@ SCHEMA_REGISTRY: dict[str, type[BaseModel]] = {
 
 __all__ = [
     "SCHEMA_REGISTRY",
-    "SlotProposalV1",
-    "FreeSlotsV1",
-    "FlightRecommendationV1",
     "EmailSummaryV1",
+    "FlightRecommendationV1",
     "FreeBusySanitizedV1",
+    "FreeSlotsV1",
+    "SlotProposalV1",
 ]

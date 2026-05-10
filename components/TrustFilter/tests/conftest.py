@@ -138,7 +138,7 @@ def scan_kwargs() -> dict:
 def injection_patterns_50() -> list[dict]:
     """Load the 50 injection pattern fixtures."""
     path = FIXTURES_DIR / "injection_patterns_50.json"
-    with open(path, encoding="utf-8") as f:
+    with path.open(encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -146,5 +146,5 @@ def injection_patterns_50() -> list[dict]:
 def benign_responses_20() -> list[dict]:
     """Load the 20 benign tool response fixtures."""
     path = FIXTURES_DIR / "benign_tool_responses_20.json"
-    with open(path, encoding="utf-8") as f:
+    with path.open(encoding="utf-8") as f:
         return json.load(f)

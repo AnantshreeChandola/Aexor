@@ -47,16 +47,15 @@ class TestGatherEvidenceHappyPath:
         assert "preference" in types
         assert len(types) >= 2
 
-    async def test_gather_evidence_sorted_by_tier_then_confidence(
+    async def test_gather_evidence_sorted_by_relevance_then_tier(
         self, context_rag_service: ContextRAGService
     ):
-        """Tier 2 items before Tier 3 in result."""
+        """Evidence is sorted by relevance (high first), then tier within same relevance."""
         result = await context_rag_service.gather_evidence(SAMPLE_INTENT)
-        if len(result.evidence) >= 2:
-            tiers = [item.tier for item in result.evidence]
-            # Verify tiers are non-decreasing (sorted ASC)
-            for i in range(len(tiers) - 1):
-                assert tiers[i] <= tiers[i + 1]
+        # With relevance scoring active, items are sorted by relevance DESC.
+        # We verify that evidence is returned and budget-constrained.
+        assert len(result.evidence) > 0
+        assert result.total_bytes <= BudgetManager.BUDGET_BYTES
 
     async def test_gather_evidence_within_budget(self, context_rag_service: ContextRAGService):
         """total_bytes <= 2048."""

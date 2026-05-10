@@ -52,3 +52,13 @@ class Intent(BaseModel):
     trace_id: str | None = Field(
         default=None, description="Distributed tracing correlation ID (32-char hex)"
     )
+
+    sub_intents: list[str] = Field(
+        default_factory=list,
+        description="Decomposed sub-intent keys for compound requests (e.g. ['schedule_meeting', 'send_email'])",
+    )
+
+    tool_overrides: dict[int, str] = Field(
+        default_factory=dict,
+        description="Step-number → tool-name overrides from the plan builder tool picker",
+    )
