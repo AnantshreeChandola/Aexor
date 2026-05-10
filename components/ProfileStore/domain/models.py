@@ -114,6 +114,30 @@ class ValidationError(Exception):
         super().__init__(f"Validation failed for {preference_key}: {reason}")
 
 
+class PreferenceImportRequest(BaseModel):
+    """Request model for importing preferences from text or JSON."""
+
+    content: str = Field(..., max_length=10_000)
+
+
+class ExtractedPreference(BaseModel):
+    """A single preference extracted from import content."""
+
+    preference_key: str
+    preference_value: Any
+    sensitive: bool = False
+    confidence: float = Field(ge=0.0, le=1.0, default=1.0)
+    source_text: str | None = None
+
+
+class PreferenceImportResponse(BaseModel):
+    """Response from preference import extraction."""
+
+    extracted: list[ExtractedPreference]
+    raw_input_type: str  # "json" | "freetext"
+    warnings: list[str] = []
+
+
 class ErrorResponse(BaseModel):
     """Standard error response format."""
 

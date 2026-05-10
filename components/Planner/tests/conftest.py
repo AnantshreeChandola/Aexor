@@ -333,6 +333,12 @@ def mock_tool_catalog():
     catalog.get_tool = MagicMock(
         side_effect=lambda name: next((t for t in tools if t.name == name), None)
     )
+    catalog.resolve_tool = MagicMock(
+        side_effect=lambda uses, call=None: next(
+            (t for t in tools if t.name == uses), None
+        )
+    )
+    catalog.get_user_tools = AsyncMock(return_value=tools)
     return catalog
 
 
@@ -386,6 +392,9 @@ def mock_plan_service():
         tier=3,
     )
     svc.get_plans_by_intent = AsyncMock(return_value=[template])
+    # Plan cache: db.get_plan_by_hash returns None (no cached plan)
+    svc.db = MagicMock()
+    svc.db.get_plan_by_hash = AsyncMock(return_value=None)
     return svc
 
 
@@ -394,7 +403,95 @@ def mock_empty_plan_service():
     """PlanLibrary with no matching templates."""
     svc = AsyncMock()
     svc.get_plans_by_intent = AsyncMock(return_value=[])
+    svc.db = MagicMock()
+    svc.db.get_plan_by_hash = AsyncMock(return_value=None)
     return svc
+
+
+def _make_composio_tool(name: str, provider_name: str, description: str = ""):
+    """Create a Composio-style ToolDefinition for tests."""
+    from shared.mcp.catalog import ToolDefinition
+
+    return ToolDefinition(
+        name=name,
+        server_name="composio",
+        provider_name=provider_name,
+        description=description,
+        input_schema={},
+    )
+
+
+@pytest.fixture()
+def mock_composio_tool_catalog():
+    """ToolCatalog with Composio-style tool names for workflow registry tests."""
+    tools = [
+        # Gmail
+        _make_composio_tool("GMAIL_SEND_EMAIL", "gmail", "Send an email via Gmail"),
+        _make_composio_tool("GMAIL_FETCH_EMAILS", "gmail", "Fetch emails from Gmail"),
+        _make_composio_tool("GMAIL_CREATE_DRAFT", "gmail", "Create a draft email"),
+        # Google Calendar
+        _make_composio_tool("GOOGLECALENDAR_CREATE_EVENT", "googlecalendar", "Create a calendar event"),
+        _make_composio_tool("GOOGLECALENDAR_FIND_EVENT", "googlecalendar", "Find calendar events"),
+        _make_composio_tool("GOOGLECALENDAR_LIST_EVENTS", "googlecalendar", "List calendar events"),
+        # Google Docs
+        _make_composio_tool("GOOGLEDOCS_CREATE_DOCUMENT_FROM_TEXT", "googledocs", "Create a document"),
+        _make_composio_tool("GOOGLEDOCS_GET_DOCUMENT", "googledocs", "Get a document"),
+        _make_composio_tool("GOOGLEDOCS_APPEND_TEXT", "googledocs", "Append text to a document"),
+        # Google Drive
+        _make_composio_tool("GOOGLEDRIVE_UPLOAD_FILE", "googledrive", "Upload a file"),
+        _make_composio_tool("GOOGLEDRIVE_FIND_FILE", "googledrive", "Find a file"),
+        _make_composio_tool("GOOGLEDRIVE_SEARCH_FILE", "googledrive", "Search for files"),
+        _make_composio_tool("GOOGLEDRIVE_LIST_FILES", "googledrive", "List files"),
+        # Notion
+        _make_composio_tool("NOTION_CREATE_A_NEW_PAGE", "notion", "Create a Notion page"),
+        _make_composio_tool("NOTION_SEARCH_NOTION", "notion", "Search Notion"),
+        _make_composio_tool("NOTION_FETCH_DATABASE", "notion", "Fetch a Notion database"),
+        # GitHub
+        _make_composio_tool("GITHUB_ISSUES_CREATE", "github", "Create a GitHub issue"),
+        _make_composio_tool("GITHUB_ISSUES_LIST", "github", "List GitHub issues"),
+        _make_composio_tool("GITHUB_PULLS_CREATE", "github", "Create a GitHub pull request"),
+        _make_composio_tool("GITHUB_PULLS_LIST", "github", "List GitHub pull requests"),
+        # Slack
+        _make_composio_tool("SLACK_SENDS_A_MESSAGE_TO_A_SLACK_CHANNEL", "slack", "Send a Slack message"),
+        _make_composio_tool("SLACK_SEARCH_FOR_MESSAGES_IN_SLACK", "slack", "Search Slack messages"),
+        _make_composio_tool("SLACK_LIST_ALL_SLACK_TEAM_CHANNELS", "slack", "List Slack channels"),
+    ]
+    catalog = MagicMock()
+    catalog.get_all_tools = MagicMock(return_value=tools)
+    catalog.get_tool = MagicMock(
+        side_effect=lambda name: next((t for t in tools if t.name == name), None)
+    )
+    catalog.resolve_tool = MagicMock(
+        side_effect=lambda uses, call=None: next(
+            (t for t in tools if t.name == uses), None
+        )
+    )
+    catalog.get_user_tools = AsyncMock(return_value=tools)
+    catalog.version = 0
+    return catalog
+
+
+@pytest.fixture()
+def mock_tool_discovery():
+    """ToolDiscoveryService mock that returns whatever tools are passed in."""
+    from components.Planner.domain.tool_discovery_models import ToolDiscoveryResult
+
+    discovery = AsyncMock()
+
+    async def _discover(intent_text, available_tools, **kwargs):
+        return ToolDiscoveryResult(
+            tools=available_tools[:5],
+            discovery_tier=2,
+            candidate_count=len(available_tools),
+            reranked_count=min(5, len(available_tools)),
+            plan_based_tools=0,
+            direct_tools=len(available_tools),
+            discovery_ms=10,
+        )
+
+    discovery.discover_tools = AsyncMock(side_effect=_discover)
+    discovery.agentic_expand = AsyncMock(return_value=[])
+    return discovery
 
 
 @pytest.fixture()

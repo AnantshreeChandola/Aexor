@@ -1,4 +1,4 @@
-# Personal Agent — High-Level Design (HLD) v6.2
+# Personal Agent — High-Level Design (HLD) v6.3
 _Preview-first • Human-approved • Pure agentic execution • Policy-bounded • MCP connectors • Composio integration_
 
 **Purpose:** System architecture overview with clear component responsibilities and real-world examples.
@@ -23,8 +23,8 @@ User Request → Preview → Approval → Execute → Learn
 3. **Pure agentic execution** — all steps execute via Python/FastAPI ExecuteOrchestrator:
    - **API steps**: Dispatched via MCP tool invocations (community-maintained connector ecosystem)
    - **LLM reasoning steps**: Anthropic API with two-tier trust model (sandboxed Tier 1 for untrusted data, capable Tier 2 for agent reasoning)
-   - **Credential isolation**: AES-256-GCM encrypted vault in PostgreSQL; LLM never sees plaintext values
-4. **PolicyEngine is the safety moat** — All runtime LLM decisions are bounded by explicit policy rules. Deny-by-default. Critical actions always require human approval.
+   - **Credential isolation**: OAuth tokens and API keys are managed entirely by Composio — the system never stores or sees plaintext credentials. LLM has zero credential access.
+4. **PolicyEngine is the safety moat** — All runtime LLM decisions are bounded by explicit policy rules. Unrecognized actions fall back to human approval. Critical actions (writes, deletes) always require human approval.
 
 ### Key Innovation
 **Preview State Caching**: User choices made during preview are reused during execution—no need to repeat steps.
@@ -54,7 +54,7 @@ The system supports three execution patterns. The plan graph is ALWAYS fully spe
 #### C) Failure Recovery (step fails, Reasoner adapts)
 - When API step N fails, the error object (system-generated, NOT the raw API response) routes to the nearest Reasoner with `can_spawn=true`
 - Reasoner proposes a recovery action (retry with different params, alternative API, skip)
-- Recovery action goes through PolicyEngine evaluation. **"Deny-by-default"** means nothing is implicitly allowed — but if an explicit policy rule matches the proposed action (tool in `plugins`, role in `allowed_recovery_roles`, within `max_recovery_actions` limit), PolicyEngine **approves automatically**. Write operations (Booker role) always require HITL approval via ApprovalGate, same as any other Booker step.
+- Recovery action goes through PolicyEngine evaluation. If an explicit policy rule matches the proposed action (tool in `plugins`, role in `allowed_recovery_roles`, within `max_recovery_actions` limit), PolicyEngine **approves automatically**. If no policy matches, the action **falls back to user approval** — the system asks rather than rejects. Write operations (Booker role) always require HITL approval via ApprovalGate, same as any other Booker step.
 - If recovery is exhausted or PolicyEngine denies (no matching rule) → plan is terminal
 - Example: Flight API returns 503 → Reasoner spawns Fetcher with alternative date range (§2c below)
 
@@ -441,7 +441,7 @@ t=800ms:  Step 6 (Notifier) sends summary via Slack
 **Key points**:
 - Error objects are **system-generated metadata** (step ID, error type, status code) — not raw API responses. They are TRUSTED and go directly to Tier 2 Reasoners.
 - Spawned recovery steps still go through **Tier 1 sanitization** before Tier 2 consumes their output.
-- **PolicyEngine** evaluates all recovery actions — same deny-by-default rules as normal spawning.
+- **PolicyEngine** evaluates all recovery actions — same approval-first rules as normal spawning.
 - If recovery is exhausted (`max_recovery_actions` reached or no alternative available) → **plan is terminal** → user notified.
 
 ---
@@ -528,41 +528,39 @@ Both are best-effort (failures logged but don't block session creation). Cached 
 **What it does**: Creates a deterministic step-by-step plan (may include hybrid LLM reasoning steps)
 **Input**: Intent + Evidence + Available tools (from PluginRegistry) + Policy version (from PolicyEngine)
 **Process**: Calls Anthropic Claude API (temperature=0) via LLMAdapter protocol to generate plan
-**Output**: Plan graph with steps, dependencies, roles, step types (`api`/`llm_reasoning`/`policy_check`), and **credential ID references**
+**Output**: Plan graph with steps, dependencies, roles, and step types (`api`/`llm_reasoning`/`policy_check`)
 
 **Key features**:
 - **Deterministic**: Same inputs always produce same plan (initial plan)
 - **Hybrid plans**: For open-ended tasks, Planner includes `type: "llm_reasoning"` steps with `can_spawn=true` and `policy_ref`
 - **PolicyEngine integration**: Planner snapshots `policy_version` at plan creation and assigns `policy_ref` to reasoning steps
-- **No access to credentials**: Plans reference credential IDs (e.g., `"gcal_user_123"`), not actual API tokens or secrets
-- **Credential resolution deferred**: ExecuteOrchestrator decrypts credentials from vault at execution time
-- **LLMAdapter protocol**: Anthropic Claude API for MVP; protocol abstraction allows future provider swaps (Ollama, vLLM)
+- **No access to credentials**: Plans reference tool IDs only — OAuth tokens are managed entirely by Composio and never enter the system
+- **LLMAdapter protocol**: Anthropic Claude API for planning; Ollama (Llama 3.2 3B) for local intent parsing via FallbackLLMAdapter (local-first, remote fallback); protocol supports additional providers (vLLM, etc.)
+- **WorkflowRegistry**: 26 known intents (email, calendar, docs, drive, Notion, GitHub, Slack) bypass LLM with pre-built multi-step DAG templates that match LLM output patterns exactly — same Reasoner steps, same HITL gates, same template references. Returned as `fallback_level=0`. Compound intents (e.g., "create a GitHub issue and send a Slack message") decompose into known sub-workflows whose DAGs are composed into a single plan.
 
-**Planner LLM vs Runtime LLM**: The Planner generates the initial plan (temperature=0, deterministic). Runtime LLM reasoning steps (temperature=0.1-0.7) execute during plan execution and adapt within PolicyEngine bounds. Both have ZERO credential access.
+**Planner LLM vs Runtime LLM**: The Planner generates the initial plan (temperature=0, deterministic). Runtime LLM reasoning steps (temperature=0.1-0.7) execute during plan execution and adapt within PolicyEngine bounds. Both have ZERO credential access — credentials are managed by Composio and never enter the LLM context.
 
 #### PluginRegistry
-**What it does**: Source of truth for available tools and their credential requirements
+**What it does**: Source of truth for available tools and their capabilities
 **Includes**:
 - Tool capabilities (operations, scopes, previewable, idempotent)
-- **Credential vault ID templates**: Maps user + integration → encrypted credential vault ID
 - MCP server bindings (which MCP server and tool to use for each operation)
 
 **Example entry**:
 ```json
 {
   "tool_id": "google.calendar",
-  "mcp_server": "google-workspace-mcp",
-  "transport": "stdio",
-  "credential_template": "gcal_user_{{user_id}}_{{account_name}}",
+  "mcp_server": "composio",
+  "transport": "sse",
   "operations": {
     "list_free_busy": {
-      "mcp_tool": "calendar_list_free_busy",
+      "mcp_tool": "GOOGLECALENDAR_LIST_FREE_BUSY",
       "previewable": true,
       "scopes": ["calendar.read"],
       "idempotent": true
     },
     "create_event": {
-      "mcp_tool": "calendar_create_event",
+      "mcp_tool": "GOOGLECALENDAR_CREATE_EVENT",
       "previewable": false,
       "scopes": ["calendar.write"],
       "idempotent": true,
@@ -572,7 +570,7 @@ Both are best-effort (failures logged but don't block session creation). Cached 
 }
 ```
 
-**Security**: PluginRegistry provides credential vault IDs to Planner, NOT credential values. Actual credentials (OAuth tokens, API keys) are stored in the encrypted credential vault (AES-256-GCM in PostgreSQL) and never exposed to the LLM.
+**Security**: PluginRegistry contains tool metadata only — no credential references. All OAuth tokens and API keys are managed entirely by Composio. The LLM sees tool IDs, never credential values.
 
 **Three connector sources**:
 1. **MCP servers**: Community-maintained protocol connectors (primary)
@@ -588,7 +586,7 @@ Both are best-effort (failures logged but don't block session creation). Cached 
 1. **Rule evaluation**: Checks proposed actions against policy rules (step-level → role-level → system-level)
 2. **Attestation**: Issues PolicyAttestation records for approved runtime modifications
 3. **HITL enforcement**: Automatically injects `gate_id` for spawned Booker steps (non-overridable)
-4. **Deny-by-default**: Rejects any action without a matching policy rule
+4. **Approval-first for unknowns**: Unmatched actions fall back to user approval rather than hard rejection — the system learns from approvals to auto-approve similar future actions
 
 **Default policies**:
 - LLM Reasoning: Allows Fetcher/Analyzer/Reasoner/Notifier roles, forbids Booker, max 3 spawned steps
@@ -685,7 +683,7 @@ warm_user_tools(user_id)  →  Redis: user_tools:{user_id} = [ToolDefinition, ..
 2. **Retrieves cached preview state** (skip repeated steps!)
 3. Resolves plan DAG into execution levels (topological sort)
 4. Dispatches steps by type:
-   - `type: "api"` → MCP tool invocation with decrypted credentials from vault
+   - `type: "api"` → MCP tool invocation via Composio (credentials managed by Composio, never in system)
    - `type: "llm_reasoning"` → Anthropic API call with two-tier trust model:
      - `trust_level: "untrusted_input"` (Tier 1): No tools, strict output schema, input sanitized
      - `trust_level: "trusted"` (Tier 2): MCP tool access, may spawn steps, PolicyEngine-bounded
@@ -891,7 +889,7 @@ Roles are assigned to plan steps during planning and used by ExecuteOrchestrator
 1. Spawned steps CANNOT have `can_spawn=true` (no recursive spawning)
 2. Spawned steps can only use tools in the plan's `plugins` array
 3. Spawned steps with `role=Booker` always get `gate_id` injected (non-overridable HITL)
-4. Deny-by-default: if no policy matches, action is denied
+4. Approval-first: if no policy matches, action requires user approval (the system asks, not rejects)
 5. Total plan steps (original + spawned) cannot exceed 100
 
 ### How Steps Execute (Pure Agentic: Python + MCP)
@@ -975,6 +973,10 @@ Execution:
 
 **Guarantee**: Same inputs always produce the same **initial plan graph** (revision 0). Runtime spawned steps increment `plan_revision` and get PolicyAttestations (§2.4).
 
+**WorkflowRegistry deterministic plans**: For 26 known intents across 7 providers, the Planner produces multi-step DAGs from frozen templates in `workflow_registry.py` without calling the LLM. These templates include Reasoner steps with `can_spawn=True`, so they benefit from the same adaptive execution and error recovery as LLM-generated plans. The only difference is that the initial plan topology was built from a template instead of an LLM call.
+
+**Compound intent composition**: For complex intents that combine multiple known workflows (e.g., "schedule a meeting and email the details"), the WorkflowRegistry decomposes the intent into sub-workflows, merges their entity requirements, and composes their DAGs into a single plan — eliminating both the entity inference and plan generation LLM calls.
+
 **Inputs** (frozen tuple):
 - Intent (finalized user request)
 - Evidence (context from ContextRAG, ≤2KB)
@@ -1003,13 +1005,13 @@ Execution:
 **Rule**: All runtime LLM decisions are bounded by PolicyEngine rules
 
 **How it works**:
-1. **Deny-by-default**: If no policy rule matches a proposed action, it is rejected
+1. **Approval-first**: If no policy rule matches a proposed action, it falls back to user approval — the system asks rather than rejects
 2. **Role enforcement**: Spawned Booker steps always require HITL (non-overridable)
 3. **Scope inheritance**: Spawned steps can only use tools in the plan's `plugins` array
 4. **No recursive spawning**: Spawned steps cannot spawn further steps
 5. **Attestation chain**: Every spawn event produces a PolicyAttestation linking to the policy rule, decision, and new steps — forming a complete audit trail
 
-**Credential isolation**: Runtime LLM reasoning steps (Python service) have the same ZERO credential access as the Planner LLM. Credentials are decrypted from the encrypted vault (AES-256-GCM in PostgreSQL) by ExecuteOrchestrator at execution time for API steps only, held in-memory briefly, zeroed after MCP call, and never exposed to any LLM.
+**Credential isolation**: Runtime LLM reasoning steps (Python service) have the same ZERO credential access as the Planner LLM. OAuth tokens and API keys are managed entirely by Composio — the system delegates tool invocations to per-user Composio MCP endpoints, which proxy the actual API calls with the user's credentials. No credentials ever enter the system or LLM context.
 
 ### Retry Strategy (Node-Level + LLM-Adaptive + Infrastructure)
 
@@ -1238,7 +1240,7 @@ async def execute_booker_step(step: PlanStep, plan_id: str):
         raise IdempotencyConflict("Operation already in progress")
 
     # 3. Execute via MCP tool invocation
-    result = await mcp_invoke(step.uses, step.call, step.args, credentials=decrypted_creds)
+    result = await mcp_invoke(step.uses, step.call, step.args)  # Composio handles auth
 
     # 4. Store result with SUCCEEDED state
     await redis.setex(idem_key, 86400, json.dumps({"state": "SUCCEEDED", "result": result}))
@@ -1431,7 +1433,7 @@ See [README.md Tech Stack section](../../README.md#tech-stack) for the complete 
 **Summary**:
 - **Backend**: Python 3.11+ (FastAPI, Pydantic, SQLAlchemy async)
 - **Orchestration**: Python/FastAPI ExecuteOrchestrator with MCP protocol for tool invocations
-- **Credentials**: AES-256-GCM encrypted vault in PostgreSQL (master key from env)
+- **Credentials**: Managed by Composio (OAuth delegation, per-user MCP endpoints)
 - **Data**: PostgreSQL 16 + pgvector, Redis 7
 - **AI**: Anthropic Claude API (plan generation, temperature=0); ONNX Runtime (local embeddings, 384-dim all-MiniLM-L6-v2)
 - **Testing**: pytest, ruff, mypy
@@ -1780,7 +1782,7 @@ usecases/<UseCase>/
 - **+** Handles open-ended tasks that pure deterministic plans cannot
 - **+** Failure recovery is natural: LLM reasoning handles step failures inline, no workflow replay needed
 - **+** Eliminates plan continuation complexity: failed plans are terminal, user starts fresh
-- **+** Same safety guarantees via PolicyEngine (deny-by-default, HITL for writes)
+- **+** Same safety guarantees via PolicyEngine (approval-first for unknowns, HITL for writes)
 - **−** Runtime behavior is no longer fully deterministic (same plan may execute differently)
 - **−** PolicyEngine is a new component to build, test, and maintain
 - **-** Runtime behavior requires PolicyEngine governance for safety
@@ -1794,43 +1796,41 @@ usecases/<UseCase>/
 **Rationale**:
 - **Deployment simplicity**: One runtime (Python) instead of two (Python + n8n)
 - **MCP ecosystem**: Community-maintained connectors replace n8n's proprietary node format
-- **Credential control**: AES-256-GCM vault with application-level access control replaces n8n's opaque Secrets Vault
+- **Credential delegation**: OAuth tokens managed by Composio — system never stores or handles raw credentials
 - **Testing**: Standard pytest for all execution paths (no n8n environment needed)
 - **NemoClaw compatible**: System can run inside NemoClaw for infrastructure-level security (OS sandboxing, network namespaces) on top of application-level security
 
 **Trade-offs**:
 - **+** Single runtime reduces operational complexity
 - **+** MCP connectors are open-source and community-maintained
-- **+** Full control over credential lifecycle
+- **+** Credential management delegated to Composio (reduced attack surface)
 - **+** Simpler testing and debugging
 - **-** Lose n8n's visual workflow editor (mitigated by structured logging + plan graph visualization)
 - **-** Must implement scheduling (APScheduler) and persistence ourselves
 - **-** Fewer built-in connectors initially (MCP ecosystem is growing)
 
-### Encrypted Credential Vault & LLM Isolation
+### Credential Delegation via Composio & LLM Isolation
 
-**Decision**: Store credentials in AES-256-GCM encrypted PostgreSQL vault with strict LLM isolation boundary. Two-tier LLM execution for prompt injection defense.
+**Decision**: Delegate all credential management (OAuth tokens, API keys) to Composio. The system never stores, handles, or sees plaintext credentials. Two-tier LLM execution for prompt injection defense.
 
 **Architecture**:
-- **Storage**: `credential_vault` table with encrypted_value (BYTEA), iv (BYTEA), key_version (INT)
-- **Master key**: Loaded from environment variable, never in database
-- **Decryption**: Only at step execution time, in-memory only, zeroed after MCP call
-- **LLM boundary**: Neither Planner nor runtime reasoning steps can access credential values
-- **Key rotation**: `key_version` supports rolling rotation
+- **OAuth delegation**: Composio handles the full OAuth flow (redirect URL generation, token exchange, token refresh)
+- **Per-user MCP endpoints**: Each user gets a unique Composio MCP URL — tool calls are scoped to the user's connected accounts
+- **Connection status only**: The system stores which providers a user is connected to (PostgreSQL), never raw tokens
+- **LLM boundary**: Neither Planner nor runtime reasoning steps can access credential values — credentials exist only within Composio's infrastructure
 
 **Rationale**:
-- Prompt injection attacks cannot leak credentials because LLM never sees values
-- Application-level encryption gives full audit control (vs n8n's opaque vault)
-- Key rotation without downtime via version-based decryption
+- Prompt injection attacks cannot leak credentials because credentials never enter the system at all
+- Reduced attack surface — no credential storage means no credential vault to breach
+- OAuth token lifecycle (refresh, rotation, revocation) is fully managed by Composio
 
 **Example Plan Step**:
 ```json
 {
   "step": 1,
   "role": "Fetcher",
-  "uses": "google.calendar",
+  "uses": "GOOGLECALENDAR_LIST_FREE_BUSY",
   "call": "list_free_busy",
-  "credential_ref": "gcal_user_{{user_id}}_primary",
   "args": {
     "calendar_id": "primary",
     "time_min": "2026-03-01T00:00:00Z"
@@ -1838,24 +1838,23 @@ usecases/<UseCase>/
 }
 ```
 
-**Credential Resolution**:
-When ExecuteOrchestrator dispatches a step, it decrypts the credential from the vault:
+**Credential Flow**:
+When ExecuteOrchestrator dispatches a step, it sends the invocation to the user's Composio MCP endpoint — Composio handles auth:
 ```python
-# ExecuteOrchestrator credential resolution
-cred_id = resolve_credential_ref(step.credential_ref, user_id)
-encrypted = await vault.get(cred_id)
-plaintext = decrypt_aes_gcm(encrypted.value, encrypted.iv, master_key)
-try:
-    result = await mcp_invoke(step.uses, step.call, step.args, credentials=plaintext)
-finally:
-    plaintext = None  # Zero credential from memory
+# ExecuteOrchestrator dispatches via Composio MCP
+result = await mcp_invoke(
+    server=composio_mcp_url(user_id),  # Per-user MCP endpoint
+    tool=step.uses,
+    args=resolved_args,
+    # No credentials passed — Composio handles auth via per-user endpoint
+)
 ```
 
 **Deployment Model**:
-- **Anthropic Claude API**: Plan generation via LLMAdapter protocol (temperature=0); swappable to local providers (Ollama, vLLM) via protocol
-- **Encrypted vault**: AES-256-GCM in PostgreSQL, master key from environment variable
-- **No cloud dependencies for secrets**: Credentials never leave the local environment; LLM receives only credential IDs, not values
-- **Full isolation**: ExecuteOrchestrator decrypts credentials only at MCP invocation time — LLM reasoning steps never see credential values
+- **Anthropic Claude API**: Plan generation via LLMAdapter protocol (temperature=0); Ollama sidecar provides local Llama 3.2 3B for Intake intent parsing (zero-cost, ~1s latency); additional local providers (vLLM, etc.) supported via same protocol
+- **Composio-managed credentials**: OAuth tokens live in Composio's infrastructure, never in the system
+- **No credential storage**: System stores connection status only — reduced attack surface
+- **Full isolation**: LLM reasoning steps never see credential values regardless of provider
 
 ### Two-Tier LLM Execution
 
@@ -1924,7 +1923,7 @@ finally:
 **Decision**: The system can optionally run inside NemoClaw for infrastructure-level security on top of application-level security.
 
 **Rationale**:
-- **Defense in depth**: Application-level security (PolicyEngine, credential vault, two-tier LLM) + infrastructure-level security (OS sandboxing, network namespaces)
+- **Defense in depth**: Application-level security (PolicyEngine, Composio credential delegation, two-tier LLM) + infrastructure-level security (OS sandboxing, network namespaces)
 - **Not required**: The system is secure without NemoClaw — NemoClaw adds an additional security layer for high-security deployments
 
 ---
@@ -2051,7 +2050,7 @@ class ExecuteOrchestrator:
     API steps execute via MCP tool invocations.
     """
 
-    async def execute_plan(self, plan: Plan, credentials: dict) -> list[StepResult]:
+    async def execute_plan(self, plan: Plan) -> list[StepResult]:
         """Execute plan by resolving DAG into execution levels."""
 
         # Group steps by dependency level
@@ -2062,13 +2061,13 @@ class ExecuteOrchestrator:
             if len(level_steps) > 1:
                 # Multiple steps at same level → parallel execution
                 level_results = await asyncio.gather(
-                    *[self._dispatch_step(step, results, credentials)
+                    *[self._dispatch_step(step, results)
                       for step in level_steps]
                 )
             else:
                 # Single step → sequential execution
                 level_results = [
-                    await self._dispatch_step(level_steps[0], results, credentials)
+                    await self._dispatch_step(level_steps[0], results)
                 ]
 
             for step, result in zip(level_steps, level_results):
@@ -2076,10 +2075,10 @@ class ExecuteOrchestrator:
 
         return list(results.values())
 
-    async def _dispatch_step(self, step, prior_results, credentials):
+    async def _dispatch_step(self, step, prior_results):
         """Dispatch step by type: MCP tool invocation or Anthropic API call."""
         if step.type == "api":
-            return await self._mcp_invoke(step, credentials)
+            return await self._mcp_invoke(step)  # Composio handles auth via per-user endpoint
         elif step.type == "llm_reasoning":
             return await self._anthropic_call(step, prior_results)
         elif step.type == "policy_check":
@@ -2767,7 +2766,7 @@ After reading this HLD, you should:
 1. **Understand the architecture**: Preview-first, pure agentic execution, policy-bounded
 2. **Know the 16 components**: Memory, Domain (including PolicyEngine, IntegrationManager), Orchestration, Utilities layers
 3. **See the flow**: Intent → Plan → Preview → Approve → Execute (with LLM reasoning + PolicyEngine + MCP) → Learn
-4. **Understand safety**: PolicyEngine governance, credential vault, two-tier LLM execution, idempotency, compensation, resource locking, privacy tiers
+4. **Understand safety**: PolicyEngine governance, Composio credential delegation, two-tier LLM execution, idempotency, compensation, resource locking, privacy tiers
 
 ### For Developers:
 1. Read [GLOBAL_SPEC.md](GLOBAL_SPEC.md) for universal contracts
@@ -2793,8 +2792,9 @@ After reading this HLD, you should:
 
 ---
 
-**Document Version**: Project_HLD v6.2
-**Last Updated**: 2026-04-06
+**Document Version**: Project_HLD v6.3
+**Last Updated**: 2026-04-23
+**Changes from v6.2**: **Credential model & PolicyEngine accuracy.** (1) Replaced AES-256-GCM credential vault references with Composio-delegated credential model — OAuth tokens are managed entirely by Composio, system stores connection status only. (2) Updated PluginRegistry to remove credential vault ID templates and credential_template fields. (3) Replaced "Encrypted Credential Vault & LLM Isolation" ADR with "Credential Delegation via Composio & LLM Isolation". (4) Updated ExecuteOrchestrator pseudocode to remove credential decryption (Composio handles auth via per-user MCP endpoints). (5) Replaced "deny-by-default" PolicyEngine terminology with "approval-first" — unmatched actions fall back to user approval rather than hard rejection, and the system learns from approvals for future auto-approval. (6) Updated architecture diagram.
 **Changes from v6.1**: **Composio Integration & IntegrationManager.** (1) Added IntegrationManager as 16th component in Domain Layer — manages user-provider OAuth connections via Composio SDK, connection caching, per-user MCP tool discovery, and tool management API. (2) Updated PluginRegistry connector sources to include Composio hosted MCP. (3) Added session-start cache warming to Intake component (connection cache + user tool cache in Redis). (4) Added Composio architectural decision (§12) with cache layers, rationale, and trade-offs. (5) Updated MCP Connector Model to reference Composio. (6) Component count: 15 → 16.
 **Changes from v6.0**: **Clarified execution model.** (1) Reworded Core Idea #2: "deterministic graphs with adaptive execution points" — graph topology never changes at runtime, only Reasoner steps introduce variability. (2) Added "Execution Model: Deterministic Graph, Adaptive Execution" section with three patterns: Pure API, Adaptive with Reasoner, Failure Recovery. (3) Added "Data Trust Boundary" section: default-untrusted rule for API outputs, trust classification table, Tier 1→Tier 2 data flow diagram, plan validator enforcement. (4) Annotated §2a meeting example as pure API plan (all type:api, template resolution, no execution-time LLM). (5) Rewrote §2b travel example with explicit Tier 1 sanitization step between API outputs and Tier 2 Reasoners, trust_level annotations on each step, injection stripping example. (6) Added §2c Failure Recovery Example: step failure → error object (system-generated, trusted) → Tier 2 Reasoner → spawned recovery step → Tier 1 sanitization → continuation. (7) Renamed "Hybrid Planning" → "Deterministic Planning with Adaptive Execution" in §5 with clearer graph-vs-execution distinction. (8) Cross-referenced default-untrusted rule in GLOBAL_SPEC.md §8.2.
 **Changes from v5.1**: **Pure Agentic Execution + MCP + Security Model.** (1) Dropped n8n — all execution via Python/FastAPI ExecuteOrchestrator with MCP tool invocations. (2) WorkflowBuilder absorbed into ExecuteOrchestrator (17→16 components). (3) Replaced n8n Secrets Vault with AES-256-GCM encrypted credential vault. (4) Added two-tier LLM execution (trust_level field) for prompt injection defense. (5) MCP connector model replaces n8n proprietary nodes. (6) Long-running tasks use APScheduler + Redis instead of n8n Wait nodes. (7) Parallelism via asyncio.gather() instead of n8n Split/Merge. (8) NemoClaw deployment compatibility for infrastructure-level security.

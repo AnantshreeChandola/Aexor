@@ -110,7 +110,7 @@ class PlanService:
         metrics: PlanMetrics
     ) -> StorePlanResult:
         """Store plan with outcome and metrics"""
-        
+
     async def get_plans_by_intent(
         self,
         intent_type: str,
@@ -118,12 +118,15 @@ class PlanService:
         limit: int = 50
     ) -> List[PlanPattern]:
         """Query plans by intent type with success filtering"""
-        
+
     async def get_plan_by_id(
-        self, 
+        self,
         plan_id: str
     ) -> Optional[Plan]:
         """Retrieve specific plan by ID"""
+
+    # Exposed via db attribute for Planner's plan cache:
+    # db.get_plan_by_hash(plan_hash) -> dict | None
 ```
 
 #### AnalyticsService Interface
@@ -193,9 +196,8 @@ class PlanOutcome(BaseModel):
 class DatabaseAdapter:
     def __init__(self):
         self.shared_db = get_database_adapter()  # Uses shared infrastructure
-        
+
     @with_db_error_handling
-    @with_retry_on_connection_error
     async def store_plan_transaction(
         self,
         plan: Plan,
@@ -205,6 +207,21 @@ class DatabaseAdapter:
         """Store plan data in single transaction"""
         async with self.shared_db.get_session() as session:
             # Atomic storage of all plan-related data
+
+    @with_db_error_handling
+    async def get_plan_by_hash(
+        self,
+        plan_hash: str
+    ) -> dict[str, Any] | None:
+        """Retrieve the most recent successful plan matching a signature hash.
+
+        Used by Planner's plan cache to find reusable plans without LLM.
+        Uses the existing idx_plans_hash index. Returns the plan data dict
+        with a `success` flag if found, None otherwise.
+
+        Query: JOIN plans + plan_outcomes WHERE plan_hash = :hash
+               AND success = true ORDER BY stored_at DESC LIMIT 1
+        """
 ```
 
 ### Shared Infrastructure Usage
@@ -362,8 +379,8 @@ Not applicable - PlanLibrary is an internal component with no user-facing operat
 ### Cross-Component Interactions
 **PlanLibrary is called by:**
 - **PlanWriter**: Stores executed plans (downstream dependency)
-- **ContextRAG**: Queries for plan patterns (downstream dependency)  
-- **Planner**: Retrieves successful plan templates (downstream dependency)
+- **ContextRAG**: Queries for plan patterns (downstream dependency)
+- **Planner**: Retrieves successful plan templates (Level 3 fallback) and cached plans by signature hash (Level 0 plan cache via `get_plan_by_hash()`)
 
 **PlanLibrary does NOT call other components** (foundation layer)
 

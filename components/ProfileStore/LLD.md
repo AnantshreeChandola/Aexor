@@ -675,7 +675,7 @@ IF operation requires consent tier N AND context_tier < N (from auth context)
 
 ## 8. Non-Functional Requirements
 
-**Deployment Configuration**: See [DEPLOYMENT.md](../../docs/DEPLOYMENT.md) for environment setup, database configuration, and cloud migration guidance.
+**Deployment Configuration**: See [DEPLOYMENT.md](../../DEPLOYMENT.md) for environment setup, database configuration, and cloud migration guidance.
 
 ### 8.1 Latency Targets
 
@@ -925,7 +925,7 @@ Once global dependencies are ready, implement ProfileStore in this order:
 - [GLOBAL_SPEC.md](../../docs/architecture/GLOBAL_SPEC.md) v2 — Universal contracts
 - [Project_HLD.md](../../docs/architecture/Project_HLD.md) v4.0 — System architecture
 - [SHARED_INFRASTRUCTURE.md](../../docs/architecture/SHARED_INFRASTRUCTURE.md) v1.0.0 — Global dependencies and shared services
-- [DEPLOYMENT.md](../../docs/DEPLOYMENT.md) v1.0.0 — Deployment and infrastructure guide
+- [DEPLOYMENT.md](../../DEPLOYMENT.md) v1.0.0 — Deployment and infrastructure guide
 - [constitution.md](../../.specify/memory/constitution.md) v1.0.0 — Development principles
 - [flow.mmd](./diagrams/flow.mmd) — Mermaid flowchart (key operations)
 

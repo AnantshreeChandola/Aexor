@@ -110,6 +110,15 @@ class ToolCatalog:
         self._user_tool_cache = user_tool_cache
         self._tools: dict[str, ToolDefinition] = {}
         self._last_refresh: float = 0.0
+        self._on_refresh_callback: Any | None = None
+
+    def set_refresh_callback(self, callback: Any) -> None:
+        """Set an async callback to fire after each successful tool refresh.
+
+        The callback receives the full list of ToolDefinition objects.
+        Used by ToolDiscoveryService to sync tool embeddings.
+        """
+        self._on_refresh_callback = callback
 
     # ------------------------------------------------------------------
     # Refresh
@@ -154,27 +163,147 @@ class ToolCatalog:
             "Tool catalog refreshed",
             extra={"tool_count": len(self._tools)},
         )
+        await self._fire_refresh_callback()
 
     async def _refresh_composio(self) -> None:
-        """Refresh tools via Composio system URL."""
+        """Refresh tools via Composio system URL.
+
+        If the MCP endpoint returns an error (e.g. broken auth configs),
+        attempts to heal the MCP config by removing invalid auth config
+        IDs and retries once.
+        """
         assert self._url_manager is not None
         assert self._composio_config is not None
 
         try:
             tools = await self._fetch_tools_composio()
-            new_tools = {t.name: t for t in tools}
-            new_tools = self._apply_filters(new_tools)
-            self._tools = new_tools
-            self._last_refresh = time.monotonic()
-            logger.info(
-                "Tool catalog refreshed (Composio)",
-                extra={"tool_count": len(self._tools)},
-            )
-        except Exception:
+        except Exception as first_err:
+            # Attempt self-healing: validate and remove broken auth configs
             logger.warning(
-                "Composio tool catalog refresh failed, preserving stale tools",
-                exc_info=True,
+                "Composio MCP fetch failed, attempting auth config heal",
+                extra={"error": str(first_err)},
             )
+            healed = await self._heal_mcp_auth_configs()
+            if healed:
+                # Invalidate cached URLs so the next fetch uses fresh state
+                self._url_manager.invalidate_all()
+                try:
+                    tools = await self._fetch_tools_composio()
+                except Exception:
+                    logger.warning(
+                        "Composio tool catalog refresh failed after heal, "
+                        "preserving stale tools",
+                        exc_info=True,
+                    )
+                    return
+            else:
+                logger.warning(
+                    "Composio tool catalog refresh failed, preserving stale tools",
+                    exc_info=True,
+                )
+                return
+
+        new_tools = {t.name: t for t in tools}
+        new_tools = self._apply_filters(new_tools)
+        self._tools = new_tools
+        self._last_refresh = time.monotonic()
+        logger.info(
+            "Tool catalog refreshed (Composio)",
+            extra={"tool_count": len(self._tools)},
+        )
+        await self._fire_refresh_callback()
+
+    async def _fire_refresh_callback(self) -> None:
+        """Fire the on-refresh callback (fire-and-forget). Never blocks refresh."""
+        if self._on_refresh_callback is None:
+            return
+        try:
+            await self._on_refresh_callback(list(self._tools.values()))
+        except Exception:
+            logger.warning("tool_refresh_callback_failed", exc_info=True)
+
+    async def _heal_mcp_auth_configs(self) -> bool:
+        """Validate auth configs on the Composio MCP server and remove broken ones.
+
+        Fetches the MCP config via REST API, checks each auth config ID
+        against ``GET /api/v3/auth_configs/{id}``, and PATCHes out any that
+        return 400/404/410.
+
+        Returns ``True`` if broken configs were found and removed.
+        """
+        assert self._composio_config is not None
+        base = self._composio_config.base_url.rstrip("/")
+        mcp_id = self._composio_config.mcp_config_id
+        headers = {"x-api-key": self._composio_config.api_key}
+
+        # 1. Fetch current MCP config
+        try:
+            r = await self._http.get(
+                f"{base}/api/v3/mcp/{mcp_id}", headers=headers
+            )
+            if r.status_code != 200:
+                logger.warning(
+                    "Cannot fetch MCP config for healing",
+                    extra={"status": r.status_code, "body": r.text[:200]},
+                )
+                return False
+            mcp_data = r.json()
+        except Exception as exc:
+            logger.warning("MCP config fetch failed during heal: %s", exc)
+            return False
+
+        auth_ids: list[str] = mcp_data.get("auth_config_ids", [])
+        if not auth_ids:
+            return False
+
+        # 2. Validate each auth config
+        broken: list[str] = []
+        for ac_id in auth_ids:
+            try:
+                r = await self._http.get(
+                    f"{base}/api/v3/auth_configs/{ac_id}", headers=headers
+                )
+                if r.status_code >= 400:
+                    broken.append(ac_id)
+            except Exception:
+                broken.append(ac_id)
+
+        if not broken:
+            logger.info("All Composio auth configs are valid, no healing needed")
+            return False
+
+        # 3. PATCH to remove broken auth configs
+        valid_ids = [ac for ac in auth_ids if ac not in set(broken)]
+        logger.warning(
+            "Removing broken Composio auth configs",
+            extra={
+                "broken": broken,
+                "remaining": len(valid_ids),
+                "total": len(auth_ids),
+            },
+        )
+
+        try:
+            r = await self._http.patch(
+                f"{base}/api/v3/mcp/{mcp_id}",
+                headers={**headers, "Content-Type": "application/json"},
+                json={"auth_config_ids": valid_ids},
+            )
+            if r.status_code != 200:
+                logger.warning(
+                    "MCP config PATCH failed",
+                    extra={"status": r.status_code, "body": r.text[:200]},
+                )
+                return False
+        except Exception as exc:
+            logger.warning("MCP config PATCH failed: %s", exc)
+            return False
+
+        logger.info(
+            "Composio MCP config healed",
+            extra={"removed": broken, "remaining_count": len(valid_ids)},
+        )
+        return True
 
     async def _fetch_tools_composio(self) -> list[ToolDefinition]:
         """Call ``tools/list`` on the Composio system MCP URL."""
@@ -270,19 +399,54 @@ class ToolCatalog:
         or if the call fails.
         """
         if self._url_manager is None or self._composio_config is None:
-            return list(self._tools.values())
+            logger.info(
+                "refresh_user_skip_no_composio",
+                extra={"user_id": user_id},
+            )
+            return []
 
+        t0 = time.monotonic()
         try:
             tools = await self._fetch_tools_for_user(user_id)
-        except Exception:
+        except Exception as first_err:
+            # Attempt self-healing before giving up
             logger.warning(
-                "Per-user tool refresh failed, using global catalog",
-                extra={"user_id": user_id},
-                exc_info=True,
+                "Per-user tool fetch failed, attempting auth config heal",
+                extra={"user_id": user_id, "error": str(first_err)},
             )
-            return list(self._tools.values())
+            healed = await self._heal_mcp_auth_configs()
+            if healed:
+                self._url_manager.invalidate_all()
+                try:
+                    tools = await self._fetch_tools_for_user(user_id)
+                except Exception as exc:
+                    t_ms = int((time.monotonic() - t0) * 1000)
+                    logger.warning(
+                        "Per-user tool refresh failed after heal",
+                        extra={
+                            "user_id": user_id,
+                            "elapsed_ms": t_ms,
+                            "error": str(exc),
+                        },
+                    )
+                    return []
+            else:
+                t_ms = int((time.monotonic() - t0) * 1000)
+                logger.warning(
+                    "Per-user tool refresh failed",
+                    extra={
+                        "user_id": user_id,
+                        "elapsed_ms": t_ms,
+                        "error": str(first_err),
+                        "error_type": type(first_err).__name__,
+                    },
+                )
+                return []
+
+        t_fetch_ms = int((time.monotonic() - t0) * 1000)
 
         # Cache in Redis if available
+        t_cache = time.monotonic()
         if self._user_tool_cache is not None:
             serialised = [
                 {
@@ -295,10 +459,20 @@ class ToolCatalog:
                 for t in tools
             ]
             await self._user_tool_cache.set(user_id, serialised)
+        t_cache_ms = int((time.monotonic() - t_cache) * 1000)
+
+        # Summarize providers found
+        providers = sorted({t.provider_name for t in tools})
 
         logger.info(
             "Per-user tool catalog refreshed",
-            extra={"user_id": user_id, "tool_count": len(tools)},
+            extra={
+                "user_id": user_id,
+                "tool_count": len(tools),
+                "providers": providers,
+                "fetch_ms": t_fetch_ms,
+                "cache_ms": t_cache_ms,
+            },
         )
         return tools
 
@@ -388,6 +562,70 @@ class ToolCatalog:
 
     def get_tool(self, tool_name: str) -> ToolDefinition | None:
         return self._tools.get(tool_name)
+
+    def resolve_tool(self, uses: str, call: str | None = None) -> ToolDefinition | None:
+        """Resolve a plan step's uses/call to a catalog ToolDefinition.
+
+        Tries multiple naming conventions in order:
+        1. Exact match on ``uses`` (e.g. ``GOOGLECALENDAR_LIST_EVENTS``)
+        2. Combine ``uses`` + ``call`` in Composio format
+           (e.g. ``google.calendar`` + ``list_events`` → ``GOOGLECALENDAR_LIST_EVENTS``)
+        3. Normalize ``uses`` alone (dots/hyphens → underscores, uppercase)
+        4. Try with ``GOOGLE`` prefix (``calendar`` → ``GOOGLECALENDAR``)
+        5. Case-insensitive substring match against catalog names
+        """
+        # 1. Exact match
+        if uses in self._tools:
+            return self._tools[uses]
+
+        # 2. Combine uses + call  (google.calendar + list_events → GOOGLECALENDAR_LIST_EVENTS)
+        if call and call != uses:
+            provider = re.sub(r"[.\-_\s]+", "", uses).upper()
+            action = call.replace("-", "_").replace(".", "_").upper()
+            composio_name = f"{provider}_{action}"
+            if composio_name in self._tools:
+                return self._tools[composio_name]
+
+        # 3. Normalize uses alone  (calendar.list_events → CALENDAR_LIST_EVENTS)
+        normalized = re.sub(r"[.\-\s]+", "_", uses).upper()
+        if normalized in self._tools:
+            return self._tools[normalized]
+
+        # 4. Try with GOOGLE prefix  (CALENDAR_LIST_EVENTS → GOOGLECALENDAR_LIST_EVENTS)
+        #    Also try combined uses+call with prefix (calendar + list_events → GOOGLECALENDAR_LIST_EVENTS)
+        candidates: list[str] = []
+        if not normalized.startswith("GOOGLE"):
+            for prefix in ("GOOGLE", "GOOGLE_"):
+                candidates.append(f"{prefix}{normalized}")
+        if call and call != uses:
+            provider = re.sub(r"[.\-_\s]+", "", uses).upper()
+            action = call.replace("-", "_").replace(".", "_").upper()
+            if not provider.startswith("GOOGLE"):
+                candidates.append(f"GOOGLE{provider}_{action}")
+        for candidate in candidates:
+            if candidate in self._tools:
+                return self._tools[candidate]
+
+        # 5. Case-insensitive + partial match as last resort
+        upper_norm = normalized
+        for name, td in self._tools.items():
+            if name.upper() == upper_norm:
+                return td
+            # Match if the catalog name ends with the action part
+            # e.g. uses="calendar.list_events" matches "GOOGLECALENDAR_LIST_EVENTS"
+            action_part = normalized.split("_", 1)[-1] if "_" in normalized else ""
+            provider_part = normalized.split("_", 1)[0] if "_" in normalized else normalized
+            if action_part and name.upper().endswith(f"_{action_part}"):
+                # Verify provider substring match
+                name_provider = name.split("_", 1)[0].upper()
+                if provider_part in name_provider:
+                    return td
+
+        logger.debug(
+            "resolve_tool_miss",
+            extra={"uses": uses, "call": call, "catalog_size": len(self._tools)},
+        )
+        return None
 
     def get_tool_or_raise(self, tool_name: str) -> ToolDefinition:
         tool = self._tools.get(tool_name)

@@ -31,6 +31,10 @@ _BYPASS_PATHS = frozenset(
         "/openapi.json",
         "/auth/token",
         "/auth/register",
+        # OAuth landing page — hit by the browser after a Composio redirect
+        # without any Authorization header. Returns static HTML only, no
+        # user state is read or written.
+        "/api/integrations/callback",
     ]
 )
 

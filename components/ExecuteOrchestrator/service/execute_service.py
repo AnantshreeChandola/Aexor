@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import time
 from datetime import UTC, datetime
 from typing import Any
@@ -36,6 +37,7 @@ from ..domain.models import (
     ExecuteRequest,
     ExecutionContext,
     GateApprovalRequired,
+    IntegrationNotConnectedError,
     MCPInvocationError,
     PlanExpiredError,
     RecoveryExhaustedError,
@@ -49,6 +51,44 @@ logger = logging.getLogger(__name__)
 # Approval token secret key (should be env-configured in production)
 _APPROVAL_TOKEN_SECRET = os.environ.get("APPROVAL_TOKEN_SECRET", "approval-gate-secret")
 _MAX_RECOVERY_ACTIONS = 5
+
+# Patterns that indicate a Composio integration is not connected/authenticated.
+# Matched case-insensitively against MCP error messages.
+_NOT_CONNECTED_PATTERNS = re.compile(
+    r"no connected\b.*\baccount|"
+    r"not connected|"
+    r"not authenticated|"
+    r"account.*not.*found|"
+    r"entity.*not.*found|"
+    r"connection.*not.*found|"
+    r"authentication.*required|"
+    r"auth.*error.*account|"
+    r"no active connection",
+    re.IGNORECASE,
+)
+
+
+def _check_integration_not_connected(
+    error: Exception, step: Any = None,
+) -> IntegrationNotConnectedError | None:
+    """If *error* looks like a 'not connected' Composio error, return
+    an ``IntegrationNotConnectedError`` with the provider name extracted
+    from the tool.  Otherwise return ``None``."""
+    msg = str(error)
+    if not _NOT_CONNECTED_PATTERNS.search(msg):
+        return None
+
+    # Extract provider from the tool name (e.g. "NOTION_SEARCH_NOTION" → "Notion")
+    tool_name = getattr(error, "tool", None) or (
+        getattr(step, "uses", None) if step else None
+    )
+    provider = "Integration"
+    if tool_name:
+        prefix = tool_name.split("_", 1)[0] if "_" in tool_name else tool_name
+        provider = prefix.capitalize()
+
+    step_num = getattr(step, "step", None) or getattr(error, "step", None)
+    return IntegrationNotConnectedError(provider=provider, step=step_num)
 
 
 class ExecuteService:
@@ -430,8 +470,19 @@ class ExecuteService:
         #    exist in the catalog (they serve only as HITL checkpoints).
         #    Forward the upstream Reasoner's data so downstream Booker steps
         #    can reference either step_N (Reasoner) or step_M (Resolver).
-        tool_def = self._tool_catalog.get_tool(step.uses)
-        if tool_def is None and step.role == "Resolver":
+        tool_def = self._tool_catalog.resolve_tool(step.uses, step.call)
+        if tool_def is not None and tool_def.name != step.uses:
+            logger.info(
+                "tool_name_resolved",
+                extra={
+                    "plan_id": ctx.plan.plan_id,
+                    "step": step.step,
+                    "plan_uses": step.uses,
+                    "resolved_name": tool_def.name,
+                },
+            )
+        _is_virtual = step.uses.startswith("system.") or step.uses.startswith("system_")
+        if tool_def is None and (step.role == "Resolver" or _is_virtual):
             gate_choice = (
                 request.preview_state.get(step.gate_id)
                 if request.preview_state and step.gate_id
@@ -460,6 +511,10 @@ class ExecuteService:
         resolved_args = self._template_resolver.resolve(
             step.args, ctx.step_results, request.preview_state
         )
+
+        # 1b. Disable dry_run for real execution.  Preview sets this to True;
+        #     once the user has approved, every step executes for real.
+        resolved_args.pop("dry_run", None)
 
         # 2. Idempotency check (Booker only)
         idem_key: str | None = None
@@ -499,7 +554,9 @@ class ExecuteService:
 
             # 5. Resolve tool info from ToolCatalog (already fetched above)
             mcp_server = tool_def.server_name if tool_def else step.uses
-            mcp_tool = step.uses  # In MCP model, tool name IS the operation
+            # Use the resolved Composio tool name for MCP invocation,
+            # not the plan's human-readable step.uses (which may differ).
+            mcp_tool = tool_def.name if tool_def else step.uses
 
             # 6. MCP invocation with retry
             # Always include user_id so MCPClientAdapter can generate
@@ -681,25 +738,53 @@ class ExecuteService:
 
         return None
 
-    # Prefix injected into every Reasoner system prompt to guarantee JSON output.
-    _REASONER_JSON_PREFIX = (
+    # Prefix injected into Reasoner system prompts for scheduling/write intents.
+    _REASONER_SCHEDULING_PREFIX = (
         "CRITICAL INSTRUCTION: You MUST return ONLY a valid JSON object. "
         "No prose, no explanation, no markdown fences. The JSON MUST include "
         "ALL of these fields:\n"
-        '- "recommended_time": ISO 8601 datetime string (e.g. "2026-04-08T10:00:00")\n'
+        '- "recommended_time": ISO 8601 datetime string WITHOUT timezone offset, '
+        "expressed in the USER'S LOCAL TIMEZONE. The user's timezone is in the "
+        "intent context under the \"tz\" field (IANA format like \"Asia/Kolkata\") "
+        "and in entities.timezone. Do NOT append a UTC offset or Z suffix. "
+        "Do NOT convert to UTC. Output the time exactly as the user would read "
+        'it on their wall clock. Example: "2026-04-08T14:00:00" for 2 PM local time.\n'
         '- "has_conflict": boolean (true if any existing event overlaps)\n'
         '- "conflicts": array of strings describing each conflicting event (empty array if none)\n'
-        '- "free_slots": array of objects, each with "start" (ISO datetime), "end" (ISO datetime), '
-        '"label" (human-readable string, e.g. "11:00 AM - 11:30 AM, Tue Apr 8"). '
+        '- "free_slots": array of objects, each with "start" (ISO datetime, no offset, local time), '
+        '"end" (ISO datetime, no offset, local time), '
+        '"label" (human-readable string in the user\'s local time, '
+        'e.g. "2:00 PM - 2:30 PM, Tue Apr 8"). '
         "Include 3-5 nearest free slots during work hours. "
         "Required when has_conflict=true, empty array when has_conflict=false.\n"
         '- "reason": string explaining why this time was chosen\n\n'
-        "Example output:\n"
-        '{"recommended_time":"2026-04-08T10:00:00","has_conflict":true,'
-        '"conflicts":["Team standup 10:00-10:30"],'
-        '"free_slots":[{"start":"2026-04-08T11:00:00","end":"2026-04-08T11:30:00",'
-        '"label":"11:00 AM - 11:30 AM, Tue Apr 8"}],'
-        '"reason":"Conflict with team standup; nearest free slot is 11:00 AM"}\n\n'
+        "IMPORTANT: When comparing the requested time against existing calendar events, "
+        "convert everything to the user's local timezone before checking for overlaps. "
+        "Calendar events from the Fetcher may be in UTC — convert them to the user's "
+        "timezone for accurate conflict detection.\n\n"
+        "Example output (for user in Asia/Kolkata, requested 2 PM):\n"
+        '{"recommended_time":"2026-04-08T14:00:00","has_conflict":true,'
+        '"conflicts":["Team standup 2:00 PM - 2:30 PM"],'
+        '"free_slots":[{"start":"2026-04-08T15:00:00","end":"2026-04-08T15:30:00",'
+        '"label":"3:00 PM - 3:30 PM, Tue Apr 8"}],'
+        '"reason":"Conflict with team standup; nearest free slot is 3:00 PM"}\n\n'
+    )
+
+    # Prefix for read-only / general Reasoner steps (list, check, show, etc.)
+    _REASONER_READONLY_PREFIX = (
+        "CRITICAL INSTRUCTION: You MUST return ONLY a valid JSON object. "
+        "No prose, no explanation, no markdown fences. The JSON MUST include:\n"
+        '- "content": a clear, human-readable summary of the data. Use markdown formatting '
+        "(headers, bullet points, bold) to make it easy to read.\n"
+        '- "events": (if applicable) array of event objects, each with "title", "start", '
+        '"end", "status", and any other relevant fields from the source data.\n\n'
+        "Your job is to present the retrieved data clearly and helpfully to the user. "
+        "Do NOT analyze conflicts or recommend times — just summarize what was found.\n\n"
+    )
+
+    _READ_ONLY_INTENT_RE = re.compile(
+        r"^(list|check|show|get|view|find|search|query|look_?up|fetch|read|display)",
+        re.IGNORECASE,
     )
 
     async def _execute_reasoning_step(
@@ -731,12 +816,16 @@ class ExecuteService:
             }
         )
 
-        # 2. Wrap system_prompt_ref with explicit JSON instruction.
-        #    The Planner LLM may set system_prompt_ref to a short label
-        #    (e.g. "calendar_conflict_analyzer") instead of actual instructions.
+        # 2. Wrap system_prompt_ref with intent-appropriate JSON instruction.
+        #    Use scheduling prefix for write intents, readonly prefix for queries.
         config = step.reasoning_config
         if config:
-            wrapped_prompt = self._REASONER_JSON_PREFIX + (config.system_prompt_ref or "")
+            intent_type = ctx.plan.intent.intent if ctx.plan.intent else ""
+            if self._READ_ONLY_INTENT_RE.match(intent_type or ""):
+                prefix = self._REASONER_READONLY_PREFIX
+            else:
+                prefix = self._REASONER_SCHEDULING_PREFIX
+            wrapped_prompt = prefix + (config.system_prompt_ref or "")
             config = config.model_copy(
                 update={
                     "system_prompt_ref": wrapped_prompt,
@@ -1040,6 +1129,12 @@ class ExecuteService:
             error_details=str(error)[:500],
         )
 
+        # Short-circuit: if this is a "not connected" error, raise
+        # immediately with a clean message — do NOT route to Reasoner.
+        not_connected = _check_integration_not_connected(error, step)
+        if not_connected is not None:
+            raise not_connected
+
         reasoner = self._find_recovery_reasoner(ctx.plan.graph)
 
         if reasoner is None:
@@ -1139,6 +1234,11 @@ class ExecuteService:
             if plan_step:
                 entry["role"] = plan_step.role
                 entry["uses"] = plan_step.uses
+            # Include result for Reasoner/Analyzer/system.* steps so the
+            # frontend can display the processed output to the user.
+            if sr.result is not None and plan_step:
+                if plan_step.role in ("Reasoner", "Analyzer") or plan_step.uses.startswith("system."):
+                    entry["result"] = sr.result
             context_data[f"step_{step_num}"] = entry
 
         final_graph = None
@@ -1198,6 +1298,7 @@ class ExecuteService:
             MCPInvocationError: "mcp_error",
             SpawnDeniedError: "spawn_denied",
             GateApprovalRequired: "gate_approval_required",
+            IntegrationNotConnectedError: "integration_not_connected",
         }
         for cls, name in mapping.items():
             if isinstance(error, cls):

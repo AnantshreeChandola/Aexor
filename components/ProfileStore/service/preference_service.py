@@ -7,6 +7,7 @@ Implements consent enforcement and Evidence Item formatting.
 Reference: LLD.md §3.2
 """
 
+import json
 import logging
 from datetime import datetime
 from typing import Any
@@ -20,6 +21,8 @@ from ..adapters.schema_registry import SchemaRegistryAdapter
 from ..domain.models import (
     ConsentDeniedError,
     DeleteResponse,
+    ExtractedPreference,
+    PreferenceImportResponse,
     PreferenceResponse,
     ValidationError,
 )
@@ -292,3 +295,138 @@ class PreferenceService:
         )
 
         return evidence_items
+
+    async def import_preferences(
+        self,
+        user_id: UUID,
+        content: str,
+        llm_adapter: Any | None = None,
+    ) -> PreferenceImportResponse:
+        """
+        Extract preferences from JSON or free-text content.
+
+        JSON input is parsed and mapped to known keys directly.
+        Free-text input is sent to the LLM-based PreferenceExtractor.
+
+        Args:
+            user_id: User UUID (for logging)
+            content: Raw text or JSON string
+            llm_adapter: LLMAdapter instance (required for free-text)
+
+        Returns:
+            PreferenceImportResponse with extracted preferences for review
+        """
+        content = content.strip()
+        warnings: list[str] = []
+
+        logger.info("Import preferences request for user %s", user_id)
+
+        # Try JSON path first
+        try:
+            parsed = json.loads(content)
+            if isinstance(parsed, dict):
+                return self._import_from_json(parsed, warnings)
+        except json.JSONDecodeError:
+            pass
+
+        # Free-text path — requires LLM
+        if llm_adapter is None:
+            raise ValueError(
+                "LLM adapter is not available. Free-text import requires an LLM. "
+                "Please paste valid JSON instead, or configure an LLM provider."
+            )
+
+        return await self._import_from_freetext(content, llm_adapter, warnings)
+
+    def _import_from_json(
+        self, data: dict[str, Any], warnings: list[str]
+    ) -> PreferenceImportResponse:
+        """Extract preferences from a parsed JSON dict."""
+        known_keys = set(self.schema_registry.list_preference_keys())
+        extracted: list[ExtractedPreference] = []
+
+        for raw_key, value in data.items():
+            # Try exact match first
+            matched_key = raw_key if raw_key in known_keys else None
+
+            # Fuzzy match: lowercase, strip common suffixes
+            if matched_key is None:
+                normalized = raw_key.lower().replace("-", "_").replace(" ", "_")
+                for k in known_keys:
+                    if k.lower() == normalized:
+                        matched_key = k
+                        break
+
+            # Use original key if no schema match (user-defined preference)
+            final_key = matched_key or raw_key
+
+            # Validate against schema
+            sensitive = self.schema_registry.is_sensitive(final_key)
+            try:
+                self.schema_registry.validate_value(final_key, value)
+            except (ValidationError, Exception) as e:
+                warnings.append(f"{final_key}: {e}")
+
+            extracted.append(
+                ExtractedPreference(
+                    preference_key=final_key,
+                    preference_value=value,
+                    sensitive=sensitive,
+                    confidence=1.0,
+                    source_text=json.dumps({raw_key: value}),
+                )
+            )
+
+        logger.info("JSON import: extracted %d preferences", len(extracted))
+        return PreferenceImportResponse(
+            extracted=extracted,
+            raw_input_type="json",
+            warnings=warnings,
+        )
+
+    async def _import_from_freetext(
+        self, text: str, llm_adapter: Any, warnings: list[str]
+    ) -> PreferenceImportResponse:
+        """Extract preferences from free text using the LLM."""
+        from ..adapters.preference_extractor import PreferenceExtractor
+
+        extractor = PreferenceExtractor(llm_adapter)
+
+        # Build known keys info for the LLM prompt
+        known_keys_info: list[dict[str, Any]] = []
+        for key in self.schema_registry.list_preference_keys():
+            info = self.schema_registry.get_preference_info(key)
+            known_keys_info.append(info)
+
+        raw_results = await extractor.extract(text, known_keys_info)
+
+        extracted: list[ExtractedPreference] = []
+        for item in raw_results:
+            key = item.get("key", "")
+            value = item.get("value")
+            confidence = float(item.get("confidence", 0.5))
+            source_text = item.get("source_text")
+
+            # Validate against schema
+            sensitive = self.schema_registry.is_sensitive(key)
+            try:
+                self.schema_registry.validate_value(key, value)
+            except (ValidationError, Exception) as e:
+                warnings.append(f"{key}: {e}")
+
+            extracted.append(
+                ExtractedPreference(
+                    preference_key=key,
+                    preference_value=value,
+                    sensitive=sensitive,
+                    confidence=confidence,
+                    source_text=source_text,
+                )
+            )
+
+        logger.info("Free-text import: extracted %d preferences", len(extracted))
+        return PreferenceImportResponse(
+            extracted=extracted,
+            raw_input_type="freetext",
+            warnings=warnings,
+        )

@@ -159,3 +159,13 @@ class ComposioClient:
     async def revoke_connection(self, connected_account_id: str) -> None:
         """DELETE /api/v3/connected_accounts/{id} — revoke a connection."""
         await self._request("DELETE", f"/api/v3/connected_accounts/{connected_account_id}")
+
+    async def get_toolkit(self, slug: str) -> dict:
+        """GET /api/v3.1/toolkits/{slug} — fetch toolkit metadata."""
+        data = await self._request("GET", f"/api/v3.1/toolkits/{slug}")
+        return {
+            "slug": data.get("slug", slug),
+            "name": data.get("name", slug),
+            "logo": data.get("logo", ""),
+            "description": data.get("description", ""),
+        }

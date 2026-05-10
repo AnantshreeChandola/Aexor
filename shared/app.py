@@ -21,6 +21,23 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+# Configure root logger so all app logs (INFO+) are visible.
+# Without this, Python defaults to WARNING and all INFO logs are silently dropped.
+_log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
+_log_format = "%(asctime)s %(levelname)-8s [%(name)s] %(message)s"
+_log_datefmt = "%H:%M:%S"
+logging.basicConfig(
+    level=getattr(logging, _log_level, logging.INFO),
+    format=_log_format,
+    datefmt=_log_datefmt,
+)
+# Also log to file so logs are accessible outside the server terminal.
+_log_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), "app.log")
+_fh = logging.FileHandler(_log_file)
+_fh.setLevel(getattr(logging, _log_level, logging.INFO))
+_fh.setFormatter(logging.Formatter(_log_format, datefmt=_log_datefmt))
+logging.getLogger().addHandler(_fh)
+
 logger = logging.getLogger(__name__)
 
 
@@ -160,6 +177,75 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.warning("Tool catalog initial refresh failed: %s", exc)
 
+    # Tool Discovery service (library -- no routes, graceful degradation)
+    tool_discovery = None
+    tool_discovery_enabled = os.environ.get(
+        "TOOL_DISCOVERY_ENABLED", "true"
+    ).lower() in ("true", "1", "yes")
+
+    if tool_discovery_enabled and app.state.vector_index_service is not None:
+        try:
+            from components.Planner.adapters.cross_encoder_reranker import (
+                CrossEncoderReranker,
+            )
+            from components.Planner.adapters.tool_discovery import (
+                ToolDiscoveryService,
+            )
+            from components.Planner.adapters.tool_embedding_adapter import (
+                ToolEmbeddingAdapter,
+            )
+            from components.VectorIndex.adapters.embedding_adapter import (
+                EmbeddingAdapter,
+            )
+
+            # Reuse the bi-encoder from VectorIndex
+            embedding_adapter = app.state.vector_index_service._embedding
+
+            tool_embedding_adapter = ToolEmbeddingAdapter(
+                embedding_adapter=embedding_adapter,
+                db_adapter=db,
+            )
+
+            # Cross-encoder reranker (optional — graceful if missing)
+            reranker = None
+            cross_encoder_path = os.environ.get(
+                "CROSS_ENCODER_MODEL_PATH",
+                os.path.expanduser("~/.cache/vectorindex/cross_encoder.onnx"),
+            )
+            try:
+                reranker = CrossEncoderReranker(model_path=cross_encoder_path)
+            except Exception as exc:
+                logger.warning("Cross-encoder model unavailable, Tier 2 reranking disabled: %s", exc)
+
+            tool_discovery = ToolDiscoveryService(
+                tool_embedding_adapter=tool_embedding_adapter,
+                reranker=reranker,
+                vector_index_service=app.state.vector_index_service,
+                plan_service=app.state.plan_service,
+                max_candidates=int(os.environ.get("TOOL_DISCOVERY_MAX_CANDIDATES", "20")),
+                max_reranked=int(os.environ.get("TOOL_DISCOVERY_MAX_RERANKED", "5")),
+                min_tools_threshold=int(os.environ.get("TOOL_DISCOVERY_MIN_THRESHOLD", "3")),
+                plan_search_k=int(os.environ.get("TOOL_DISCOVERY_PLAN_SEARCH_K", "10")),
+                tool_search_k=int(os.environ.get("TOOL_DISCOVERY_TOOL_SEARCH_K", "10")),
+            )
+
+            # Set catalog refresh callback to sync tool embeddings
+            async def _on_tool_refresh(tools):
+                try:
+                    await tool_embedding_adapter.sync_tool_embeddings(tools)
+                except Exception:
+                    logger.warning("tool_embedding_sync_failed", exc_info=True)
+
+            app.state.tool_catalog.set_refresh_callback(_on_tool_refresh)
+
+            logger.info(
+                "Tool discovery initialized",
+                extra={"reranker_available": reranker is not None},
+            )
+        except Exception as exc:
+            logger.warning("Tool discovery init failed, degrading gracefully: %s", exc)
+            tool_discovery = None
+
     # Planner service (library -- no routes)
     from components.Planner.service.planner_service import create_planner_service
 
@@ -168,6 +254,7 @@ async def lifespan(app: FastAPI):
             context_rag_service=app.state.context_rag_service,
             tool_catalog=app.state.tool_catalog,
             plan_service=app.state.plan_service,
+            tool_discovery=tool_discovery,
         )
     except Exception as exc:
         logger.warning("Planner init failed (ANTHROPIC_API_KEY may not be set): %s", exc)
@@ -189,24 +276,45 @@ async def lifespan(app: FastAPI):
         import redis.asyncio as aioredis
 
         from components.Intake.service.intake_service import create_intake_service
-        from components.Planner.adapters.llm_adapter import AnthropicAdapter
+        from components.Planner.adapters.llm_adapter import (
+            LLMAdapter,
+            LLMAdapterFactory,
+            LLMConfig,
+        )
 
         redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
         intake_redis = aioredis.from_url(redis_url, decode_responses=True)
 
-        # Reuse the shared LLM adapter from Planner if available, else create one
-        llm_adapter: AnthropicAdapter | None = None
+        # Reuse the shared LLM adapter from Planner if available, else create
+        # one via the same provider selector so Intake and Planner stay in sync.
+        llm_adapter: LLMAdapter | None = None
         if app.state.planner_service is not None:
             llm_adapter = app.state.planner_service._llm
         if llm_adapter is None:
-            llm_adapter = AnthropicAdapter()
+            llm_adapter = LLMAdapterFactory.from_env()
+
+        # Store LLM adapter on app.state for reuse by other components
+        app.state.llm_adapter = llm_adapter
+
+        # Local LLM (Ollama) for Intake — zero-cost, low-latency fast-path
+        local_llm_adapter = None
+        if os.environ.get("INTAKE_USE_LOCAL_LLM", "true").lower() in ("true", "1", "yes"):
+            try:
+                ollama_config = LLMConfig(
+                    provider="ollama",
+                    api_key=None,
+                    timeout_s=int(os.environ.get("INTAKE_LOCAL_TIMEOUT_S", "30")),
+                )
+                local_llm_adapter = LLMAdapterFactory.create(ollama_config)
+                logger.info("Ollama adapter created for Intake local LLM")
+            except Exception as exc:
+                logger.info("Ollama adapter not available, using remote only: %s", exc)
+                local_llm_adapter = None
 
         app.state.intake_service = create_intake_service(
             redis_client=intake_redis,
             llm_adapter=llm_adapter,
-            planner_service=app.state.planner_service,
-            preference_service=app.state.preference_service,
-            db_adapter=db,
+            local_llm_adapter=local_llm_adapter,
         )
 
         # Wire Redis into PolicyEngine cache now that it's available
@@ -216,6 +324,8 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.warning("Intake init failed: %s", exc)
         app.state.intake_service = None
+        if not hasattr(app.state, "llm_adapter"):
+            app.state.llm_adapter = None
 
     # Shared MCP client adapter (one instance for both orchestrators)
     from components.ExecuteOrchestrator.adapters.mcp_client import MCPClientAdapter
@@ -280,7 +390,7 @@ async def lifespan(app: FastAPI):
             CredentialVaultAdapter,
         )
         from components.ExecuteOrchestrator.adapters.llm_client import (
-            AnthropicReasoningAdapter,
+            create_reasoning_adapter,
         )
         from components.ExecuteOrchestrator.service.execute_service import (
             create_execute_service,
@@ -291,7 +401,7 @@ async def lifespan(app: FastAPI):
             tool_catalog=app.state.tool_catalog,
             plan_writer_service=app.state.plan_writer_service,
             mcp_client=mcp_client,
-            llm_client=AnthropicReasoningAdapter(),
+            llm_client=create_reasoning_adapter(),
             credential_vault=CredentialVaultAdapter(db=db),
             redis_client=intake_redis,
         )
@@ -378,11 +488,38 @@ async def lifespan(app: FastAPI):
         logger.warning("Audit init failed: %s", exc)
         app.state.audit_service = None
 
+    # Scheduler service (APScheduler lifecycle + job execution)
+    scheduler_service = None
+    try:
+        from components.Scheduler.adapters.db import SchedulerDatabaseAdapter
+        from components.Scheduler.service.scheduler_service import SchedulerService
+
+        scheduler_db = SchedulerDatabaseAdapter()
+        scheduler_service = SchedulerService(
+            db=scheduler_db,
+            planner_service=app.state.planner_service,
+            execute_service=app.state.execute_service,
+            approval_service=app.state.approval_service,
+            plan_service=app.state.plan_service,
+        )
+        await scheduler_service.start()
+        app.state.scheduler_service = scheduler_service
+    except Exception as exc:
+        logger.warning("Scheduler init failed: %s", exc)
+        app.state.scheduler_service = None
+
     logger.info("All services initialized")
 
     yield
 
     # --- Shutdown ---
+    # Stop Scheduler
+    if scheduler_service is not None:
+        try:
+            await scheduler_service.stop()
+        except Exception as exc:
+            logger.warning("Scheduler shutdown error: %s", exc)
+
     # Stop ExecutionMonitor background task
     if monitor_task is not None:
         try:
@@ -454,6 +591,10 @@ def create_app() -> FastAPI:
 
     app.include_router(audit_router)
     app.include_router(integration_router)
+
+    from components.Scheduler.api.routes import router as scheduler_router
+
+    app.include_router(scheduler_router)
 
     # Root health check
     @app.get("/health")
