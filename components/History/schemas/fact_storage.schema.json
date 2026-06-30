@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Fact Storage Schema",
+  "description": "JSON Schema for storing history facts",
+  "type": "object",
+  "required": [
+    "fact_text",
+    "intent_type",
+    "entities",
+    "outcome"
+  ],
+  "properties": {
+    "fact_text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "description": "PII-light fact text (max 4KB)"
+    },
+    "intent_type": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "description": "Intent type classification"
+    },
+    "entities": {
+      "type": "object",
+      "description": "Structured entities extracted from fact"
+    },
+    "outcome": {
+      "type": "boolean",
+      "description": "Success or failure of the action"
+    },
+    "source_plan_id": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$",
+      "description": "ULID of source plan (optional)"
+    },
+    "ttl_days": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 365,
+      "default": 30,
+      "description": "Time-to-live in days (default 30)"
+    }
+  }
+}

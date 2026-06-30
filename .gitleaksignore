@@ -1,0 +1,22 @@
+# Test fixtures — fake/mock secrets used in unit and integration tests
+components/ApprovalGate/tests/test_service.py:generic-api-key:196
+components/ContextRAG/tests/conftest.py:generic-api-key:54
+components/ContextRAG/tests/conftest.py:generic-api-key:63
+components/ApprovalGate/tests/test_unit.py:generic-api-key:163
+components/ApprovalGate/tests/test_unit.py:generic-api-key:170
+components/ApprovalGate/tests/test_unit.py:generic-api-key:179
+components/ApprovalGate/tests/test_unit.py:generic-api-key:186
+components/ApprovalGate/tests/test_unit.py:generic-api-key:203
+components/ApprovalGate/tests/test_unit.py:generic-api-key:335
+components/ApprovalGate/tests/test_unit.py:generic-api-key:349
+components/ApprovalGate/tests/test_unit.py:generic-api-key:365
+components/ApprovalGate/tests/test_unit.py:generic-api-key:401
+components/ApprovalGate/tests/test_unit.py:generic-api-key:421
+components/ApprovalGate/tests/test_unit.py:generic-api-key:437
+components/IntegrationManager/tests/test_integration_service.py:generic-api-key:264
+components/IntegrationManager/tests/test_integration_service.py:generic-api-key:279
+
+# Documentation examples — not real keys
+components/ApprovalGate/LLD.md:generic-api-key:388
+components/History/verification-report.md:generic-api-key:279
+specs/005-history-memory-layer/spec.md:generic-api-key:314

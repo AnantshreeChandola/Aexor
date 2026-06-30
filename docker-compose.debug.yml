@@ -1,0 +1,29 @@
+services:
+  app:
+    command:
+      - python
+      - -m
+      - debugpy
+      - --listen
+      - 0.0.0.0:5678
+      - --wait-for-client
+      - -m
+      - uvicorn
+      - shared.app:create_app
+      - --factory
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --reload
+    ports:
+      - "8000:8000"
+      - "5678:5678"
+    volumes:
+      - ./components:/app/components
+      - ./shared:/app/shared
+      - ./static:/app/static
+      - ./migrations:/app/migrations
+      - claude_auth:/root/.claude
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"

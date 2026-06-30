@@ -1,0 +1,69 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://personal-agent.dev/schemas/approval_token.schema.json",
+  "title": "Approval Token",
+  "description": "User approval token for plan execution (GLOBAL_SPEC v2 §2.7)",
+  "type": "object",
+  "required": ["token", "plan_id", "user_id", "exp", "scopes"],
+  "properties": {
+    "token": {
+      "type": "string",
+      "description": "JWT approval token (signed with HS256/RS256)",
+      "pattern": "^eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
+      "minLength": 20,
+      "examples": ["eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM..."]
+    },
+    "plan_id": {
+      "type": "string",
+      "pattern": "^[0-9A-Z]{26}$",
+      "description": "ULID of the approved plan",
+      "examples": ["01JXYZ1234567890ABCDEFGHIJ"]
+    },
+    "user_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "User who approved this plan"
+    },
+    "exp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Token expiration timestamp (ISO 8601)",
+      "examples": ["2025-12-17T10:00:00Z"]
+    },
+    "scopes": {
+      "type": "array",
+      "description": "Approved OAuth scopes for this execution (validated against allowlist)",
+      "minItems": 1,
+      "maxItems": 10,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z_]+\\.(read|write|admin)$"
+      },
+      "examples": [["calendar.write", "contacts.read"]]
+    },
+    "gate_id": {
+      "type": "string",
+      "description": "Optional gate ID if this approval is for a specific HITL gate",
+      "pattern": "^gate-[A-Za-z0-9]+$"
+    },
+    "selected_option": {
+      "type": "object",
+      "description": "Optional user selection from preview (e.g., chosen time slot)",
+      "additionalProperties": true
+    },
+    "iat": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Issued-at timestamp (ISO 8601)",
+      "examples": ["2025-12-12T10:00:00Z"]
+    },
+    "nbf": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Not-before timestamp (ISO 8601)",
+      "examples": ["2025-12-12T10:00:00Z"]
+    }
+  },
+  "additionalProperties": false
+}

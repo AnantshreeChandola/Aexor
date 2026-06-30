@@ -1,0 +1,111 @@
+# ProfileStore Flow Diagram
+
+Key operations: GET/SET Preference, GET/SET Consent
+
+```mermaid
+graph TD
+    %% Entry points
+    Start([Component calls ProfileStore])
+
+    %% Decision: Operation type
+    OpType{Operation Type?}
+
+    %% GET Preference flow
+    GetPref[GET Preference]
+    CheckConsent1{Check Consent<br/>Tier 2+?}
+    ConsentDenied1[Return CONSENT_DENIED]
+    QueryDB1[Query preferences table]
+    PrefExists1{Preference<br/>exists?}
+    DecryptCheck1{Sensitive?}
+    Decrypt1[Decrypt value]
+    GetDefault1[Get default from schema]
+    BuildEvidence1[Build Evidence Item]
+    ReturnSuccess1[Return Evidence Item]
+
+    %% SET Preference flow
+    SetPref[SET Preference]
+    ValidateSchema[Validate against<br/>schema registry]
+    SchemaValid{Valid?}
+    ValidationError[Return VALIDATION_ERROR]
+    SensitiveCheck{Sensitive?}
+    Encrypt[Encrypt value]
+    UpsertDB[Upsert to preferences table]
+    ReturnSuccess2[Return preference_id,<br/>updated_at]
+
+    %% GET Consent flow
+    GetConsent[GET Consent]
+    CheckCache{Redis<br/>cached?}
+    ReturnCached[Return cached consent]
+    QueryUsers[Query users table]
+    CacheConsent[Cache in Redis<br/>TTL=5min]
+    ReturnConsent[Return consent flags]
+
+    %% SET Consent flow
+    SetConsent[SET Consent]
+    UpdateUsers[UPDATE users table<br/>consent_tier_N]
+    InvalidateCache[Invalidate Redis cache]
+    ReturnSuccess3[Return updated consent]
+
+    %% DELETE Preference flow
+    DelPref[DELETE Preference]
+    DeleteDB[DELETE from<br/>preferences table]
+    ReturnSuccess4[Return deleted confirmation]
+
+    %% Flow connections
+    Start --> OpType
+
+    %% GET Preference path
+    OpType -->|GET Preference| GetPref
+    GetPref --> CheckConsent1
+    CheckConsent1 -->|Denied| ConsentDenied1
+    CheckConsent1 -->|Granted| QueryDB1
+    QueryDB1 --> PrefExists1
+    PrefExists1 -->|Yes| DecryptCheck1
+    PrefExists1 -->|No| GetDefault1
+    DecryptCheck1 -->|Yes| Decrypt1
+    DecryptCheck1 -->|No| BuildEvidence1
+    Decrypt1 --> BuildEvidence1
+    GetDefault1 --> BuildEvidence1
+    BuildEvidence1 --> ReturnSuccess1
+
+    %% SET Preference path
+    OpType -->|SET Preference| SetPref
+    SetPref --> ValidateSchema
+    ValidateSchema --> SchemaValid
+    SchemaValid -->|Invalid| ValidationError
+    SchemaValid -->|Valid| SensitiveCheck
+    SensitiveCheck -->|Yes| Encrypt
+    SensitiveCheck -->|No| UpsertDB
+    Encrypt --> UpsertDB
+    UpsertDB --> ReturnSuccess2
+
+    %% GET Consent path
+    OpType -->|GET Consent| GetConsent
+    GetConsent --> CheckCache
+    CheckCache -->|Hit| ReturnCached
+    CheckCache -->|Miss| QueryUsers
+    QueryUsers --> CacheConsent
+    CacheConsent --> ReturnConsent
+
+    %% SET Consent path
+    OpType -->|SET Consent| SetConsent
+    SetConsent --> UpdateUsers
+    UpdateUsers --> InvalidateCache
+    InvalidateCache --> ReturnSuccess3
+
+    %% DELETE Preference path
+    OpType -->|DELETE Preference| DelPref
+    DelPref --> DeleteDB
+    DeleteDB --> ReturnSuccess4
+
+    %% Styling
+    classDef errorNode fill:#ffcccc,stroke:#cc0000
+    classDef successNode fill:#ccffcc,stroke:#00cc00
+    classDef decisionNode fill:#ffffcc,stroke:#cccc00
+    classDef processNode fill:#cce5ff,stroke:#0066cc
+
+    class ConsentDenied1,ValidationError errorNode
+    class ReturnSuccess1,ReturnSuccess2,ReturnSuccess3,ReturnSuccess4,ReturnCached,ReturnConsent successNode
+    class OpType,CheckConsent1,PrefExists1,SchemaValid,SensitiveCheck,DecryptCheck1,CheckCache decisionNode
+    class GetPref,SetPref,GetConsent,SetConsent,DelPref,ValidateSchema,QueryDB1,UpsertDB,QueryUsers,UpdateUsers processNode
+```

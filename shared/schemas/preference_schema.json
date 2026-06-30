@@ -1,0 +1,146 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://personal-agent.dev/schemas/preference.schema.json",
+  "title": "Universal Preference Schema",
+  "description": "Flexible schema for all preference types with metadata-driven validation",
+  "type": "object",
+  "required": ["key", "value", "metadata"],
+  "properties": {
+    "key": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9_]+$",
+      "minLength": 1,
+      "maxLength": 64,
+      "description": "Preference key identifier"
+    },
+    "value": {
+      "description": "Preference value - type determined by metadata.type",
+      "anyOf": [
+        {"type": "string"},
+        {"type": "number"},
+        {"type": "integer"},
+        {"type": "boolean"},
+        {"type": "array"},
+        {"type": "object"},
+        {"type": "null"}
+      ]
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["type", "sensitive"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["string", "integer", "number", "boolean", "array", "object"],
+          "description": "Expected data type for validation"
+        },
+        "sensitive": {
+          "type": "boolean",
+          "description": "Whether this preference contains sensitive data"
+        },
+        "default": {
+          "description": "Default value if preference not set"
+        },
+        "validation": {
+          "type": "object",
+          "description": "Type-specific validation rules",
+          "properties": {
+            "minLength": {"type": "integer", "minimum": 0},
+            "maxLength": {"type": "integer", "minimum": 0},
+            "pattern": {"type": "string"},
+            "minimum": {"type": "number"},
+            "maximum": {"type": "number"},
+            "enum": {"type": "array"},
+            "format": {
+              "type": "string",
+              "enum": ["email", "uri", "date", "time", "datetime", "duration", "timezone"]
+            }
+          },
+          "additionalProperties": false
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description"
+        },
+        "examples": {
+          "type": "array",
+          "description": "Example values"
+        },
+        "category": {
+          "type": "string",
+          "enum": ["user", "system", "security", "ui", "notification", "integration"],
+          "description": "Preference category for organization"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "examples": [
+    {
+      "key": "meeting_duration_min",
+      "value": 30,
+      "metadata": {
+        "type": "integer",
+        "sensitive": false,
+        "default": 30,
+        "validation": {
+          "minimum": 15,
+          "maximum": 240
+        },
+        "description": "Default meeting duration in minutes",
+        "examples": [30, 60, 90],
+        "category": "user"
+      }
+    },
+    {
+      "key": "work_hours",
+      "value": "09:00-17:00",
+      "metadata": {
+        "type": "string",
+        "sensitive": false,
+        "default": "09:00-17:00",
+        "validation": {
+          "pattern": "^([0-1][0-9]|2[0-3]):[0-5][0-9]-([0-1][0-9]|2[0-3]):[0-5][0-9]$"
+        },
+        "description": "User work hours in HH:MM-HH:MM format",
+        "examples": ["09:00-17:00", "10:00-18:00", "08:30-16:30"],
+        "category": "user"
+      }
+    },
+    {
+      "key": "passport_number",
+      "value": "ABC123456",
+      "metadata": {
+        "type": "string",
+        "sensitive": true,
+        "validation": {
+          "minLength": 6,
+          "maxLength": 20,
+          "pattern": "^[A-Z0-9]+$"
+        },
+        "description": "User passport number (sensitive)",
+        "category": "security"
+      }
+    },
+    {
+      "key": "notification_settings",
+      "value": {
+        "email": true,
+        "sms": false,
+        "push": true
+      },
+      "metadata": {
+        "type": "object",
+        "sensitive": false,
+        "default": {
+          "email": true,
+          "sms": false,
+          "push": true
+        },
+        "description": "Notification preferences",
+        "category": "notification"
+      }
+    }
+  ]
+}

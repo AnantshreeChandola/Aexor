@@ -1,0 +1,106 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: personal_agent
+      POSTGRES_USER: agent
+      POSTGRES_PASSWORD: agent
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent -d personal_agent"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  ollama-pull:
+    image: ollama/ollama:latest
+    depends_on:
+      ollama:
+        condition: service_healthy
+    entrypoint: ["ollama", "pull", "${INTAKE_LOCAL_MODEL:-llama3.2:3b}"]
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    restart: "no"
+
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://agent:agent@db:5432/personal_agent
+      REDIS_URL: redis://redis:6379
+      ENCRYPTION_KEY: HLvFYndF/AHSGe8gZ1usG/z7fSQyal2B55Ayu1/gPvA=
+      JWT_SECRET: change-me-in-production-at-least-32-chars
+      APPROVAL_TOKEN_SECRET: change-me-in-production-at-least-32-chars
+      LOG_LEVEL: INFO
+      ENVIRONMENT: development
+      # LLM provider selection — see QUICKSTART.md § 2 for per-provider config.
+      # Supported: anthropic | openai | gemini | claude_code
+      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
+      # API key for the selected provider. Leave empty for claude_code (uses host OAuth).
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_TIMEOUT_S: ${LLM_TIMEOUT_S:-60}
+      # Model names — must be valid for the selected provider.
+      PLANNER_PRIMARY_MODEL: ${PLANNER_PRIMARY_MODEL:-claude-sonnet-4-5-20250929}
+      PLANNER_FALLBACK_MODEL: ${PLANNER_FALLBACK_MODEL:-claude-sonnet-4-5-20250929}
+      INTAKE_PARSER_MODEL: ${INTAKE_PARSER_MODEL:-claude-sonnet-4-5-20250929}
+      # Claude Code CLI options (only read when LLM_PROVIDER=claude_code)
+      CLAUDE_CODE_BIN: claude
+      PLANNER_CLAUDE_CODE_TIMEOUT_S: ${PLANNER_CLAUDE_CODE_TIMEOUT_S:-120}
+      CLAUDE_CODE_USE_API_KEY: ${CLAUDE_CODE_USE_API_KEY:-false}
+      # AES-256-GCM master key (hex) for credential vault decryption
+      # Generate: python -c "import secrets; print(secrets.token_hex(32))"
+      CREDENTIAL_MASTER_KEY: ${CREDENTIAL_MASTER_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
+      # Path to ONNX embedding model (baked into the Docker image)
+      ONNX_MODEL_PATH: /app/models/model.onnx
+      # MCP / Composio — tool catalog discovery
+      MCP_SERVER_COMPOSIO_URL: ${MCP_SERVER_COMPOSIO_URL:-}
+      MCP_SERVER_COMPOSIO_API_KEY: ${MCP_SERVER_COMPOSIO_API_KEY:-}
+      COMPOSIO_API_KEY: ${COMPOSIO_API_KEY:-}
+      COMPOSIO_MCP_CONFIG_ID: ${COMPOSIO_MCP_CONFIG_ID:-}
+      # Local LLM (Ollama sidecar)
+      INTAKE_USE_LOCAL_LLM: ${INTAKE_USE_LOCAL_LLM:-true}
+      OLLAMA_BASE_URL: http://ollama:11434
+      INTAKE_LOCAL_MODEL: ${INTAKE_LOCAL_MODEL:-llama3.2:3b}
+      INTAKE_LOCAL_TIMEOUT_S: ${INTAKE_LOCAL_TIMEOUT_S:-30}
+    volumes:
+      # Persist Claude Code OAuth credentials across container restarts.
+      # Run `docker compose exec -it app claude auth login` once to authenticate.
+      - claude_auth:/root/.claude
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  ollama_models:
+  claude_auth:
